@@ -66,21 +66,40 @@ function sanitizeLargePayload<T>(data: T, aggressive = false): T {
   }
 }
 
-// Safe LocalStorage helpers with automatic QuotaExceeded recovery
+// Safe LocalStorage helpers with automatic QuotaExceeded recovery and strict type validation
 export const loadData = <T>(key: string, fallback: T): T => {
+  const validateParsed = (parsed: any): T => {
+    if (parsed === null || parsed === undefined) {
+      return fallback;
+    }
+    if (Array.isArray(fallback) && !Array.isArray(parsed)) {
+      return fallback;
+    }
+    if (typeof fallback === 'object' && fallback !== null && !Array.isArray(fallback)) {
+      if (typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return fallback;
+      }
+    }
+    return parsed as T;
+  };
+
   try {
-    const item = localStorage.getItem(key);
-    if (item) return JSON.parse(item) as T;
-    
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const item = localStorage.getItem(key);
+      if (item) return validateParsed(JSON.parse(item));
+    }
+
     // Check sessionStorage fallback
     try {
-      const sItem = sessionStorage.getItem(key);
-      if (sItem) return JSON.parse(sItem) as T;
+      if (typeof window !== 'undefined' && window.sessionStorage) {
+        const sItem = sessionStorage.getItem(key);
+        if (sItem) return validateParsed(JSON.parse(sItem));
+      }
     } catch {}
 
     // Check memory fallback
     if (memoryStorageFallback[key]) {
-      return JSON.parse(memoryStorageFallback[key]) as T;
+      return validateParsed(JSON.parse(memoryStorageFallback[key]));
     }
 
     return fallback;

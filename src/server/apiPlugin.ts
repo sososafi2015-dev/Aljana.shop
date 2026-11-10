@@ -51,15 +51,12 @@ function sendJson(res: ServerResponse, statusCode: number, data: any) {
  * Vite Middleware Plugin providing Backend API Endpoints & RBAC Security Enforcement
  */
 export function associationApiPlugin(): Plugin {
-  return {
-    name: 'association-rbac-api-middleware',
-    configureServer(server) {
-      server.middlewares.use(async (req, res, next) => {
-        const url = req.url || '';
+  const apiMiddleware = async (req: IncomingMessage, res: ServerResponse, next: () => void) => {
+    const url = req.url || '';
 
-        if (!url.startsWith('/api/')) {
-          return next();
-        }
+    if (!url.startsWith('/api/')) {
+      return next();
+    }
 
         try {
           // Handle CORS Preflight
@@ -439,7 +436,15 @@ export function associationApiPlugin(): Plugin {
             });
           }
         }
-      });
+  };
+
+  return {
+    name: 'association-rbac-api-middleware',
+    configureServer(server) {
+      server.middlewares.use(apiMiddleware);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use(apiMiddleware);
     },
   };
 }

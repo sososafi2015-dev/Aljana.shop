@@ -577,7 +577,7 @@ async function uploadViaServerAndFirestoreBridge(params: {
         'x-uploaded-by': encodeURIComponent(userInfo.email),
         'x-uploaded-by-uid': encodeURIComponent(userInfo.uid),
       },
-      body: Buffer.from(arrayBuffer),
+      body: new Uint8Array(arrayBuffer),
     });
     if (!res.ok) {
       throw new Error(`فشل رفع الملف (${res.status})`);
