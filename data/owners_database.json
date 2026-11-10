@@ -1,0 +1,118 @@
+[
+  {
+    "id": "owner_nour_master",
+    "fullName": "أحمد المنصوري (رئيس الجمعية)",
+    "phone": "0661000001",
+    "passwordHash": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918",
+    "passwordSalt": "nour_salt_123",
+    "tenantId": "tenant_nour",
+    "status": "active",
+    "createdAt": "2024-01-01T00:00:00.000Z",
+    "updatedAt": "2026-10-26T09:23:55.322Z",
+    "username": "nour2024"
+  },
+  {
+    "id": "owner_amal_khadija",
+    "fullName": "خديجة العلمي",
+    "phone": "0662000002",
+    "passwordHash": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918",
+    "passwordSalt": "amal_salt_123",
+    "tenantId": "tenant_amal",
+    "status": "active",
+    "createdAt": "2024-03-15T10:30:00.000Z",
+    "username": "amal2024"
+  },
+  {
+    "id": "owner_al_istithmar",
+    "fullName": "مسؤول جمعية الاستثمار",
+    "phone": "0661000202",
+    "passwordHash": "39684056f205d016292b3c4dd43ad53749cceb4ea9cbd9513a9131db655d2521",
+    "passwordSalt": "b65ec0a42e35cda3",
+    "tenantId": "tenant_al_istithmar",
+    "status": "active",
+    "createdAt": "2026-10-19T18:10:00.000Z",
+    "recoveredAccount": true,
+    "username": "istithmar24"
+  },
+  {
+    "id": "owner_1789045972557_8ycr",
+    "fullName": "يوسف الرباحي",
+    "phone": "0612458765",
+    "passwordHash": "acf36f6683237b90b6e124d7b39308f79056baaec70dcacca5670ee80521e24a",
+    "passwordSalt": "ae58a5949bad49a7",
+    "tenantId": "tenant_1789045972557_t35i",
+    "status": "active",
+    "createdAt": "2026-09-10T13:12:52.563Z",
+    "username": "atlas2024"
+  },
+  {
+    "id": "owner_1789212385161_ud49",
+    "fullName": "سليمان بن",
+    "phone": "+212 6 89 56 23 56",
+    "passwordHash": "a7cba0a3330cbed804f991a6120f3d3a223c666e9233761fea052e412c630138",
+    "passwordSalt": "2321c09799519b2c",
+    "tenantId": "tenant_1789212385161_k79d",
+    "status": "active",
+    "createdAt": "2026-09-12T11:26:25.164Z",
+    "username": "albir2024"
+  },
+  {
+    "id": "owner_ihsan_sa",
+    "fullName": "عبدالرحمن بن سعود",
+    "phone": "+966501234567",
+    "passwordHash": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918",
+    "passwordSalt": "ihsan_salt_123",
+    "tenantId": "tenant_ihsan_sa",
+    "status": "active",
+    "createdAt": "2024-06-01T10:00:00.000Z",
+    "username": "ihsan2024"
+  },
+  {
+    "id": "owner_takafol_eg",
+    "fullName": "محمود حسن الشريف",
+    "phone": "+201012345678",
+    "passwordHash": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918",
+    "passwordSalt": "takafol_salt_123",
+    "tenantId": "tenant_takafol_eg",
+    "status": "active",
+    "createdAt": "2024-07-01T11:00:00.000Z",
+    "username": "takafol2024"
+  },
+  {
+    "id": "owner_1792430222354_0140",
+    "fullName": "سعيد الفاسي",
+    "phone": "0611223344",
+    "passwordHash": "d2cef9c324e5826a01da74944fccae2ed3718287b44d3745eeed43cef732a703",
+    "passwordSalt": "0c499952df135b01",
+    "tenantId": "tenant_1792430222354_klrf",
+    "status": "active",
+    "createdAt": "2026-10-19T17:17:02.357Z",
+    "username": "basma2024"
+  },
+  {
+    "id": "owner_1792661526529_7gak",
+    "fullName": "عبدالله",
+    "phone": "+212 6 89 56 23 56",
+    "passwordHash": "dbf68455ce618b94118685dc4b6d47f49b70b9e42af2b4e875c9a07b55abceda",
+    "passwordSalt": "462b07fb4df114c1ab431977e4e2d31b",
+    "tenantId": "tenant_1792661526529_a545",
+    "status": "active",
+    "createdAt": "2026-10-22T09:32:06.533Z",
+    "recoveredAccount": true,
+    "plainPassword": "123456",
+    "username": "nador2024"
+  },
+  {
+    "id": "owner_1792874152357_qtvk",
+    "fullName": "عبدالله",
+    "phone": "+212 6 59 86 53 26",
+    "passwordHash": "ddaa74803c81db4a30303499b77732da0cfea4e4272e7317c8e5330be1c97f2f",
+    "passwordSalt": "1b9107079075ace1d934c629bab1e788",
+    "tenantId": "tenant_1792874152357_46fk",
+    "status": "active",
+    "createdAt": "2026-10-24T20:35:52.358Z",
+    "plainPassword": "123456",
+    "recoveredAccount": true,
+    "username": "taqwa2024"
+  }
+]

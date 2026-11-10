@@ -1,0 +1,21 @@
+[
+  {
+    "id": "vid-1792946220082-9ysiy",
+    "originalName": "tutorial_demo.mp4",
+    "mimeType": "video/mp4",
+    "fileSize": 37,
+    "fileSizeFormatted": "0 كيلوبايت",
+    "duration": 0,
+    "durationFormatted": "00:00",
+    "width": 1280,
+    "height": 720,
+    "resolution": "720p HD",
+    "storageKey": "videos/vid-1792946220082-9ysiy.mp4",
+    "cdnUrl": "/api/videos/stream/vid-1792946220082-9ysiy",
+    "thumbnailUrl": "",
+    "fileName": "vid-1792946220082-9ysiy.mp4",
+    "processingStatus": "ready",
+    "uploadedAt": "2026-10-25T16:37:00.085Z",
+    "isUploadedDirectly": true
+  }
+]

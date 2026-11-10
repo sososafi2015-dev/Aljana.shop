@@ -1,0 +1,15 @@
+[
+  {
+    "id": "support_failed_1792968539351",
+    "type": "activation",
+    "donorName": "مساهم كريم",
+    "donorPhone": "",
+    "currency": "MAD",
+    "paymentMethod": "PayPal",
+    "paypalOrderId": "5TJ59833F15344546",
+    "status": "failed",
+    "mode": "sandbox",
+    "createdAt": "2026-10-25T22:48:59.351Z",
+    "notes": "The requested action could not be performed, semantically incorrect, or failed business validation."
+  }
+]

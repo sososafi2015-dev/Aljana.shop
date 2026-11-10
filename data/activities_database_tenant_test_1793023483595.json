@@ -1,0 +1,110 @@
+{
+  "activities": [
+    {
+      "id": "act_tenant_test_1793023483595_1",
+      "title": "حملة تشجير كبرى وغرس 150 شجرة بالشايف",
+      "description": "نظمت جمعية النور حملة تشجير واسعة شملت محيط المدرسة والمسجد والساحة المركزية بهدف مكافحة التصحر وخلق فضاء بيئي نقي بمشاركة شباب وأطفال المنطقة.",
+      "category": "tree_planting",
+      "date": "2024-05-10",
+      "location": "الساحة المركزية ومحيط مدرسة املو",
+      "spentAmount": 0,
+      "beneficiariesCount": 450,
+      "coverImage": "https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=1000&q=80",
+      "galleryImages": [
+        "/api/images/img-1789036103904-nu7oql2.jpg",
+        "/api/images/img-1789036104209-govvpm1.jpg",
+        "/api/images/img-1789036104651-crf51vx.jpg",
+        "/api/images/img-1789036104995-onczs73.jpg"
+      ],
+      "videoUrl": "/api/videos/stream/vid-1789036124925-hnuaj85",
+      "videoMetadata": {
+        "id": "vid-1789036124925-hnuaj85",
+        "activityId": "act_tenant_test_1793023483595_1",
+        "storageKey": "/api/videos/stream/vid-1789036124925-hnuaj85",
+        "cdnUrl": "/api/videos/stream/vid-1789036124925-hnuaj85",
+        "thumbnailUrl": "/api/videos/thumbnail/vid-1789036124925-hnuaj85",
+        "originalName": "13095.mp4",
+        "duration": 10,
+        "durationFormatted": "00:10",
+        "fileSize": 6837620,
+        "fileSizeFormatted": "6.5 ميجابايت",
+        "resolution": "1280x720 (HD)",
+        "width": 1280,
+        "height": 720,
+        "mimeType": "video/mp4",
+        "processingStatus": "ready",
+        "isUploadedDirectly": true,
+        "uploadedAt": "2026-09-10T10:28:45.430Z"
+      },
+      "proofDocumentUrl": "https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?auto=format&fit=crop&w=600&q=80",
+      "isFeatured": true,
+      "isActive": true,
+      "videoUrls": [
+        "/api/videos/stream/vid-1789036124925-hnuaj85"
+      ]
+    },
+    {
+      "id": "act_tenant_test_1793023483595_2",
+      "title": "مبادرة الدعم المدرسي وتوزيع الحقائب المدرسية",
+      "description": "بمناسبة الدخول المدرسي، قامت جمعية النور بتوفير حقائب مجهزة بكامل الأدوات والكتب المدرسية للتلاميذ المتفوقين والمنحدرين من أسر هشة لتشجيع التمدرس.",
+      "category": "social_aid",
+      "date": "2024-09-08",
+      "location": "قاعة الأنشطة امنو",
+      "spentAmount": 0,
+      "beneficiariesCount": 30,
+      "coverImage": "https://images.unsplash.com/photo-1488521787991-ed7bbaae773c?auto=format&fit=crop&w=1000&q=80",
+      "galleryImages": [
+        "https://images.unsplash.com/photo-1593113598332-cd288d649433?auto=format&fit=crop&w=800&q=80",
+        "https://images.unsplash.com/photo-1509062522246-3755977927d7?auto=format&fit=crop&w=800&q=80",
+        "/api/images/img-1789036150606-2bnru9d.jpg"
+      ],
+      "videoUrl": "/api/videos/stream/vid-1789036163363-hn02evd",
+      "videoMetadata": {
+        "id": "vid-1789036163363-hn02evd",
+        "activityId": "act_tenant_test_1793023483595_2",
+        "storageKey": "/api/videos/stream/vid-1789036163363-hn02evd",
+        "cdnUrl": "/api/videos/stream/vid-1789036163363-hn02evd",
+        "thumbnailUrl": "/api/videos/thumbnail/vid-1789036163363-hn02evd",
+        "originalName": "13090.mp4",
+        "duration": 10,
+        "durationFormatted": "00:10",
+        "fileSize": 6129328,
+        "fileSizeFormatted": "5.8 ميجابايت",
+        "resolution": "1280x720 (HD)",
+        "width": 1280,
+        "height": 720,
+        "mimeType": "video/mp4",
+        "processingStatus": "ready",
+        "isUploadedDirectly": true,
+        "uploadedAt": "2026-09-10T10:29:23.780Z"
+      },
+      "proofDocumentUrl": "https://images.unsplash.com/photo-1554224154-26032ffc0d07?auto=format&fit=crop&w=600&q=80",
+      "isFeatured": true,
+      "isActive": true,
+      "videoUrls": [
+        "/api/videos/stream/vid-1789036163363-hn02evd"
+      ]
+    },
+    {
+      "id": "act_tenant_test_1793023483595_3",
+      "title": "اقتناء معدات وتجهيزات صوتية وأدوات ميدانية للجمعية",
+      "description": "تم اقتناء معدات لوجستية أساسية تتيح للجمعية تنظيم الفعاليات الثقافية والبيئية والرياضية بكفاءة واستقلالية.",
+      "category": "equipment",
+      "date": "2024-06-02",
+      "location": "مقر جمعية النور",
+      "spentAmount": 0,
+      "beneficiariesCount": 600,
+      "coverImage": "https://images.unsplash.com/photo-1581783342308-f792dbdd27c5?auto=format&fit=crop&w=1000&q=80",
+      "galleryImages": [
+        "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&w=800&q=80"
+      ],
+      "proofDocumentUrl": "https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?auto=format&fit=crop&w=600&q=80",
+      "isFeatured": false,
+      "isActive": true
+    }
+  ],
+  "referenceVersionId": "v1.0.0",
+  "referencePublishedAt": "2026-10-26T14:04:43.597Z",
+  "referencePublishedBy": "إدارة جمعية النور للتنمية والتضامن (النموذج المعتمد)",
+  "lastUpdated": "2026-10-26T14:04:43.597Z"
+}

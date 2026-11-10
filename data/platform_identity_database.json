@@ -1,0 +1,11 @@
+{
+  "platformName": "syoumax منصة العمل الجمعوي",
+  "platformLogo": "/api/images/img-a0a3de2d1f25a52b.png",
+  "whatsapp": "00212718861646",
+  "associationsWhatsapp": "00212718861646",
+  "masterPinHash": "ff365eb05fc51fb0d3877e3ba1fd345fa7085f6b4ad0d1fc9b9754c57c95d2dd",
+  "masterPinSalt": "platform_master_superadmin_salt_2025",
+  "isPinCustomized": true,
+  "updatedAt": "2026-11-10T14:00:00.000Z",
+  "updatedBy": "الإدارة العامة للمنصة"
+}

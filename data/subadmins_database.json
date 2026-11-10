@@ -1,0 +1,372 @@
+{
+  "subAdmins": [
+    {
+      "id": "subadmin-1793778631464",
+      "fullName": "morad salmi",
+      "username": "morad88",
+      "phone": "0689563256",
+      "passwordHash": "4b8e789bea8b526f5f06c211d849fa50af022eb92ac7dbf5f776b1517e9b7271",
+      "passwordSalt": "7d932c651226166815a22477a5ab71a9",
+      "status": "active",
+      "createdAt": "2026-11-04T07:50:31.464Z",
+      "updatedAt": "2026-11-04T08:50:50.826Z",
+      "permissions": {
+        "overview": {
+          "sectionKey": "overview",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "createAd": {
+          "sectionKey": "createAd",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "donationsBenefit": {
+          "sectionKey": "donationsBenefit",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "subscriptionRenewal": {
+          "sectionKey": "subscriptionRenewal",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "platformTutorials": {
+          "sectionKey": "platformTutorials",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "platformSetupService": {
+          "sectionKey": "platformSetupService",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "operations": {
+          "sectionKey": "operations",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "campaigns": {
+          "sectionKey": "campaigns",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "official_registers": {
+          "sectionKey": "official_registers",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "members": {
+          "sectionKey": "members",
+          "canView": true,
+          "canAdd": true,
+          "canEdit": true,
+          "canDelete": false
+        },
+        "boardMembers": {
+          "sectionKey": "boardMembers",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "contributions": {
+          "sectionKey": "contributions",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "memberCard": {
+          "sectionKey": "memberCard",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "activities": {
+          "sectionKey": "activities",
+          "canView": true,
+          "canAdd": true,
+          "canEdit": true,
+          "canDelete": true
+        },
+        "branding": {
+          "sectionKey": "branding",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "polls": {
+          "sectionKey": "polls",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "uiElements": {
+          "sectionKey": "uiElements",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "nonMemberVisibility": {
+          "sectionKey": "nonMemberVisibility",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "fields": {
+          "sectionKey": "fields",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "accessControl": {
+          "sectionKey": "accessControl",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "subAdmins": {
+          "sectionKey": "subAdmins",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "settings": {
+          "sectionKey": "settings",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "audit": {
+          "sectionKey": "audit",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "backup": {
+          "sectionKey": "backup",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        }
+      },
+      "tenantId": "tenant_nour",
+      "associationId": "tenant_nour"
+    },
+    {
+      "id": "subadmin-1",
+      "fullName": "أحمد الناصري (منسق الأنشطة والمشاريع)",
+      "username": "ahmed24",
+      "phone": "0611223344",
+      "passwordHash": "",
+      "passwordSalt": "",
+      "status": "active",
+      "createdAt": "2024-02-01T10:00:00.000Z",
+      "permissions": {
+        "overview": {
+          "sectionKey": "overview",
+          "canView": true,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "createAd": {
+          "sectionKey": "createAd",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "donationsBenefit": {
+          "sectionKey": "donationsBenefit",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "subscriptionRenewal": {
+          "sectionKey": "subscriptionRenewal",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "platformTutorials": {
+          "sectionKey": "platformTutorials",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "platformSetupService": {
+          "sectionKey": "platformSetupService",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "campaigns": {
+          "sectionKey": "campaigns",
+          "canView": true,
+          "canAdd": true,
+          "canEdit": true,
+          "canDelete": false
+        },
+        "operations": {
+          "sectionKey": "operations",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "official_registers": {
+          "sectionKey": "official_registers",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "members": {
+          "sectionKey": "members",
+          "canView": true,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "boardMembers": {
+          "sectionKey": "boardMembers",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "contributions": {
+          "sectionKey": "contributions",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "memberCard": {
+          "sectionKey": "memberCard",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "activities": {
+          "sectionKey": "activities",
+          "canView": true,
+          "canAdd": true,
+          "canEdit": true,
+          "canDelete": true
+        },
+        "branding": {
+          "sectionKey": "branding",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "polls": {
+          "sectionKey": "polls",
+          "canView": true,
+          "canAdd": true,
+          "canEdit": true,
+          "canDelete": false
+        },
+        "uiElements": {
+          "sectionKey": "uiElements",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "nonMemberVisibility": {
+          "sectionKey": "nonMemberVisibility",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "fields": {
+          "sectionKey": "fields",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "accessControl": {
+          "sectionKey": "accessControl",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "subAdmins": {
+          "sectionKey": "subAdmins",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "settings": {
+          "sectionKey": "settings",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "audit": {
+          "sectionKey": "audit",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        },
+        "backup": {
+          "sectionKey": "backup",
+          "canView": false,
+          "canAdd": false,
+          "canEdit": false,
+          "canDelete": false
+        }
+      },
+      "notes": "مكلف بمتابعة أنشطة الجمعية ومشاريعها واستطلاعات الرأي",
+      "tenantId": "tenant_nour",
+      "associationId": "tenant_nour"
+    }
+  ],
+  "deletedSubAdminIds": [],
+  "lastUpdated": "2026-11-04T09:45:40.991Z"
+}

@@ -1,0 +1,109 @@
+{
+  "activities": [
+    {
+      "title": "حملة تشجير كبرى وغرس 150 شجرة بالشايف",
+      "description": "نظمت جمعية النور حملة تشجير واسعة شملت محيط المدرسة والمسجد والساحة المركزية بهدف مكافحة التصحر وخلق فضاء بيئي نقي بمشاركة شباب وأطفال المنطقة.",
+      "category": "tree_planting",
+      "date": "2024-05-10",
+      "location": "الساحة المركزية ومحيط مدرسة املو",
+      "spentAmount": 2500,
+      "beneficiariesCount": 450,
+      "coverImage": "https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=1000&q=80",
+      "galleryImages": [
+        "/api/images/img-818d4cfe596ea37a.jpg",
+        "/api/images/img-cf80ae3e1e05e30c.jpg",
+        "/api/images/img-c0c9d7dbc649347b.jpg",
+        "/api/images/img-a3c9abe97c1efd4c.jpg"
+      ],
+      "videoUrl": "https://youtu.be/CUlwyO6rTQQ",
+      "videoUrls": [
+        "https://youtu.be/CUlwyO6rTQQ"
+      ],
+      "videoMetadata": {
+        "id": "ext-1793352680107",
+        "originalName": "فيديو توثيقي",
+        "mimeType": "video/mp4",
+        "fileSize": 0,
+        "fileSizeFormatted": "رابط خارجي",
+        "duration": 0,
+        "durationFormatted": "فيديو توثيقي",
+        "width": 1280,
+        "height": 720,
+        "resolution": "HD",
+        "storageKey": "https://youtu.be/CUlwyO6rTQQ",
+        "cdnUrl": "https://youtu.be/CUlwyO6rTQQ",
+        "thumbnailUrl": "https://img.youtube.com/vi/CUlwyO6rTQQ/hqdefault.jpg",
+        "processingStatus": "ready",
+        "uploadedAt": "2026-10-30T09:31:20.107Z",
+        "isUploadedDirectly": false
+      },
+      "proofDocumentUrl": "https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?auto=format&fit=crop&w=600&q=80",
+      "isFeatured": false,
+      "isActive": true,
+      "id": "act-1",
+      "updatedAt": "2026-10-30T10:52:51.615Z"
+    },
+    {
+      "title": "مبادرة الدعم المدرسي وتوزيع الحقائب المدرسية",
+      "description": "بمناسبة الدخول المدرسي، قامت جمعية النور بتوفير حقائب مجهزة بكامل الأدوات والكتب المدرسية للتلاميذ المتفوقين والمنحدرين من أسر هشة لتشجيع التمدرس.",
+      "category": "social_aid",
+      "date": "2024-09-08",
+      "location": "قاعة الأنشطة امنو",
+      "spentAmount": 1500,
+      "beneficiariesCount": 30,
+      "coverImage": "https://images.unsplash.com/photo-1488521787991-ed7bbaae773c?auto=format&fit=crop&w=1000&q=80",
+      "galleryImages": [
+        "https://images.unsplash.com/photo-1593113598332-cd288d649433?auto=format&fit=crop&w=800&q=80",
+        "https://images.unsplash.com/photo-1509062522246-3755977927d7?auto=format&fit=crop&w=800&q=80",
+        "/api/images/img-7cbeab66690e8d15.jpg",
+        "/api/images/img-bd8ef05ebc51f4b3.jpg"
+      ],
+      "videoUrl": "https://youtu.be/GOwj7BwyMUw",
+      "videoUrls": [
+        "https://youtu.be/GOwj7BwyMUw"
+      ],
+      "videoMetadata": {
+        "id": "ext-1793352501467",
+        "originalName": "فيديو توثيقي",
+        "mimeType": "video/mp4",
+        "fileSize": 0,
+        "fileSizeFormatted": "رابط خارجي",
+        "duration": 0,
+        "durationFormatted": "فيديو توثيقي",
+        "width": 1280,
+        "height": 720,
+        "resolution": "HD",
+        "storageKey": "https://youtu.be/GOwj7BwyMUw",
+        "cdnUrl": "https://youtu.be/GOwj7BwyMUw",
+        "thumbnailUrl": "https://img.youtube.com/vi/GOwj7BwyMUw/hqdefault.jpg",
+        "processingStatus": "ready",
+        "uploadedAt": "2026-10-30T09:28:21.467Z",
+        "isUploadedDirectly": false
+      },
+      "proofDocumentUrl": "https://images.unsplash.com/photo-1554224154-26032ffc0d07?auto=format&fit=crop&w=600&q=80",
+      "isFeatured": true,
+      "isActive": true,
+      "id": "act-2"
+    },
+    {
+      "title": "اقتناء معدات وتجهيزات صوتية وأدوات ميدانية للجمعية",
+      "description": "تم اقتناء معدات لوجستية أساسية تتيح للجمعية تنظيم الفعاليات الثقافية والبيئية والرياضية بكفاءة واستقلالية.",
+      "category": "equipment",
+      "date": "2024-06-02",
+      "location": "مقر جمعية النور",
+      "spentAmount": 1000,
+      "beneficiariesCount": 600,
+      "coverImage": "https://images.unsplash.com/photo-1581783342308-f792dbdd27c5?auto=format&fit=crop&w=1000&q=80",
+      "galleryImages": [],
+      "videoUrls": [],
+      "proofDocumentUrl": "https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?auto=format&fit=crop&w=600&q=80",
+      "isFeatured": false,
+      "isActive": false,
+      "id": "act-3"
+    }
+  ],
+  "referenceVersionId": "v1.0.0",
+  "referencePublishedAt": "2026-10-30T10:05:02.185Z",
+  "referencePublishedBy": "إدارة جمعية النور للتنمية والتضامن",
+  "lastUpdated": "2026-10-30T10:52:51.615Z"
+}

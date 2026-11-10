@@ -1,0 +1,11 @@
+{
+  "clientId": "AaJbsftKG9QmDMZmcWCiJEGXISIeDhuWL7z7qSYDHT48-QcsJ6QhY_gMEWuvOuvFnhFRHZ4HwiOpjtZT",
+  "clientSecret": "EDR5Z2HEx-ZZD_aWmo7wsce0K-J_IYtBQHEROTLrakKfeQ2YQfctnNVSZjL6i_0pUrR-Hc4-xzhKuE5y",
+  "businessEmail": "sb-onuud40741552@business.example.com",
+  "sandboxAccountPassword": "X+551!Ev",
+  "mode": "sandbox",
+  "isConnected": true,
+  "sandboxPaypalTested": true,
+  "sandboxCardTested": true,
+  "lastTestedAt": "2026-10-25T22:25:00.000Z"
+}

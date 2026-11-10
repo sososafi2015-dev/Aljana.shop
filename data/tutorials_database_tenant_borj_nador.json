@@ -1,0 +1,111 @@
+{
+  "version": 1,
+  "tenantId": "tenant_borj_nador",
+  "tutorials": [
+    {
+      "id": "tut-1792941377397-rqo3b",
+      "title": "فيديو تجريبي معدل ومؤكد",
+      "description": "شرح تجريبي",
+      "sourceType": "url",
+      "videoUrl": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      "aspectRatio": "landscape",
+      "createdAt": "2026-10-25T15:16:17.397Z",
+      "updatedAt": "2026-10-25T15:16:17.405Z",
+      "tenantId": "tenant_nour",
+      "addedBy": "أدمن المنصة الرئيسية",
+      "order": 1
+    },
+    {
+      "id": "tut-1792664585556-e5vv2",
+      "title": "شرح كيفية إضافة عملية التصويت على قررات الجمعية",
+      "description": "",
+      "sourceType": "url",
+      "videoUrl": "https://youtu.be/dAzlNsMnzLU",
+      "aspectRatio": "portrait",
+      "createdAt": "2026-10-22T10:23:05.556Z",
+      "updatedAt": "2026-10-22T10:23:05.556Z",
+      "tenantId": "tenant_nour",
+      "addedBy": "الأدمين الرئيسي (Super Admin)",
+      "order": 2
+    },
+    {
+      "id": "tut-shorts-mobile-guide",
+      "title": "دليل استخدام المنصة من الهاتف الذكي (نمط Shorts عمودي 9:16)",
+      "description": "شرح مصور بالهاتف عمودياً يوضح كيفية تصفح المنصة من الموبايل، تحديث البيانات، وإدارة بطاقات المنخرطين والعمليات بسهولة وسرعة.",
+      "sourceType": "url",
+      "videoUrl": "https://www.youtube.com/shorts/dQw4w9WgXcQ",
+      "duration": "01:15",
+      "aspectRatio": "portrait",
+      "createdAt": "2026-10-21T17:00:00.000Z",
+      "updatedAt": "2026-10-21T17:00:00.000Z",
+      "addedBy": "الإدارة العامة للمنصة",
+      "order": 3
+    },
+    {
+      "id": "tut-1792601977857-041fj",
+      "title": "شرح كيفية تعديل وتنسيق واجهة منصتك",
+      "description": "خطوات ضبط ألوان وهوية الجمعية، وتنسيق مكونات الواجهة الرئيسية بسهولة.",
+      "sourceType": "url",
+      "videoUrl": "https://youtu.be/QeLkJgZGWCg",
+      "aspectRatio": "landscape",
+      "createdAt": "2026-10-21T16:59:37.857Z",
+      "updatedAt": "2026-10-21T16:59:37.857Z",
+      "tenantId": "tenant_nour",
+      "addedBy": "الأدمين الرئيسي (Super Admin)",
+      "order": 4
+    },
+    {
+      "id": "tut-overview-guide",
+      "title": "دليل شامل للتعرف على لوحة التحكم وإدارة الجمعية الذكية",
+      "description": "جولة تعريفية بالمنصة، استعراض مؤشرات الإحصائيات العامة، وكيفية التنقل السلس بين الأقسام والإجراءات الإدارية المتاحة.",
+      "sourceType": "url",
+      "videoUrl": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      "duration": "04:30",
+      "aspectRatio": "landscape",
+      "createdAt": "2026-10-06T16:52:55.251Z",
+      "updatedAt": "2026-10-06T16:52:55.251Z",
+      "addedBy": "الإدارة العامة للمنصة",
+      "order": 5
+    },
+    {
+      "id": "tut-members-guide",
+      "title": "كيفية إضافة وإدارة المنخرطين واستخراج بطاقة الانخراط",
+      "description": "شرح تفصيلي لكيفية تسجيل منخرط جديد، تعديل البيانات، تفعيل العضوية، وتوليد بطاقة الانخراط مع رمز الاستجابة السريعة QR.",
+      "sourceType": "url",
+      "videoUrl": "https://www.youtube.com/watch?v=ScMzIvxBSi4",
+      "duration": "06:15",
+      "aspectRatio": "landscape",
+      "createdAt": "2026-10-11T16:52:55.251Z",
+      "updatedAt": "2026-10-11T16:52:55.251Z",
+      "addedBy": "الإدارة العامة للمنصة",
+      "order": 6
+    },
+    {
+      "id": "tut-finances-guide",
+      "title": "تدبير العمليات المالية والمداخيل والمصاريف وإصدار الوصولات",
+      "description": "خطوات إضافة مداخيل ومصاريف الجمعية، إرفاق الفواتير والوصولات، واستخراج كشف الحساب والتقرير المالي بدقة.",
+      "sourceType": "url",
+      "videoUrl": "https://www.youtube.com/watch?v=9bZkp7q19f0",
+      "duration": "05:45",
+      "aspectRatio": "landscape",
+      "createdAt": "2026-10-16T16:52:55.251Z",
+      "updatedAt": "2026-10-16T16:52:55.251Z",
+      "addedBy": "الإدارة العامة للمنصة",
+      "order": 7
+    },
+    {
+      "id": "tut-campaigns-guide",
+      "title": "شرح تدشين حملات التبرع والمشاريع الخيرية وتتبع المساهمات",
+      "description": "كيفية إنشاء حملة تبرع جديدة، تحديد المبالغ المستهدفة، تفعيل طرق الدفع (كاش بلوس، التحويل، بايبال) وتحديث شريط الإنجاز.",
+      "sourceType": "url",
+      "videoUrl": "https://www.youtube.com/watch?v=kJQP7kiw5Fk",
+      "duration": "07:20",
+      "aspectRatio": "landscape",
+      "createdAt": "2026-10-19T16:52:55.251Z",
+      "updatedAt": "2026-10-19T16:52:55.251Z",
+      "addedBy": "الإدارة العامة للمنصة",
+      "order": 8
+    }
+  ],
+  "lastUpdated": "2026-10-25T15:16:17.405Z"
+}

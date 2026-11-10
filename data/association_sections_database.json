@@ -1,0 +1,37 @@
+{
+  "sectionsVisibility": {
+    "overview": true,
+    "operations": true,
+    "contributions": true,
+    "donationsBenefit": true,
+    "activities": true,
+    "campaigns": true,
+    "members": true,
+    "boardMembers": true,
+    "fields": false,
+    "branding": true,
+    "memberCard": true,
+    "uiElements": false,
+    "createAd": false,
+    "polls": true,
+    "nonMemberVisibility": false,
+    "accessControl": false,
+    "settings": true,
+    "subAdmins": true,
+    "audit": true,
+    "backup": false,
+    "subscriptionRenewal": true,
+    "platformTutorials": true,
+    "platformSetupService": true
+  },
+  "sectionTitles": {
+    "donationsBenefit": "اجعل منصتك ظاهرة للعموم للحصول على التبرعات المالية"
+  },
+  "sectionBrandNames": {
+    "donationsBenefit": "syoumax"
+  },
+  "hideBoardMembersPublicContact": true,
+  "lastUpdated": "2026-11-10T14:00:00.000Z",
+  "updatedBy": "الأدمين الرئيسي (Super Admin)",
+  "version": 20
+}

@@ -1,0 +1,241 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // ============================================================================
+    // 1. Helper Functions: Authentication & Role Verification
+    // ============================================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // الإدارة العامة للمنصة (Master Super Admin)
+    function isSuperAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.email == 'soso.safi.2015@gmail.com' ||
+        request.auth.token.role == 'super_admin' ||
+        request.auth.token.role == 'master_super_admin' ||
+        request.auth.token.role == 'admin'
+      );
+    }
+
+    // التحقق من ملكية الجمعية أو صلاحية مدير الجمعية / المشرف الفرعي داخل نفس الجمعية فقط
+    function isTenantAdmin(tenantId) {
+      return isSuperAdmin() || (
+        isAuthenticated() && (
+          request.auth.token.tenantId == tenantId ||
+          (request.resource != null &&
+           request.resource.metadata != null &&
+           request.resource.metadata.tenantId == tenantId &&
+           (request.resource.metadata.role == 'admin' ||
+            request.resource.metadata.role == 'tenant_admin' ||
+            request.resource.metadata.role == 'sub_admin'))
+        )
+      );
+    }
+
+    // التحقق من أن المستخدم هو صاحب الملف المرفوع
+    function isFileOwner() {
+      return isAuthenticated() && (
+        (resource != null &&
+         resource.metadata != null &&
+         resource.metadata.uploadedByUid == request.auth.uid) ||
+        (request.resource != null &&
+         request.resource.metadata != null &&
+         request.resource.metadata.uploadedByUid == request.auth.uid)
+      );
+    }
+
+    // منع التلاعب بملفات جمعية أخرى (عزل الجمعيات Tenant Isolation)
+    function isSameTenantResource(tenantId) {
+      return resource == null ||
+             resource.metadata == null ||
+             !('tenantId' in resource.metadata) ||
+             resource.metadata.tenantId == tenantId;
+    }
+
+    // التحقق من البيانات الوصفية الإلزامية عند رفع ملف جديد
+    function hasValidUploadMetadata(tenantId) {
+      return request.resource != null &&
+             request.resource.metadata != null &&
+             request.resource.metadata.tenantId == tenantId &&
+             request.resource.metadata.uploadedByUid is string &&
+             request.resource.metadata.uploadedByUid.size() > 0;
+    }
+
+    // ============================================================================
+    // 2. Helper Functions: File Content-Type & Size Validation
+    // ============================================================================
+
+    function isValidImageType() {
+      return request.resource != null &&
+             request.resource.contentType.matches('image/(jpeg|jpg|png|webp|gif|svg\\+xml)');
+    }
+
+    function isValidDocumentType() {
+      return request.resource != null && (
+        request.resource.contentType == 'application/pdf' ||
+        request.resource.contentType == 'application/msword' ||
+        request.resource.contentType == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      );
+    }
+
+    function isValidVideoType() {
+      return request.resource != null &&
+             request.resource.contentType.matches('video/.*');
+    }
+
+    function isValidMediaContentType() {
+      return isValidImageType() || isValidDocumentType() || isValidVideoType();
+    }
+
+    // حدود الحجم المعتمدة:
+    // - صور الشعارات والوصولات والبطائق: حتى 20 ميجابايت
+    // - المستندات والملفات الإدارية: حتى 50 ميجابايت
+    // - الفيديوهات التعليمية وفيديوهات الأنشطة: حتى 2048 ميجابايت (2 جيجابايت)
+    function isWithinSizeLimit(category) {
+      return request.resource != null && (
+        (isValidVideoType() && request.resource.size <= 2048 * 1024 * 1024) ||
+        ((category == 'receipts' || category == 'subscriptions' || category == 'avatars' || category == 'logos') &&
+          (isValidImageType() || isValidDocumentType()) &&
+          request.resource.size <= 20 * 1024 * 1024) ||
+        (!isValidVideoType() && request.resource.size <= 50 * 1024 * 1024)
+      );
+    }
+
+    // الفئات العامة المسموح بعرضها للزوار والمنخرطين (شعارات، أنشطة، حملات، فيديوهات تعليمية)
+    function isPublicDisplayCategory(category) {
+      return category in [
+        'logos',
+        'banners',
+        'covers',
+        'activities',
+        'campaigns',
+        'tutorials',
+        'videos',
+        'thumbnails',
+        'cards',
+        'avatars',
+        'board',
+        'images'
+      ];
+    }
+
+    // الفئات المسموح للمستخدمين والمنخرطين برفعها (وصولات الدفع، الاشتراكات، التبرعات، الصور الشخصية)
+    function isUserUploadableCategory(category) {
+      return category in [
+        'receipts',
+        'subscriptions',
+        'donations',
+        'contributions',
+        'avatars',
+        'profiles',
+        'members'
+      ];
+    }
+
+    // الفئات الخاصة بالإدارة والوثائق المالية والإدارية
+    function isPrivateDocumentCategory(category) {
+      return category in [
+        'receipts',
+        'subscriptions',
+        'donations',
+        'contributions',
+        'operations',
+        'documents',
+        'contracts',
+        'reports'
+      ];
+    }
+
+    // ============================================================================
+    // 3. مسارات الإدارة العامة للمنصة الرئيسية (Platform Global Assets & Tutorials)
+    // ============================================================================
+    match /platform/{category}/{fileName} {
+      allow get: if true;
+      allow list: if isSuperAdmin();
+      allow create, update: if isSuperAdmin() &&
+                               isValidMediaContentType() &&
+                               isWithinSizeLimit(category);
+      allow delete: if isSuperAdmin();
+    }
+
+    // ============================================================================
+    // 4. المسارات المهيكلة الخاصة بالجمعيات والمنخرطين:
+    //    /tenants/{tenantId}/{category}/{fileName}
+    // ============================================================================
+    match /tenants/{tenantId}/{category}/{fileName} {
+
+      // القراءة (Read):
+      // - ملفات العرض العامة (الشعارات، الأنشطة، الفيديوهات، البطائق) متاحة للعرض المباشر
+      // - الوصولات والمستندات الخاصة متاحة عبر الرابط المباشر (get) للمعاينة في لوحة الإدارة،
+      //   بينما يُمنع استعراض القائمة (list) إلا للإدارة العامة أو مدير الجمعية المعنية أو صاحب الملف
+      allow get: if isPublicDisplayCategory(category) ||
+                    isSuperAdmin() ||
+                    isTenantAdmin(tenantId) ||
+                    isFileOwner() ||
+                    isPrivateDocumentCategory(category);
+
+      allow list: if isSuperAdmin() ||
+                     isTenantAdmin(tenantId) ||
+                     isPublicDisplayCategory(category);
+
+      // الإنشاء والرفع (Create):
+      // 1. الإدارة العامة للمنصة: صلاحية كاملة مع التحقق من نوع وحجم الملف
+      // 2. مدير الجمعية / المشرف الفرعي: رفع ملفات جمعيته فقط مع التحقق من tenantId ونوع وحجم الملف
+      // 3. المستخدمون والمنخرطون: رفع وصولات الدفع أو الصور الشخصية فقط ضمن الحجم والنوع المسموحين
+      allow create: if isValidMediaContentType() &&
+                       isWithinSizeLimit(category) &&
+                       hasValidUploadMetadata(tenantId) && (
+                         isSuperAdmin() ||
+                         isTenantAdmin(tenantId) ||
+                         isUserUploadableCategory(category)
+                       );
+
+      // التحديث (Update):
+      // يقتصر على الإدارة العامة، أو مدير نفس الجمعية، أو صاحب الملف نفسه مع عدم تغيير الجمعية المالكة
+      allow update: if isValidMediaContentType() &&
+                       isWithinSizeLimit(category) &&
+                       isSameTenantResource(tenantId) &&
+                       hasValidUploadMetadata(tenantId) && (
+                         isSuperAdmin() ||
+                         isTenantAdmin(tenantId) ||
+                         isFileOwner()
+                       );
+
+      // الحذف (Delete):
+      // يقتصر حصراً على الإدارة العامة أو مدير نفس الجمعية أو صاحب الملف (ومنع حذف ملفات جمعية أخرى)
+      allow delete: if isSameTenantResource(tenantId) && (
+                         isSuperAdmin() ||
+                         isTenantAdmin(tenantId) ||
+                         isFileOwner()
+                       );
+    }
+
+    // ============================================================================
+    // 5. المسارات التوافقية للملفات المصنفة: /{category}/{fileName}
+    // ============================================================================
+    match /{category}/{fileName} {
+      allow get: if isPublicDisplayCategory(category) ||
+                    isPrivateDocumentCategory(category) ||
+                    isSuperAdmin() ||
+                    isFileOwner();
+      allow list: if isSuperAdmin() || isPublicDisplayCategory(category);
+
+      // يُمنع الفتح الكامل للجميع؛ يتطلب نوع ملف وحجم صالحين وبيانات مرسل موثقة
+      allow create: if isValidMediaContentType() &&
+                       isWithinSizeLimit(category) &&
+                       request.resource.metadata != null &&
+                       request.resource.metadata.uploadedByUid is string &&
+                       request.resource.metadata.uploadedByUid.size() > 0 && (
+                         isSuperAdmin() ||
+                         isAuthenticated() ||
+                         isUserUploadableCategory(category) ||
+                         isPublicDisplayCategory(category)
+                       );
+
+      allow update, delete: if isSuperAdmin() || isFileOwner();
+    }
+  }
+}

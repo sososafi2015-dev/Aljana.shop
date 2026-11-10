@@ -1,0 +1,89 @@
+{
+  "logs": [
+    {
+      "adminId": "super_admin",
+      "adminName": "Super Admin",
+      "adminRole": "super_admin",
+      "action": "إزالة شعار المنصة",
+      "actionKey": "platform_identity_edit",
+      "targetItem": "شعار المنصة العام",
+      "result": "success",
+      "details": "تمت إزالة شعار المنصة والعودة للرمز الافتراضي",
+      "id": "log-1792663826849-dg4w5",
+      "timestamp": "2026-10-22T10:10:26.849Z"
+    },
+    {
+      "adminId": "super_admin",
+      "adminName": "Super Admin",
+      "adminRole": "super_admin",
+      "action": "تعديل اسم المنصة",
+      "actionKey": "platform_identity_edit",
+      "targetItem": "اسم المنصة: syoumax منصة العمل الجمعوي",
+      "result": "success",
+      "details": "قام Super Admin بتحديث اسم المنصة إلى «syoumax منصة العمل الجمعوي» وحفظه في قاعدة البيانات",
+      "id": "log-1792663826848-qq0lg",
+      "timestamp": "2026-10-22T10:10:26.848Z"
+    },
+    {
+      "adminId": "super_admin",
+      "adminName": "Super Admin",
+      "adminRole": "super_admin",
+      "action": "تحديث شعار المنصة",
+      "actionKey": "platform_identity_edit",
+      "targetItem": "شعار المنصة العام",
+      "result": "success",
+      "details": "تم رفع وحفظ شعار جديد للمنصة بنجاح",
+      "id": "log-1792663826753-0ar2l",
+      "timestamp": "2026-10-22T10:10:26.753Z"
+    },
+    {
+      "adminId": "super_admin",
+      "adminName": "Super Admin",
+      "adminRole": "super_admin",
+      "action": "تعديل اسم المنصة",
+      "actionKey": "platform_identity_edit",
+      "targetItem": "اسم المنصة: منصة الجنة التضامنية - اختبار الحفظ الدائم",
+      "result": "success",
+      "details": "قام Super Admin بتحديث اسم المنصة إلى «منصة الجنة التضامنية - اختبار الحفظ الدائم» وحفظه في قاعدة البيانات",
+      "id": "log-1792663826738-3xott",
+      "timestamp": "2026-10-22T10:10:26.738Z"
+    },
+    {
+      "adminId": "super_admin",
+      "adminName": "Super Admin",
+      "adminRole": "super_admin",
+      "action": "تعديل اسم المنصة",
+      "actionKey": "platform_identity_edit",
+      "targetItem": "اسم المنصة: منصة الجنة التضامنية - اختبار الحفظ الدائم",
+      "result": "success",
+      "details": "قام Super Admin بتحديث اسم المنصة إلى «منصة الجنة التضامنية - اختبار الحفظ الدائم» وحفظه في قاعدة البيانات",
+      "id": "log-1792663757997-nm8a6",
+      "timestamp": "2026-10-22T10:09:17.997Z"
+    },
+    {
+      "adminId": "super_admin",
+      "adminName": "Super Admin",
+      "adminRole": "super_admin",
+      "action": "تعديل اسم المنصة",
+      "actionKey": "platform_identity_edit",
+      "targetItem": "اسم المنصة: منصة الجنة التضامنية - اختبار الحفظ الدائم",
+      "result": "success",
+      "details": "قام Super Admin بتحديث اسم المنصة إلى «منصة الجنة التضامنية - اختبار الحفظ الدائم» وحفظه في قاعدة البيانات",
+      "id": "log-1792663621099-0ln1r",
+      "timestamp": "2026-10-22T10:07:01.099Z"
+    },
+    {
+      "id": "log-init-1",
+      "timestamp": "2026-10-22T09:07:01.098Z",
+      "adminId": "super-admin-root",
+      "adminName": "Super Admin",
+      "adminRole": "super_admin",
+      "action": "تسجيل الدخول",
+      "actionKey": "login",
+      "targetItem": "لوحة الإدارة العامة للمنصة",
+      "result": "success",
+      "details": "تسجيل دخول ناجح للأدمن الرئيسي عبر PIN"
+    }
+  ],
+  "lastUpdated": "2026-10-22T10:10:26.849Z"
+}

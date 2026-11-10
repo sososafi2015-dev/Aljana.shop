@@ -1,0 +1,299 @@
+{
+  "schemaVersion": "1.0",
+  "userRoles": {
+    "admin": {
+      "description": "Platform Super Admin with full management permissions over all tenants and platform settings",
+      "inherits": []
+    },
+    "tenant_admin": {
+      "description": "Association administrator with rights to manage their own association content, activities, members, and operations",
+      "inherits": []
+    },
+    "member": {
+      "description": "Registered member or visitor with read and interactive participation rights",
+      "inherits": []
+    }
+  },
+  "collections": {
+    "users": {
+      "description": "User profiles, roles, and administrative claims",
+      "fields": {
+        "email": { "type": "string", "description": "User email address" },
+        "displayName": { "type": "string", "description": "Display name of the user" },
+        "role": { "type": "string", "description": "User role: admin, tenant_admin, or member" },
+        "tenantId": { "type": "string", "description": "Associated tenant ID if tenant admin", "optional": true },
+        "createdAt": { "type": "string", "description": "ISO timestamp of account creation" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp of last update" }
+      },
+      "allowRead": "auth != null",
+      "allowCreate": "auth != null",
+      "allowUpdate": "auth != null",
+      "allowDelete": "auth != null && (request.auth.token.email == 'soso.safi.2015@gmail.com' || resource.data.role != 'admin')"
+    },
+    "tenants": {
+      "description": "Registered associations and tenant configurations",
+      "fields": {
+        "id": { "type": "string", "description": "Unique tenant identifier" },
+        "name": { "type": "string", "description": "Association Arabic/English name" },
+        "subdomain": { "type": "string", "description": "Unique association slug or domain identifier" },
+        "status": { "type": "string", "description": "Status: active, pending, suspended" },
+        "settings": { "type": "map", "description": "Tenant specific configuration", "optional": true },
+        "createdAt": { "type": "string", "description": "ISO timestamp" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp" }
+      },
+      "allowRead": "true",
+      "allowCreate": "true",
+      "allowUpdate": "true",
+      "allowDelete": "true"
+    },
+    "activities": {
+      "description": "Activities, news, events, and reports for associations",
+      "fields": {
+        "id": { "type": "string", "description": "Activity unique ID" },
+        "tenantId": { "type": "string", "description": "Tenant identifier" },
+        "title": { "type": "string", "description": "Activity title" },
+        "description": { "type": "string", "description": "Activity details and text" },
+        "date": { "type": "string", "description": "Activity date" },
+        "images": { "type": "list", "description": "List of image URLs and attachments" },
+        "category": { "type": "string", "description": "Activity category", "optional": true },
+        "createdAt": { "type": "string", "description": "ISO timestamp" }
+      },
+      "allowRead": "true",
+      "allowCreate": "true",
+      "allowUpdate": "true",
+      "allowDelete": "true"
+    },
+    "tutorials": {
+      "description": "Platform guide and usage tutorial videos",
+      "fields": {
+        "id": { "type": "string", "description": "Tutorial unique ID" },
+        "tenantId": { "type": "string", "description": "Tenant identifier or global" },
+        "title": { "type": "string", "description": "Tutorial video title" },
+        "description": { "type": "string", "description": "Tutorial description" },
+        "videoUrl": { "type": "string", "description": "Video stream/playback URL" },
+        "coverImage": { "type": "string", "description": "Cover thumbnail image URL", "optional": true },
+        "order": { "type": "number", "description": "Display order" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp of last update" }
+      },
+      "allowRead": "true",
+      "allowCreate": "true",
+      "allowUpdate": "true",
+      "allowDelete": "true"
+    },
+    "settings": {
+      "description": "Association settings, branding, colors, and legal information",
+      "fields": {
+        "tenantId": { "type": "string", "description": "Tenant ID" },
+        "associationName": { "type": "string", "description": "Association name" },
+        "logoUrl": { "type": "string", "description": "Logo URL", "optional": true },
+        "coverUrl": { "type": "string", "description": "Cover image URL", "optional": true },
+        "primaryColor": { "type": "string", "description": "Branding color" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp" }
+      },
+      "allowRead": "true",
+      "allowCreate": "true",
+      "allowUpdate": "true",
+      "allowDelete": "true"
+    },
+    "portal_settings": {
+      "description": "Main platform portal landing page settings and announcements",
+      "fields": {
+        "id": { "type": "string", "description": "Document ID" },
+        "title": { "type": "string", "description": "Portal title" },
+        "subtitle": { "type": "string", "description": "Portal subtitle" },
+        "bannerUrl": { "type": "string", "description": "Banner image URL", "optional": true },
+        "updatedAt": { "type": "string", "description": "ISO timestamp" }
+      },
+      "allowRead": "true",
+      "allowCreate": "true",
+      "allowUpdate": "true",
+      "allowDelete": "true"
+    },
+    "platform_identity": {
+      "description": "Global platform identity, branding logos and badges",
+      "fields": {
+        "id": { "type": "string", "description": "Document ID" },
+        "logo": { "type": "string", "description": "Platform logo URL or Base64" },
+        "platformName": { "type": "string", "description": "Platform brand name" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp" }
+      },
+      "allowRead": "true",
+      "allowCreate": "true",
+      "allowUpdate": "true",
+      "allowDelete": "true"
+    },
+    "operations": {
+      "description": "Financial income and expense operations per association",
+      "fields": {
+        "id": { "type": "string", "description": "Operation ID" },
+        "tenantId": { "type": "string", "description": "Tenant ID" },
+        "type": { "type": "string", "description": "income or expense" },
+        "amount": { "type": "number", "description": "Amount in MAD" },
+        "description": { "type": "string", "description": "Operation description" },
+        "date": { "type": "string", "description": "Operation date" },
+        "category": { "type": "string", "description": "Financial category" }
+      },
+      "allowRead": "true",
+      "allowCreate": "true",
+      "allowUpdate": "true",
+      "allowDelete": "true"
+    },
+    "contributions": {
+      "description": "Membership monthly/annual dues contributions",
+      "fields": {
+        "id": { "type": "string", "description": "Contribution ID" },
+        "tenantId": { "type": "string", "description": "Tenant ID" },
+        "memberId": { "type": "string", "description": "Member ID" },
+        "memberName": { "type": "string", "description": "Member Name" },
+        "amount": { "type": "number", "description": "Contribution amount" },
+        "date": { "type": "string", "description": "Payment date" }
+      },
+      "allowRead": "true",
+      "allowCreate": "true",
+      "allowUpdate": "true",
+      "allowDelete": "true"
+    },
+    "members": {
+      "description": "Association members directory",
+      "fields": {
+        "id": { "type": "string", "description": "Member ID" },
+        "tenantId": { "type": "string", "description": "Tenant ID" },
+        "fullName": { "type": "string", "description": "Member full name" },
+        "cin": { "type": "string", "description": "National ID number", "optional": true },
+        "phone": { "type": "string", "description": "Phone number", "optional": true },
+        "status": { "type": "string", "description": "active, inactive" }
+      },
+      "allowRead": "true",
+      "allowCreate": "true",
+      "allowUpdate": "true",
+      "allowDelete": "true"
+    },
+    "board_members": {
+      "description": "Association administrative executive board members",
+      "fields": {
+        "id": { "type": "string", "description": "Board member ID" },
+        "tenantId": { "type": "string", "description": "Tenant ID" },
+        "name": { "type": "string", "description": "Name" },
+        "role": { "type": "string", "description": "Board position/role" },
+        "phone": { "type": "string", "description": "Phone", "optional": true },
+        "email": { "type": "string", "description": "Email", "optional": true }
+      },
+      "allowRead": "true",
+      "allowCreate": "true",
+      "allowUpdate": "true",
+      "allowDelete": "true"
+    },
+    "campaigns": {
+      "description": "Crowdfunding and charity fundraising campaigns",
+      "fields": {
+        "id": { "type": "string", "description": "Campaign ID" },
+        "tenantId": { "type": "string", "description": "Tenant ID" },
+        "title": { "type": "string", "description": "Campaign title" },
+        "targetAmount": { "type": "number", "description": "Target amount in MAD" },
+        "collectedAmount": { "type": "number", "description": "Collected amount in MAD" },
+        "status": { "type": "string", "description": "active, completed, paused" },
+        "videoUrl": { "type": "string", "description": "Introductory or promotional video URL (YouTube, Vimeo, or direct MP4/WebM)", "optional": true }
+      },
+      "allowRead": "true",
+      "allowCreate": "true",
+      "allowUpdate": "true",
+      "allowDelete": "true"
+    },
+    "campaign_contributions": {
+      "description": "Donations and financial contributions linked to campaigns",
+      "fields": {
+        "id": { "type": "string", "description": "Contribution ID" },
+        "tenantId": { "type": "string", "description": "Tenant ID" },
+        "campaignId": { "type": "string", "description": "Campaign ID" },
+        "campaignTitle": { "type": "string", "description": "Campaign title" },
+        "donorName": { "type": "string", "description": "Donor name or فاعل خير" },
+        "amount": { "type": "number", "description": "Contribution amount in MAD" },
+        "status": { "type": "string", "description": "completed, pending, approved" },
+        "date": { "type": "string", "description": "Contribution date" },
+        "createdAt": { "type": "string", "description": "ISO timestamp" }
+      },
+      "allowRead": "true",
+      "allowCreate": "true",
+      "allowUpdate": "true",
+      "allowDelete": "true"
+    },
+    "polls": {
+      "description": "Community and association decision polls and voting",
+      "fields": {
+        "id": { "type": "string", "description": "Poll ID" },
+        "tenantId": { "type": "string", "description": "Tenant ID" },
+        "question": { "type": "string", "description": "Poll question" },
+        "options": { "type": "list", "description": "Poll options with vote counts" },
+        "status": { "type": "string", "description": "active, closed" }
+      },
+      "allowRead": "true",
+      "allowCreate": "true",
+      "allowUpdate": "true",
+      "allowDelete": "true"
+    },
+    "ui_elements": {
+      "description": "UI elements and visibility toggles",
+      "fields": {
+        "id": { "type": "string", "description": "Document ID" },
+        "tenantId": { "type": "string", "description": "Tenant ID or global" },
+        "elements": { "type": "map", "description": "Element toggles and labels" }
+      },
+      "allowRead": "true",
+      "allowCreate": "true",
+      "allowUpdate": "true",
+      "allowDelete": "true"
+    },
+    "media_files": {
+      "description": "Metadata for uploaded images, videos, and documents",
+      "fields": {
+        "id": { "type": "string", "description": "File identifier" },
+        "fileName": { "type": "string", "description": "Original file name" },
+        "storagePath": { "type": "string", "description": "Structured storage path", "optional": true },
+        "tenantId": { "type": "string", "description": "Tenant ID", "optional": true },
+        "category": { "type": "string", "description": "Storage category", "optional": true },
+        "contentType": { "type": "string", "description": "MIME type" },
+        "size": { "type": "number", "description": "File size in bytes" },
+        "url": { "type": "string", "description": "Permanent access URL" },
+        "chunkCount": { "type": "number", "description": "Number of binary chunks stored in storage_chunks", "optional": true },
+        "uploadedBy": { "type": "string", "description": "Uploader identifier", "optional": true },
+        "uploadedByUid": { "type": "string", "description": "Uploader UID", "optional": true },
+        "uploadedAt": { "type": "string", "description": "ISO timestamp" }
+      },
+      "allowRead": "true",
+      "allowCreate": "request.resource.data is map && request.resource.data.url is string",
+      "allowUpdate": "request.resource.data is map && request.resource.data.url is string",
+      "allowDelete": "true"
+    },
+    "storage_chunks": {
+      "description": "Permanent binary chunks for uploaded images and documents in Cloud Firestore",
+      "fields": {
+        "id": { "type": "string", "description": "Chunk document ID" },
+        "fileId": { "type": "string", "description": "Parent media_files ID or filename" },
+        "chunkIndex": { "type": "number", "description": "Zero-based chunk index" },
+        "totalChunks": { "type": "number", "description": "Total chunks for the file" },
+        "data": { "type": "string", "description": "Base64-encoded binary slice" },
+        "tenantId": { "type": "string", "description": "Tenant ID", "optional": true },
+        "updatedAt": { "type": "string", "description": "ISO timestamp" }
+      },
+      "allowRead": "true",
+      "allowCreate": "request.resource.data is map && request.resource.data.fileId is string",
+      "allowUpdate": "request.resource.data is map && request.resource.data.fileId is string",
+      "allowDelete": "true"
+    },
+    "tenant_payments": {
+      "description": "Subscription and activation payment receipts for associations",
+      "fields": {
+        "id": { "type": "string", "description": "Payment request ID" },
+        "tenantId": { "type": "string", "description": "Association tenant ID" },
+        "receiptImageUrl": { "type": "string", "description": "Permanent URL of uploaded payment receipt" },
+        "status": { "type": "string", "description": "pending, approved, rejected" },
+        "submittedAt": { "type": "string", "description": "ISO submission timestamp" }
+      },
+      "allowRead": "true",
+      "allowCreate": "request.resource.data is map && request.resource.data.tenantId is string",
+      "allowUpdate": "request.resource.data is map && request.resource.data.tenantId is string",
+      "allowDelete": "true"
+    }
+  },
+  "securityRulesSummary": "Role-based access with bootstrapped super admin soso.safi.2015@gmail.com, tenant isolation per association, and validated media/chunk storage rules."
+}

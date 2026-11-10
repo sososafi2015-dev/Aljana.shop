@@ -1,0 +1,6 @@
+{
+  "name": "Aljana",
+  "description": "منصة SaaS سحابية متكاملة لإدارة الجمعيات بنظام Multi-Tenant وMulti-User وصلاحيات متقدمة، تتيح إنشاء وإدارة منصات إلكترونية مستقلة لكل جمعية بناءً على القالب النموذجي لجمعية النور.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

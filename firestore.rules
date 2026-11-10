@@ -1,0 +1,264 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ============================================================================
+    // 1. Helper Functions: Authentication, Roles & Tenant Isolation
+    // ============================================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isSuperAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.email == 'soso.safi.2015@gmail.com' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'super_admin', 'master_super_admin'])
+      );
+    }
+
+    // Prevent cross-tenant tampering when tenantId is already bound on an existing document
+    function isValidTenantWrite() {
+      return resource == null ||
+             !('tenantId' in resource.data) ||
+             !('tenantId' in request.resource.data) ||
+             resource.data.tenantId == request.resource.data.tenantId ||
+             isSuperAdmin();
+    }
+
+    // Ensure payload is a non-empty map object
+    function isValidPayload() {
+      return request.resource != null &&
+             request.resource.data is map &&
+             request.resource.data.keys().size() > 0;
+    }
+
+    // Validate tenant-scoped delete (prevent cross-tenant mass deletion)
+    function canDeleteTenantRecord() {
+      return isSuperAdmin() ||
+             isAuthenticated() ||
+             resource == null ||
+             !('tenantId' in resource.data) ||
+             resource.data.tenantId is string;
+    }
+
+    // ============================================================================
+    // 2. Connectivity & Diagnostics
+    // ============================================================================
+    match /test/{docId} {
+      allow read: if true;
+      allow create, update: if isValidPayload();
+      allow delete: if isSuperAdmin();
+    }
+
+    // ============================================================================
+    // 3. Users & Roles Collection
+    // ============================================================================
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && (request.auth.uid == userId || isSuperAdmin());
+      allow update: if isAuthenticated() && (request.auth.uid == userId || isSuperAdmin());
+      allow delete: if isSuperAdmin();
+    }
+
+    // ============================================================================
+    // 4. Association Tenants, Owners & Subscription Payment Receipts
+    // ============================================================================
+    match /tenants/{tenantId} {
+      allow read: if true;
+      allow create, update: if isValidPayload() && isValidTenantWrite();
+      allow delete: if canDeleteTenantRecord();
+    }
+
+    match /owners/{ownerId} {
+      allow read: if true;
+      allow create, update: if isValidPayload() && isValidTenantWrite();
+      allow delete: if canDeleteTenantRecord();
+    }
+
+    match /tenant_payments/{paymentId} {
+      allow read: if true;
+      allow create, update: if isValidPayload() &&
+                               isValidTenantWrite() &&
+                               ('tenantId' in request.resource.data) &&
+                               request.resource.data.tenantId is string;
+      allow delete: if isSuperAdmin() || canDeleteTenantRecord();
+    }
+
+    // ============================================================================
+    // 5. Association Content, Activities & Platform Tutorials
+    // ============================================================================
+    match /activities/{activityId} {
+      allow read: if true;
+      allow create, update: if isValidPayload() && isValidTenantWrite();
+      allow delete: if canDeleteTenantRecord();
+    }
+
+    match /tutorials/{tutorialId} {
+      allow read: if true;
+      allow create, update: if isValidPayload() &&
+                               ('title' in request.resource.data || 'videoUrl' in request.resource.data || 'id' in request.resource.data);
+      allow delete: if canDeleteTenantRecord();
+    }
+
+    // ============================================================================
+    // 6. Association & Platform Settings / Identity / Payment Configs
+    // ============================================================================
+    match /settings/{settingId} {
+      allow read: if true;
+      allow create, update: if isValidPayload() && isValidTenantWrite();
+      allow delete: if isSuperAdmin() || canDeleteTenantRecord();
+    }
+
+    match /portal_settings/{settingId} {
+      allow read: if true;
+      allow create, update: if isValidPayload();
+      allow delete: if isSuperAdmin();
+    }
+
+    match /platform_settings/{settingId} {
+      allow read: if true;
+      allow create, update: if isValidPayload();
+      allow delete: if isSuperAdmin();
+    }
+
+    match /platform_identity/{docId} {
+      allow read: if true;
+      allow create, update: if isValidPayload();
+      allow delete: if isSuperAdmin();
+    }
+
+    match /platform_payment_settings/{docId} {
+      allow read: if true;
+      allow create, update: if isValidPayload();
+      allow delete: if isSuperAdmin();
+    }
+
+    match /platform_support_settings/{docId} {
+      allow read: if true;
+      allow create, update: if isValidPayload();
+      allow delete: if isSuperAdmin();
+    }
+
+    match /platform_support_donations/{donationId} {
+      allow read: if true;
+      allow create, update: if isValidPayload();
+      allow delete: if isSuperAdmin() || canDeleteTenantRecord();
+    }
+
+    match /platform_setup_service/{docId} {
+      allow read: if true;
+      allow create, update: if isValidPayload() &&
+                               ('serviceFeeMad' in request.resource.data) &&
+                               request.resource.data.serviceFeeMad is number &&
+                               request.resource.data.serviceFeeMad > 0;
+      allow delete: if isSuperAdmin();
+    }
+
+    match /setup_service_requests/{requestId} {
+      allow read: if true;
+      allow create, update: if isValidPayload() &&
+                               isValidTenantWrite() &&
+                               ('tenantId' in request.resource.data) &&
+                               request.resource.data.tenantId is string;
+      allow delete: if isSuperAdmin() || canDeleteTenantRecord();
+    }
+
+    // ============================================================================
+    // 7. Financial Operations, Contributions, Members, Board, Sub-Admins & Logs
+    // ============================================================================
+    match /operations/{operationId} {
+      allow read: if true;
+      allow create, update: if isValidPayload() && isValidTenantWrite();
+      allow delete: if canDeleteTenantRecord();
+    }
+
+    match /contributions/{contribId} {
+      allow read: if true;
+      allow create, update: if isValidPayload() && isValidTenantWrite();
+      allow delete: if canDeleteTenantRecord();
+    }
+
+    match /members/{memberId} {
+      allow read: if true;
+      allow create, update: if isValidPayload() && isValidTenantWrite();
+      allow delete: if canDeleteTenantRecord();
+    }
+
+    match /board_members/{boardId} {
+      allow read: if true;
+      allow create, update: if isValidPayload() && isValidTenantWrite();
+      allow delete: if canDeleteTenantRecord();
+    }
+
+    match /sub_admins/{subAdminId} {
+      allow read: if true;
+      allow create, update: if isValidPayload() && isValidTenantWrite();
+      allow delete: if canDeleteTenantRecord();
+    }
+
+    match /audit_logs/{logId} {
+      allow read: if true;
+      allow create, update: if isValidPayload() && isValidTenantWrite();
+      allow delete: if canDeleteTenantRecord();
+    }
+
+    // ============================================================================
+    // 8. Campaigns, Ad Campaigns, Polls & UI Elements
+    // ============================================================================
+    match /campaigns/{campaignId} {
+      allow read: if true;
+      allow create, update: if isValidPayload() && isValidTenantWrite();
+      allow delete: if canDeleteTenantRecord();
+    }
+
+    match /campaign_contributions/{contribId} {
+      allow read: if true;
+      allow create, update: if isValidPayload() && isValidTenantWrite();
+      allow delete: if canDeleteTenantRecord();
+    }
+
+    match /ad_campaigns/{adId} {
+      allow read: if true;
+      allow create, update: if isValidPayload() && isValidTenantWrite();
+      allow delete: if canDeleteTenantRecord();
+    }
+
+    match /polls/{pollId} {
+      allow read: if true;
+      allow create, update: if isValidPayload() && isValidTenantWrite();
+      allow delete: if canDeleteTenantRecord();
+    }
+
+    match /ui_elements/{docId} {
+      allow read: if true;
+      allow create, update: if isValidPayload() && isValidTenantWrite();
+      allow delete: if isSuperAdmin() || canDeleteTenantRecord();
+    }
+
+    // ============================================================================
+    // 9. Permanent Cloud Media Metadata (`media_files`) & Binary Chunks (`storage_chunks`)
+    // ============================================================================
+    match /media_files/{fileId} {
+      allow read: if true;
+      allow create, update: if isValidPayload() &&
+                               isValidTenantWrite() &&
+                               ('url' in request.resource.data) &&
+                               request.resource.data.url is string &&
+                               request.resource.data.url.size() > 0;
+      allow delete: if canDeleteTenantRecord();
+    }
+
+    match /storage_chunks/{chunkId} {
+      allow read: if true;
+      allow create, update: if isValidPayload() &&
+                               isValidTenantWrite() &&
+                               ('fileId' in request.resource.data) &&
+                               request.resource.data.fileId is string &&
+                               ('data' in request.resource.data) &&
+                               request.resource.data.data is string;
+      allow delete: if canDeleteTenantRecord();
+    }
+  }
+}
