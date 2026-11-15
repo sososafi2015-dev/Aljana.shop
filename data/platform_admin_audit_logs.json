@@ -18,9 +18,9 @@
       "adminRole": "super_admin",
       "action": "تعديل اسم المنصة",
       "actionKey": "platform_identity_edit",
-      "targetItem": "اسم المنصة: syoumax منصة العمل الجمعوي",
+      "targetItem": "اسم المنصة: youx منصة العمل الجمعوي",
       "result": "success",
-      "details": "قام Super Admin بتحديث اسم المنصة إلى «syoumax منصة العمل الجمعوي» وحفظه في قاعدة البيانات",
+      "details": "قام Super Admin بتحديث اسم المنصة إلى «youx منصة العمل الجمعوي» وحفظه في قاعدة البيانات",
       "id": "log-1792663826848-qq0lg",
       "timestamp": "2026-10-22T10:10:26.848Z"
     },

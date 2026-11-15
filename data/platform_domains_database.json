@@ -1,0 +1,47 @@
+{
+  "domains": [
+    {
+      "id": "dom_1794696632659_df7637",
+      "domainName": "youx.ai.studio",
+      "targetUrl": "https://youx.ai.studio",
+      "providerPreset": "hostinger",
+      "nameservers": [
+        "ns1.dns-parking.com",
+        "ns2.dns-parking.com"
+      ],
+      "dnsRecords": [],
+      "status": "not_linked",
+      "sslEnabled": true,
+      "lastVerification": null,
+      "createdAt": "2026-11-14T22:50:32.658Z",
+      "updatedAt": "2026-11-15T18:31:08.265Z",
+      "createdBy": "الأدمين الرئيسي (Super Admin)",
+      "updatedBy": "الأدمين الرئيسي (Super Admin)",
+      "auditLogs": [
+        {
+          "id": "domlog_1794696632659_8cbc3c",
+          "domainId": "dom_1794696632659_df7637",
+          "domainName": "youx.ai.studio",
+          "action": "update",
+          "actionLabelAr": "تحديث إعدادات الدومين و DNS",
+          "details": "تم تحديث النطاق الرسمي للمنصة إلى (youx.ai.studio) وربطه بالعنوان الرسمي (https://youx.ai.studio).",
+          "performedBy": "الأدمين الرئيسي (Super Admin)",
+          "timestamp": "2026-11-15T18:31:08.265Z"
+        }
+      ]
+    }
+  ],
+  "auditLogs": [
+    {
+      "id": "domlog_1794696632659_8cbc3c",
+      "domainId": "dom_1794696632659_df7637",
+      "domainName": "youx.ai.studio",
+      "action": "update",
+      "actionLabelAr": "تحديث إعدادات الدومين و DNS",
+      "details": "تم تحديث النطاق الرسمي للمنصة إلى (youx.ai.studio) وربطه بالعنوان الرسمي (https://youx.ai.studio).",
+      "performedBy": "الأدمين الرئيسي (Super Admin)",
+      "timestamp": "2026-11-15T18:31:08.265Z"
+    }
+  ],
+  "updatedAt": "2026-11-15T18:31:08.265Z"
+}

@@ -263,11 +263,14 @@ export const SECTION_ALIASES: Record<string, string> = {
   'contact': 'contact_card',
   'office': 'contact_card',
 
-  // Footer & Social
+  // Footer & Social & Bank
   'social_links': 'footer_social_links',
   'social': 'footer_social_links',
   'footer_links': 'footer_quick_links',
   'footer_contact': 'footer_contact_info',
+  'nav_bank_rib_btn': 'bank_rib_card',
+  'bank_rib': 'bank_rib_card',
+  'rib_card': 'bank_rib_card',
 };
 
 /**
@@ -339,8 +342,11 @@ export function isSectionVisibleForUser(
 
   const element = uiElements.find((e) => e.id === canonicalId || e.id === sectionId);
 
-  // If element not registered in system, default to visible
+  // If element not registered in system, default to visible (except gateway_members which defaults to hidden)
   if (!element) {
+    if (canonicalId === 'gateway_members') {
+      return false;
+    }
     return true;
   }
 

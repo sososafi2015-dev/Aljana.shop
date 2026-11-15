@@ -1265,3 +1265,74 @@ export interface PlatformSetupServiceRequest {
   adminNotes?: string;
 }
 
+// ==================== DOMAIN MANAGEMENT & DNS CONFIGURATION (ضومين) ====================
+
+export type DnsRecordType = 'A' | 'AAAA' | 'CNAME' | 'TXT' | 'MX' | 'NS';
+
+export interface DnsRecordItem {
+  id: string;
+  type: DnsRecordType;
+  host: string; // e.g. '@', 'www', 'mail', '_acme-challenge'
+  value: string; // IP, target host, TXT value, etc.
+  ttl: number; // Seconds, e.g. 3600 or 14400
+  priority?: number; // Required/used for MX records (and SRV if needed)
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type DomainConnectionStatus =
+  | 'not_linked'   // لم يتم الربط بعد
+  | 'pending_dns'  // في انتظار تحديث DNS
+  | 'connected'    // متصل بنجاح
+  | 'dns_error';   // يوجد خطأ في إعدادات DNS
+
+export interface DomainAuditLogEntry {
+  id: string;
+  domainId: string;
+  domainName: string;
+  action: 'create' | 'update' | 'dns_add' | 'dns_update' | 'dns_delete' | 'verify' | 'delete';
+  actionLabelAr: string;
+  details: string;
+  performedBy: string;
+  timestamp: string; // ISO datetime
+}
+
+export interface DomainVerificationResult {
+  checkedAt: string;
+  status: DomainConnectionStatus;
+  sslEnabled: boolean;
+  sslIssuer?: string;
+  sslSubject?: string;
+  sslValidTo?: string;
+  sslAuthorized?: boolean;
+  sslError?: string;
+  httpStatus?: number | null;
+  targetReachable: boolean;
+  nameserversMatch: boolean;
+  resolvedNameservers: string[];
+  resolvedARecords: string[];
+  resolvedAaaaRecords: string[];
+  resolvedCnameRecords: string[];
+  resolvedTxtRecords: string[];
+  resolvedMxRecords: Array<{ exchange: string; priority: number }>;
+  targetResolvedARecords: string[];
+  summaryAr: string;
+  issuesAr: string[];
+}
+
+export interface PlatformDomainConfig {
+  id: string;
+  domainName: string;
+  targetUrl: string;
+  providerPreset: 'hostinger' | 'custom';
+  nameservers: string[]; // [NS1, NS2, ...additional]
+  dnsRecords: DnsRecordItem[];
+  status: DomainConnectionStatus;
+  sslEnabled: boolean;
+  lastVerification?: DomainVerificationResult | null;
+  auditLogs?: DomainAuditLogEntry[];
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string;
+  updatedBy: string;
+}

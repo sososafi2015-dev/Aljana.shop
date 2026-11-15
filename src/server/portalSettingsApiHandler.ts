@@ -50,7 +50,7 @@ export const DEFAULT_PORTAL_SETTINGS: PlatformPortalSettings = {
   texts: {
     announcementBadge: 'SaaS Multi-Tenant',
     announcementText: 'المنصة السحابية الموحدة لإدارة الجمعيات بنظام استقلال البيانات التام والصلاحيات المتعددة',
-    headerBrandName: 'syoumax منصة العمل الجمعوي',
+    headerBrandName: 'youx منصة العمل الجمعوي',
     headerBrandTagline: 'منظومة رقمية شاملة لإدارة وتطوير العمل الجمعوي',
     createAssociationButtonText: 'إنشاء منصة احترافية للجمعية',
     heroBadge: 'نظام مستقل لكل جمعية • Multi-Tenant & Multi-User Architecture',
@@ -84,7 +84,7 @@ export const DEFAULT_PORTAL_SETTINGS: PlatformPortalSettings = {
     pillar5Desc: 'قسم مخصص لعرض وتوثيق كافة الأعمال والأنشطة الخيرية والتنموية بالصور والتفاصيل أمام الزوار والمنخرطين بطريقة منظمة واحترافية.',
     pillar6Title: 'إستفادة من تبرعات مالية',
     pillar6Desc: 'استفد من تبرعات مالية ومساهمات المنخرطين الجدد والمحسنين، واستقطب دعم القطاع الخاص والجالية المقيمة بالخارج، لبناء شراكات وتمويل مشاريعك الخيرية والتنموية وتحقيق أثر أكبر في المجتمع.',
-    footerBrandName: 'syoumax منصة العمل الجمعوي - Smart Multi-Association Platform',
+    footerBrandName: 'youx منصة العمل الجمعوي - Smart Multi-Association Platform',
     footerCopyrightText: 'جميع الحقوق محفوظة © • القالب المعتمد: جمعية النور للتنمية والتضامن',
   },
   watchVideosColors: { ...DEFAULT_WATCH_VIDEOS_COLORS },
@@ -133,15 +133,15 @@ export function loadPortalSettingsDatabase(forceFresh = false): PlatformPortalSe
         }
         if (loadedTexts.headerBrandName) {
           loadedTexts.headerBrandName = loadedTexts.headerBrandName
-            .replace(/منظومة الجنى الرقمية للعمل الجمعوي/g, 'syoumax منصة العمل الجمعوي')
-            .replace(/\byoux\b/gi, 'syoumax')
-            .replace(/\bAljana\b/gi, 'syoumax');
+            .replace(/منظومة الجنى الرقمية للعمل الجمعوي/g, 'youx منصة العمل الجمعوي')
+            .replace(/\bsyoumax\b/gi, 'youx')
+            .replace(/\bAljana\b/gi, 'youx');
         }
         if (loadedTexts.footerBrandName) {
           loadedTexts.footerBrandName = loadedTexts.footerBrandName
-            .replace(/منظومة الجنى الرقمية للعمل الجمعوي/g, 'syoumax منصة العمل الجمعوي')
-            .replace(/\byoux\b/gi, 'syoumax')
-            .replace(/\bAljana\b/gi, 'syoumax');
+            .replace(/منظومة الجنى الرقمية للعمل الجمعوي/g, 'youx منصة العمل الجمعوي')
+            .replace(/\bsyoumax\b/gi, 'youx')
+            .replace(/\bAljana\b/gi, 'youx');
         }
 
         const rawWatchColors = {

@@ -27,6 +27,7 @@ import { DEFAULT_DONATION_PRESETS } from '../types';
 import { apiSubmitDonationContribution } from '../api/campaignsApi';
 import { ensurePermanentImageUrl } from '../api/imageApi';
 import { VideoPlayer } from '../utils/videoUtils';
+import { resolveEffectiveBankSettings } from '../storage';
 
 interface CampaignDonationModalProps {
   isOpen: boolean;
@@ -199,9 +200,11 @@ export const CampaignDonationModal: React.FC<CampaignDonationModalProps> = ({
       !customAmountError &&
       Number(customAmountInput) > 0);
 
+  const effectiveBank = resolveEffectiveBankSettings(settings);
+
   const handleCopyRib = () => {
-    if (settings.ribBank) {
-      navigator.clipboard.writeText(settings.ribBank.replace(/\s+/g, ''));
+    if (effectiveBank.ribBank) {
+      navigator.clipboard.writeText(effectiveBank.ribBank.replace(/\s+/g, ''));
       setCopiedRib(true);
       addToast('info', 'تم نسخ رقم الحساب البنكي (RIB) للحافظة بنجاح.');
       setTimeout(() => setCopiedRib(false), 2500);
@@ -807,12 +810,12 @@ export const CampaignDonationModal: React.FC<CampaignDonationModalProps> = ({
                   {/* Bank Details Display */}
                   {paymentMethod === 'bank_transfer' && (
                     <div className="space-y-3 mt-2">
-                      {settings.ribBank && (
+                      {effectiveBank.ribBank && (
                         <div className="p-3 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700 text-xs">
                           <div className="flex items-center justify-between mb-1">
                             <span className="font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                               <Building className="w-3.5 h-3.5 text-emerald-600" />
-                              الحساب البنكي الرسمي للجمعية ({settings.bankName}):
+                              الحساب البنكي الرسمي للجمعية ({effectiveBank.bankName}):
                             </span>
                             <button
                               type="button"
@@ -824,7 +827,7 @@ export const CampaignDonationModal: React.FC<CampaignDonationModalProps> = ({
                             </button>
                           </div>
                           <div className="font-mono font-bold text-slate-900 dark:text-white text-sm bg-white dark:bg-slate-900 p-2 rounded-lg border border-slate-200 dark:border-slate-700 tracking-wider text-center select-all">
-                            {settings.ribBank}
+                            {effectiveBank.ribBank}
                           </div>
                         </div>
                       )}

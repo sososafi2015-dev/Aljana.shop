@@ -36,11 +36,15 @@ export function readUIElementsFromDisk(tenantId?: string | null): UIElementConfi
   if (!fs.existsSync(filePath)) {
     const seeded = initialUIElements
       .filter((el) => el.id !== 'pillars_section' && el.id !== 'gateway_financials')
-      .map((el) =>
-        el.id === 'current_financial_balance'
-          ? { ...el, enabled: true, visibleToNonMembers: false }
-          : { ...el }
-      );
+      .map((el) => {
+        if (el.id === 'current_financial_balance') {
+          return { ...el, enabled: true, visibleToNonMembers: false };
+        }
+        if (el.id === 'gateway_members') {
+          return { ...el, enabled: false, _gatewayMembersDefaultHiddenV1: true } as UIElementConfig;
+        }
+        return { ...el };
+      });
     writeJsonFileAtomicSync(filePath, seeded, 'ui_elements');
     return seeded;
   }
@@ -52,6 +56,7 @@ export function readUIElementsFromDisk(tenantId?: string | null): UIElementConfi
       if (def.id === 'pillars_section' || def.id === 'gateway_financials') continue;
       map.set(def.id, { ...def });
     }
+    let didMigrateGatewayMembers = false;
     for (const item of parsed) {
       if (item && item.id && item.id !== 'pillars_section' && item.id !== 'gateway_financials') {
         const existing = map.get(item.id) || ({} as UIElementConfig);
@@ -60,10 +65,19 @@ export function readUIElementsFromDisk(tenantId?: string | null): UIElementConfi
           merged.enabled = true;
           merged.visibleToNonMembers = false;
         }
+        if (merged.id === 'gateway_members' && !(merged as any)._gatewayMembersDefaultHiddenV1) {
+          merged.enabled = false;
+          (merged as any)._gatewayMembersDefaultHiddenV1 = true;
+          didMigrateGatewayMembers = true;
+        }
         map.set(item.id, merged);
       }
     }
-    return Array.from(map.values()).sort((a, b) => (a.order || 0) - (b.order || 0));
+    const result = Array.from(map.values()).sort((a, b) => (a.order || 0) - (b.order || 0));
+    if (didMigrateGatewayMembers) {
+      writeJsonFileAtomicSync(filePath, result, 'ui_elements');
+    }
+    return result;
   }
 
   return initialUIElements

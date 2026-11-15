@@ -5,7 +5,7 @@ export const PLATFORM_IDENTITY_STORAGE_KEY = 'smart_platform_identity_v1';
 export const PLATFORM_IDENTITY_EVENT = 'platform-identity-changed';
 
 export const DEFAULT_PLATFORM_IDENTITY: PlatformIdentitySettings = {
-  platformName: 'syoumax منصة العمل الجمعوي',
+  platformName: 'youx منصة العمل الجمعوي',
   platformLogo: '',
   whatsapp: '00212718861646',
   associationsWhatsapp: '00212718861646',
@@ -19,7 +19,7 @@ function normalizeBrandName(name?: string): string {
   if (name === 'منظومة الجنى الرقمية للعمل الجمعوي') {
     return DEFAULT_PLATFORM_IDENTITY.platformName;
   }
-  return name.replace(/\byoux\b/gi, 'syoumax').replace(/\bAljana\b/gi, 'syoumax');
+  return name.replace(/\bsyoumax\b/gi, 'youx').replace(/\bAljana\b/gi, 'youx');
 }
 
 let inMemoryIdentity: PlatformIdentitySettings | null = null;

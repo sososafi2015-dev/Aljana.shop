@@ -42,7 +42,8 @@ import {
   AlertCircle,
   X,
   Mail,
-  Video
+  Video,
+  Globe
 } from 'lucide-react';
 import { 
   getAllTenants, 
@@ -77,6 +78,7 @@ import { PlatformSupportAdminSettings } from './PlatformSupportAdminSettings';
 import { PlatformSupportModal } from './PlatformSupportModal';
 import { PlatformAssociationSectionsAdmin } from './PlatformAssociationSectionsAdmin';
 import { PlatformTutorialsSection } from './PlatformTutorialsSection';
+import { PlatformDomainManager } from './PlatformDomainManager';
 import { usePlatformIdentity, verifyMasterSuperAdminPin, apiUnifiedMasterAdminLogin } from '../api/platformIdentityApi';
 import { apiLoginPlatformSubAdmin, apiLogPlatformAdminActivity } from '../api/platformSubAdminsApi';
 import { getAllTenantPayments, getTenantsRequiringRenewal } from '../paymentStorage';
@@ -130,7 +132,8 @@ export const MasterPlatformAdmin: React.FC<MasterPlatformAdminProps> = ({
     | 'add_admin' 
     | 'platform_identity' 
     | 'platform_support'
-    | 'platform_tutorials';
+    | 'platform_tutorials'
+    | 'domains';
 
   // Helper to determine first allowed tab
   const getFirstAllowedTab = (session: MasterAdminSession | null): MasterTabType => {
@@ -809,7 +812,7 @@ export const MasterPlatformAdmin: React.FC<MasterPlatformAdminProps> = ({
             )}
             <h1 className="text-2xl font-black text-slate-900">الإدارة العامة للمنصة</h1>
             <p className="text-xs text-slate-500 mt-1.5 leading-relaxed font-bold">
-              {platformIdentity?.platformName || 'syoumax منصة العمل الجمعوي'}
+              {platformIdentity?.platformName || 'youx منصة العمل الجمعوي'}
             </p>
           </div>
 
@@ -926,7 +929,7 @@ export const MasterPlatformAdmin: React.FC<MasterPlatformAdminProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-base font-black tracking-tight text-white">
-                  {platformIdentity?.platformName || 'syoumax منصة العمل الجمعوي'}
+                  {platformIdentity?.platformName || 'youx منصة العمل الجمعوي'}
                 </h1>
                 {isSuperAdmin ? (
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
@@ -1318,6 +1321,27 @@ export const MasterPlatformAdmin: React.FC<MasterPlatformAdminProps> = ({
                 </span>
               </button>
             )}
+
+            {/* Requested Section: 🌐 ضومين (Domain Management) - Super Admin Only */}
+            {isSuperAdmin && (
+              <button
+                id="tab-btn-domains"
+                onClick={() => setActiveTab('domains')}
+                className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
+                  activeTab === 'domains'
+                    ? 'bg-gradient-to-r from-sky-600 via-indigo-600 to-slate-900 text-white shadow-md ring-2 ring-sky-400/50'
+                    : 'bg-white text-sky-950 hover:bg-sky-50/70 border border-sky-200 hover:border-sky-400'
+                }`}
+              >
+                <Globe className={`w-4 h-4 ${activeTab === 'domains' ? 'text-sky-200' : 'text-sky-600'}`} />
+                <span>🌐 ضومين (Domain Management)</span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                  activeTab === 'domains' ? 'bg-black/20 text-white' : 'bg-sky-100 text-sky-800'
+                }`}>
+                  Super Admin
+                </span>
+              </button>
+            )}
           </div>
 
           <div className="text-xs text-slate-500 hidden sm:block">
@@ -1343,6 +1367,8 @@ export const MasterPlatformAdmin: React.FC<MasterPlatformAdminProps> = ({
               <span className="text-emerald-700 font-bold">إدارة الأدمن المساعدين وتعيين الصلاحيات</span>
             ) : activeTab === 'platform_identity' ? (
               <span className="text-purple-700 font-bold">تعديل الرمز السري وشعار واسم المنصة الرسمي</span>
+            ) : activeTab === 'domains' ? (
+              <span className="text-sky-700 font-bold">ربط وإدارة الدومينات الخارجية (Hostinger DNS) وسجلات DNS والتحقق الفعلي من الاتصال و SSL</span>
             ) : activeTab === 'platform_tutorials' ? (
               <span className="text-indigo-700 font-bold">إدارة قسم «شاهد شرح بالفيديو كيفية استخدام المنصة» وحفظ الفيديوهات والأغلفة بشكل دائم</span>
             ) : (
@@ -1352,7 +1378,7 @@ export const MasterPlatformAdmin: React.FC<MasterPlatformAdminProps> = ({
         </div>
 
         {/* ================= FILTERS & SEARCH ================= */}
-        {activeTab !== 'association_sections' && activeTab !== 'portal_ui' && activeTab !== 'platform_tutorials' && activeTab !== 'payments' && activeTab !== 'activation_fee' && activeTab !== 'ad_creation_fee' && activeTab !== 'contribution_types' && activeTab !== 'platform_support' && activeTab !== 'ad_campaigns' && activeTab !== 'renewals' && activeTab !== 'add_admin' && activeTab !== 'platform_identity' && (
+        {activeTab !== 'association_sections' && activeTab !== 'portal_ui' && activeTab !== 'platform_tutorials' && activeTab !== 'payments' && activeTab !== 'activation_fee' && activeTab !== 'ad_creation_fee' && activeTab !== 'contribution_types' && activeTab !== 'platform_support' && activeTab !== 'ad_campaigns' && activeTab !== 'renewals' && activeTab !== 'add_admin' && activeTab !== 'platform_identity' && activeTab !== 'domains' && (
           <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row items-center gap-3">
             {/* Search Bar */}
             <div className="relative flex-1 w-full">
@@ -2125,6 +2151,15 @@ export const MasterPlatformAdmin: React.FC<MasterPlatformAdminProps> = ({
             currentAdminSession={currentSession}
             customTitle="شاهد شرح بالفيديو كيفية استخدام المنصة"
             addToast={(type, message) => onShowToast(message, type === 'warning' ? 'info' : type)}
+          />
+        )}
+
+        {/* ================= SECTION: 🌐 ضومين (DOMAIN MANAGEMENT - Super Admin فقط) ================= */}
+        {activeTab === 'domains' && isSuperAdmin && (
+          <PlatformDomainManager
+            currentSession={currentSession}
+            isSuperAdmin={isSuperAdmin}
+            onShowToast={onShowToast}
           />
         )}
       </main>

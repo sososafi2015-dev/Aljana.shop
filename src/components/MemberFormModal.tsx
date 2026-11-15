@@ -39,7 +39,7 @@ import {
 } from 'lucide-react';
 import { Member, MemberStatus, Language, MemberRegistrationField, PaymentMethodType, AssociationSettings } from '../types';
 import { translations } from '../translations';
-import { getStoredSettings, getStoredRegistrationFields, ensureMandatoryPasswordFields } from '../storage';
+import { getStoredSettings, getStoredRegistrationFields, ensureMandatoryPasswordFields, resolveEffectiveBankSettings } from '../storage';
 import {
   generateSalt,
   hashPasswordWithSalt,
@@ -702,9 +702,10 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
   const renderPaymentMethodSection = () => {
     const isFeeSpecified = Number(annualFee) > 0;
     const currentAssociationSettings: AssociationSettings = propSettings || getStoredSettings();
+    const resolvedBank = resolveEffectiveBankSettings(currentAssociationSettings);
     const effectiveAssociationName = associationName || currentAssociationSettings.name || 'الجمعية';
-    const effectiveRib = currentAssociationSettings.ribBank ? currentAssociationSettings.ribBank.trim() : '';
-    const effectiveBankName = currentAssociationSettings.bankName ? currentAssociationSettings.bankName.trim() : 'الحساب البنكي المعتمد للجمعية';
+    const effectiveRib = resolvedBank.ribBank;
+    const effectiveBankName = resolvedBank.bankName;
     const effectiveLocation = currentAssociationSettings.city || currentAssociationSettings.address || '';
 
     const handleCopyRib = () => {

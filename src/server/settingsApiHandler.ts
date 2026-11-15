@@ -87,11 +87,41 @@ function buildDefaultTenantSettings(tenantId: string, tenantRecord?: any): Assoc
     heroBadgeTextFr: '',
     heroBadgeTextEn: '',
     aboutText: `تأسست ${assocName} لتكون نموذجًا للعمل الجمعوي المؤسساتي القائم على الشفافية المالية الكاملة وتوثيق الأنشطة الميدانية.`,
+    ribBank:
+      (tenantRecord?.ribBank && String(tenantRecord.ribBank).trim()) ||
+      (tenantRecord?.rib && String(tenantRecord.rib).trim()) ||
+      initialSettings.ribBank,
+    bankName:
+      (tenantRecord?.bankName && String(tenantRecord.bankName).trim()) ||
+      initialSettings.bankName,
     enablePublicDonations:
       tenantRecord?.enablePublicDonations !== undefined
         ? tenantRecord.enablePublicDonations
         : true,
   } as unknown as AssociationSettings;
+}
+
+function ensureBankDefaults(
+  settings: AssociationSettings,
+  fallbackSource?: Partial<AssociationSettings> | null,
+  tenantRecord?: any
+): AssociationSettings {
+  const ribBank =
+    (settings?.ribBank && String(settings.ribBank).trim()) ||
+    (fallbackSource?.ribBank && String(fallbackSource.ribBank).trim()) ||
+    (tenantRecord?.ribBank && String(tenantRecord.ribBank).trim()) ||
+    (tenantRecord?.rib && String(tenantRecord.rib).trim()) ||
+    initialSettings.ribBank;
+  const bankName =
+    (settings?.bankName && String(settings.bankName).trim()) ||
+    (fallbackSource?.bankName && String(fallbackSource.bankName).trim()) ||
+    (tenantRecord?.bankName && String(tenantRecord.bankName).trim()) ||
+    initialSettings.bankName;
+  return {
+    ...settings,
+    ribBank,
+    bankName,
+  };
 }
 
 function sanitizeSettingsMedia(settings: AssociationSettings): AssociationSettings {
@@ -116,10 +146,14 @@ export function loadSettingsDatabase(tenantId?: string | null): SettingsDatabase
   if (fs.existsSync(dbFile)) {
     const parsed = readJsonFileSync<any>(dbFile, () => null);
     if (parsed && parsed.settings && typeof parsed.settings === 'object') {
-      const merged: AssociationSettings = sanitizeSettingsMedia({
-        ...baseDefaults,
-        ...parsed.settings,
-      });
+      const merged: AssociationSettings = ensureBankDefaults(
+        sanitizeSettingsMedia({
+          ...baseDefaults,
+          ...parsed.settings,
+        }),
+        baseDefaults,
+        tenantRecord
+      );
 
       if (
         cleanTenant !== 'tenant_nour' &&
@@ -153,7 +187,8 @@ export function loadSettingsDatabase(tenantId?: string | null): SettingsDatabase
 export function saveSettingsDatabase(db: SettingsDatabase, tenantId?: string | null): void {
   const cleanTenant = normalizeTenantId(tenantId);
   const dbFile = getTenantSettingsFile(cleanTenant);
-  const sanitizedSettings = sanitizeSettingsMedia(db.settings);
+  const tenantRecord = cleanTenant !== 'tenant_nour' ? getTenantRecordFromDisk(cleanTenant) : null;
+  const sanitizedSettings = ensureBankDefaults(sanitizeSettingsMedia(db.settings), null, tenantRecord);
 
   const cleanDb: SettingsDatabase = {
     settings: sanitizedSettings,
@@ -162,7 +197,7 @@ export function saveSettingsDatabase(db: SettingsDatabase, tenantId?: string | n
 
   writeJsonFileAtomicSync(dbFile, cleanDb, 'branding');
 
-  // Synchronize association branding, identity & whatsapp back into tenants_database.json
+  // Synchronize association branding, identity, bank info & whatsapp back into tenants_database.json
   try {
     if (fs.existsSync(TENANTS_DB_FILE)) {
       const tenants = readJsonFileSync<any[]>(TENANTS_DB_FILE, () => []);
@@ -180,6 +215,8 @@ export function saveSettingsDatabase(db: SettingsDatabase, tenantId?: string | n
             ...(s.tagline ? { tagline: s.tagline } : {}),
             ...(s.whatsapp ? { whatsapp: s.whatsapp } : {}),
             ...(s.phone ? { phone: s.phone } : {}),
+            ...(s.ribBank ? { rib: s.ribBank, ribBank: s.ribBank } : {}),
+            ...(s.bankName ? { bankName: s.bankName } : {}),
             ...(s.enablePublicDonations !== undefined ? { enablePublicDonations: s.enablePublicDonations } : {}),
             updatedAt: new Date().toISOString(),
           };
@@ -270,10 +307,13 @@ export async function handleSettingsApi(
         return true;
       }
 
-      const sanitizedIncoming = sanitizeSettingsMedia({
-        ...targetDb.settings,
-        ...incomingSettings,
-      });
+      const sanitizedIncoming = ensureBankDefaults(
+        sanitizeSettingsMedia({
+          ...targetDb.settings,
+          ...incomingSettings,
+        }),
+        targetDb.settings
+      );
 
       targetDb.settings = sanitizedIncoming;
       targetDb.lastUpdated = new Date().toISOString();

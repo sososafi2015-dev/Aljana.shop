@@ -1639,9 +1639,9 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
           ...(body.phone !== undefined ? { phone: body.phone } : {}),
           ...(body.whatsapp !== undefined ? { whatsapp: body.whatsapp } : {}),
           ...(body.email !== undefined ? { email: body.email } : {}),
-          ...(body.rib !== undefined ? { ribBank: body.rib } : {}),
-          ...(body.ribBank !== undefined ? { ribBank: body.ribBank } : {}),
-          ...(body.bankName !== undefined ? { bankName: body.bankName } : {}),
+          ...(body.rib !== undefined && String(body.rib).trim() ? { ribBank: String(body.rib).trim() } : {}),
+          ...(body.ribBank !== undefined && String(body.ribBank).trim() ? { ribBank: String(body.ribBank).trim() } : {}),
+          ...(body.bankName !== undefined && String(body.bankName).trim() ? { bankName: String(body.bankName).trim() } : {}),
           ...(body.licenseNumber !== undefined ? { licenseNumber: body.licenseNumber } : {}),
           ...(body.enablePublicDonations !== undefined ? { enablePublicDonations: body.enablePublicDonations } : {}),
         };

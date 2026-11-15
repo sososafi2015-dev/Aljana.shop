@@ -120,7 +120,7 @@
     "descriptionFr": "Accès au registre des adhérents et cartes d'adhésion",
     "descriptionEn": "Access card and gateway to the Members and Subscribers directory",
     "category": "records_and_ledgers",
-    "enabled": true,
+    "enabled": false,
     "visibleToNonMembers": true,
     "order": 8,
     "iconName": "Users"

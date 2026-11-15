@@ -32,7 +32,7 @@
   "minCustomAmountUsd": 5,
   "bankAccount": {
     "enabled": true,
-    "accountHolder": "syoumax منصة العمل الجمعوي - حساب دعم المنصة (SMART ASSOC SARL)",
+    "accountHolder": "youx منصة العمل الجمعوي - حساب دعم المنصة (SMART ASSOC SARL)",
     "bankName": "التجاري وفا بنك (Attijariwafa Bank)",
     "rib": "007 780 0001234567890123 45",
     "iban": "MA64007780000123456789012345",
@@ -44,7 +44,7 @@
   },
   "cashPlus": {
     "enabled": true,
-    "beneficiaryName": "syoumax منصة العمل الجمعوي (صندوق دعم وتطوير المنصة)",
+    "beneficiaryName": "youx منصة العمل الجمعوي (صندوق دعم وتطوير المنصة)",
     "phone": "+212 661-234567",
     "accountOrRef": "CP-8849201",
     "instructions": "يمكنكم التوجه لأقرب وكالة كاش بليس بالمغرب وتقديم رقم الهاتف أو رقم المرجع، أو مسح رمز QR Code للدفع الفوري.",
@@ -60,7 +60,7 @@
   "creditCard": {
     "enabled": true,
     "gatewayName": "بوابة البطاقات البنكية المباشرة (Visa / Mastercard / CMI)",
-    "instructions": "معاملة إلكترونية فورية وآمنة 100% لدعم استمرارية وتطوير syoumax منصة العمل الجمعوي والإعلانات.",
+    "instructions": "معاملة إلكترونية فورية وآمنة 100% لدعم استمرارية وتطوير youx منصة العمل الجمعوي والإعلانات.",
     "countriesMode": "all",
     "allowedCountries": []
   },
@@ -68,7 +68,7 @@
     "enabled": true,
     "email": "sb-onuud40741552@business.example.com",
     "paymentUrl": "",
-    "instructions": "الدفع المباشر والآمن عبر حساب PayPal أو البطاقات البنكية الدولية لدعم برامج وتطوير syoumax منصة العمل الجمعوي.",
+    "instructions": "الدفع المباشر والآمن عبر حساب PayPal أو البطاقات البنكية الدولية لدعم برامج وتطوير youx منصة العمل الجمعوي.",
     "clientId": "AaJbsftKG9QmDMZmcWCiJEGXISIeDhuWL7z7qSYDHT48-QcsJ6QhY_gMEWuvOuvFnhFRHZ4HwiOpjtZT",
     "mode": "sandbox",
     "isConnected": true,

@@ -30,9 +30,11 @@ import {
 } from 'lucide-react';
 import { TenantPaymentRecord, PlatformPaymentSettings, PaymentStatus, AssociationTenant } from '../types';
 import {
+  defaultPlatformPaymentSettings,
   getAllTenantPayments,
   getPlatformPaymentSettings,
   savePlatformPaymentSettings,
+  syncPlatformPaymentSettingsFromBackend,
   verifyTenantPayment,
   confirmPaymentAndActivateTenant,
   rejectTenantPayment,
@@ -95,13 +97,25 @@ export const PlatformPaymentsAdmin: React.FC<PlatformPaymentsAdminProps> = ({
     refreshData();
     syncPaymentsFromBackend().then(() => refreshData()).catch(() => {});
     syncTenantsFromBackend().then(() => refreshData()).catch(() => {});
+    syncPlatformPaymentSettingsFromBackend()
+      .then((synced) => {
+        setSettings(synced);
+        setFormSettings(synced);
+      })
+      .catch(() => {});
 
     const handleUpdate = () => refreshData();
+    const handlePaymentSettingsUpdate = () => {
+      const latest = getPlatformPaymentSettings();
+      setSettings(latest);
+    };
     window.addEventListener('chayef-payments-changed', handleUpdate);
     window.addEventListener('chayef-tenants-changed', handleUpdate);
+    window.addEventListener('platform-payment-settings-updated', handlePaymentSettingsUpdate);
     return () => {
       window.removeEventListener('chayef-payments-changed', handleUpdate);
       window.removeEventListener('chayef-tenants-changed', handleUpdate);
+      window.removeEventListener('platform-payment-settings-updated', handlePaymentSettingsUpdate);
     };
   }, []);
 
@@ -209,8 +223,22 @@ export const PlatformPaymentsAdmin: React.FC<PlatformPaymentsAdminProps> = ({
 
   const handleSaveSettings = (e: React.FormEvent) => {
     e.preventDefault();
-    savePlatformPaymentSettings(formSettings);
-    setSettings(formSettings);
+    const defBank = defaultPlatformPaymentSettings.bankAccount;
+    const normalizedSettings: PlatformPaymentSettings = {
+      ...formSettings,
+      bankAccount: {
+        ...defBank,
+        ...formSettings.bankAccount,
+        accountHolder: formSettings.bankAccount.accountHolder?.trim() || defBank.accountHolder,
+        bankName: formSettings.bankAccount.bankName?.trim() || defBank.bankName,
+        rib: formSettings.bankAccount.rib?.trim() || defBank.rib,
+        iban: formSettings.bankAccount.iban?.trim() || defBank.iban,
+        additionalInstructions: formSettings.bankAccount.additionalInstructions?.trim() || defBank.additionalInstructions,
+      },
+    };
+    savePlatformPaymentSettings(normalizedSettings);
+    setSettings(normalizedSettings);
+    setFormSettings(normalizedSettings);
     onShowToast('تم حفظ وتحديث إعدادات رسوم وطرق الدفع بنجاح.', 'success');
   };
 

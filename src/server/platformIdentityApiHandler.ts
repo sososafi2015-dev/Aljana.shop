@@ -27,7 +27,7 @@ export interface PlatformIdentityDatabase {
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'platform_identity_database.json');
 
-const DEFAULT_PLATFORM_NAME = 'syoumax منصة العمل الجمعوي';
+const DEFAULT_PLATFORM_NAME = 'youx منصة العمل الجمعوي';
 const DEFAULT_WHATSAPP = '00212718861646';
 const DEFAULT_SALT = 'platform_master_superadmin_salt_2025';
 
@@ -115,7 +115,7 @@ export function loadPlatformIdentityDatabase(forceFresh = false): PlatformIdenti
         const normalizedName =
           rawName === 'منظومة الجنى الرقمية للعمل الجمعوي'
             ? DEFAULT_PLATFORM_NAME
-            : rawName.replace(/\byoux\b/gi, 'syoumax').replace(/\bAljana\b/gi, 'syoumax');
+            : rawName.replace(/\bsyoumax\b/gi, 'youx').replace(/\bAljana\b/gi, 'youx');
         inMemoryIdentityDb = {
           platformName: normalizedName,
           platformLogo: parsed.platformLogo || '',

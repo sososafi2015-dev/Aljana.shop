@@ -414,7 +414,7 @@ export const PlatformSubscriptionRenewalsAdmin: React.FC<PlatformSubscriptionRen
 
     const msg = `السلام عليكم ورحمة الله وبركاته،
 تحية طيبة السيد(ة) / ${tenant.ownerName || 'المسؤول الإداري'}،
-بخصوص اشتراك منصة جمعيتكم «${tenant.name}» في syoumax منصة العمل الجمعوي:
+بخصوص اشتراك منصة جمعيتكم «${tenant.name}» في youx منصة العمل الجمعوي:
 
 نحيطكم علماً بأن الاشتراك السنوي للمنصة: *${daysText}*.
 - تاريخ انتهاء الصلاحية: ${formatDateDisplay(subInfo.subscriptionEndDate)}

@@ -18,7 +18,11 @@ import {
   writeJsonFileAtomicSync,
   readLargeJsonBody,
 } from './storageEngine';
-import { syncTenantCollectionToFirebaseServer } from './firebaseServerStorage';
+import {
+  syncTenantCollectionToFirebaseServer,
+  fetchTenantCollectionFromFirebaseServer,
+  getDocFromFirebaseServer,
+} from './firebaseServerStorage';
 import { readTenantRecordsFromDisk, writeTenantRecordsToDisk } from './tenantRecordsApiHandler';
 
 export interface CampaignsDatabase {
@@ -26,7 +30,74 @@ export interface CampaignsDatabase {
   contributions: CampaignContribution[];
   contributionTypes: ContributionTypeConfig[];
   presets?: number[];
+  deletedCampaignIds?: string[];
   lastUpdated: string;
+}
+
+const DEFAULT_SEED_UNSPLASH_COVERS = new Set([
+  'https://images.unsplash.com/photo-1488521787991-ed7bbaae773c?auto=format&fit=crop&w=1200&q=80',
+  'https://images.unsplash.com/photo-1541544741938-0af808871cc0?auto=format&fit=crop&w=1200&q=80',
+  'https://images.unsplash.com/photo-1469571486292-0ba58a3f068b?auto=format&fit=crop&w=1200&q=80',
+]);
+
+function isSeedUnsplashCover(url?: string): boolean {
+  if (!url || typeof url !== 'string') return true;
+  const trimmed = url.trim();
+  if (!trimmed) return true;
+  return DEFAULT_SEED_UNSPLASH_COVERS.has(trimmed);
+}
+
+function getCampaignTimestampMs(camp?: Partial<DonationCampaign> | null): number {
+  if (!camp) return 0;
+  const raw = (camp as any).updatedAt || camp.createdAt || (camp as any)._updatedAt || '';
+  if (!raw) return 0;
+  const parsed = new Date(raw).getTime();
+  return isNaN(parsed) ? 0 : parsed;
+}
+
+export function mergeCampaignRecordsAuthoritatively(
+  existing: DonationCampaign,
+  incoming: DonationCampaign
+): DonationCampaign {
+  const existingTs = getCampaignTimestampMs(existing);
+  const incomingTs = getCampaignTimestampMs(incoming);
+
+  const incomingIsNewerOrEqual = incomingTs >= existingTs;
+  const primary = incomingIsNewerOrEqual ? incoming : existing;
+  const secondary = incomingIsNewerOrEqual ? existing : incoming;
+
+  let resolvedCover = primary.coverImage || secondary.coverImage || '';
+  // Never allow a stale seed Unsplash placeholder to overwrite a custom uploaded cover image
+  if (
+    isSeedUnsplashCover(primary.coverImage) &&
+    secondary.coverImage &&
+    !isSeedUnsplashCover(secondary.coverImage)
+  ) {
+    resolvedCover = secondary.coverImage;
+  }
+
+  let resolvedVideo = primary.videoUrl;
+  if (
+    (!resolvedVideo || !String(resolvedVideo).trim()) &&
+    secondary.videoUrl &&
+    String(secondary.videoUrl).trim() &&
+    existingTs === incomingTs
+  ) {
+    resolvedVideo = secondary.videoUrl;
+  }
+
+  const latestIso =
+    incomingTs >= existingTs
+      ? incoming.updatedAt || existing.updatedAt || new Date().toISOString()
+      : existing.updatedAt || incoming.updatedAt || new Date().toISOString();
+
+  return {
+    ...secondary,
+    ...primary,
+    coverImage: resolvedCover,
+    videoUrl: resolvedVideo && String(resolvedVideo).trim() ? String(resolvedVideo).trim() : undefined,
+    updatedAt: latestIso,
+  };
 }
 
 const GLOBAL_TYPES_FILE = path.join(DATA_DIR, 'global_contribution_types.json');
@@ -402,12 +473,14 @@ export function loadCampaignsDatabase(tenantId?: string | null): CampaignsDataba
     const parsed = readJsonFileSync<any>(dbFile, null);
     if (parsed && typeof parsed === 'object') {
       const globalTypes = getMasterContributionTypes();
+      const deletedSet = new Set<string>(Array.isArray(parsed.deletedCampaignIds) ? parsed.deletedCampaignIds : []);
+      const rawCampaigns: DonationCampaign[] = Array.isArray(parsed.campaigns)
+        ? parsed.campaigns
+        : cleanTenant === 'tenant_nour'
+        ? [...initialCampaigns]
+        : [];
       return {
-        campaigns: Array.isArray(parsed.campaigns)
-          ? parsed.campaigns
-          : cleanTenant === 'tenant_nour'
-          ? [...initialCampaigns]
-          : [],
+        campaigns: rawCampaigns.filter((c) => c && c.id && !deletedSet.has(c.id)),
         contributions: Array.isArray(parsed.contributions)
           ? parsed.contributions
           : cleanTenant === 'tenant_nour'
@@ -420,6 +493,7 @@ export function loadCampaignsDatabase(tenantId?: string | null): CampaignsDataba
             ? parsed.contributionTypes.map((t: any, i: number) => normalizeContributionType(t, i))
             : initialContributionTypes.map((t, i) => normalizeContributionType(t, i)),
         presets: Array.isArray(parsed.presets) ? parsed.presets : getGlobalPresetsFromDisk(),
+        deletedCampaignIds: Array.from(deletedSet),
         lastUpdated: parsed.lastUpdated || new Date().toISOString(),
       };
     }
@@ -431,6 +505,7 @@ export function loadCampaignsDatabase(tenantId?: string | null): CampaignsDataba
     contributions: cleanTenant === 'tenant_nour' ? [...initialCampaignContributions] : [],
     contributionTypes: clonedTypes,
     presets: getGlobalPresetsFromDisk(),
+    deletedCampaignIds: [],
     lastUpdated: new Date().toISOString(),
   };
 
@@ -442,9 +517,13 @@ export function saveCampaignsDatabase(db: CampaignsDatabase, tenantId?: string |
   ensureStorageDirectories();
   const cleanTenant = normalizeTenantId(tenantId);
   const dbFile = getTenantCampaignsFile(cleanTenant);
+  const deletedSet = new Set<string>(Array.isArray(db.deletedCampaignIds) ? db.deletedCampaignIds : []);
+  const cleanCampaigns = (db.campaigns || []).filter((c) => c && c.id && !deletedSet.has(c.id));
   const sanitized = offloadEmbeddedMediaDeep(
     {
       ...db,
+      campaigns: cleanCampaigns,
+      deletedCampaignIds: Array.from(deletedSet),
       lastUpdated: db.lastUpdated || new Date().toISOString(),
     },
     `campaign_${cleanTenant}`
@@ -452,7 +531,99 @@ export function saveCampaignsDatabase(db: CampaignsDatabase, tenantId?: string |
   writeJsonFileAtomicSync(dbFile, sanitized, `campaign_${cleanTenant}`);
   // Sync campaigns and campaign contributions to Firebase Firestore for real-time transparency
   syncTenantCollectionToFirebaseServer('campaign_contributions', cleanTenant, sanitized.contributions).catch(() => {});
-  syncTenantCollectionToFirebaseServer('campaigns', cleanTenant, sanitized.campaigns).catch(() => {});
+  syncTenantCollectionToFirebaseServer(
+    'campaigns',
+    cleanTenant,
+    sanitized.campaigns,
+    sanitized.deletedCampaignIds || []
+  ).catch(() => {});
+}
+
+const lastCloudHydrationByTenant = new Map<string, number>();
+
+async function ensureCampaignsHydratedFromCloud(tenantId: string): Promise<CampaignsDatabase> {
+  const cleanTenant = normalizeTenantId(tenantId);
+  const localDb = loadCampaignsDatabase(cleanTenant);
+  const now = Date.now();
+  const lastHydrated = lastCloudHydrationByTenant.get(cleanTenant) || 0;
+
+  // Hydrate on first request per tenant or every 30 seconds
+  if (now - lastHydrated < 30000 && localDb.campaigns.length > 0) {
+    return localDb;
+  }
+  lastCloudHydrationByTenant.set(cleanTenant, now);
+
+  try {
+    const [bundleDoc, cloudDocs] = await Promise.all([
+      getDocFromFirebaseServer<any>('settings', `${cleanTenant}_campaigns_bundle`).catch(() => null),
+      fetchTenantCollectionFromFirebaseServer<DonationCampaign>('campaigns', cleanTenant).catch(() => []),
+    ]);
+
+    const deletedSet = new Set<string>(localDb.deletedCampaignIds || []);
+    if (bundleDoc && Array.isArray(bundleDoc.removedIds)) {
+      for (const remId of bundleDoc.removedIds) {
+        if (remId) deletedSet.add(String(remId));
+      }
+    }
+
+    const byId = new Map<string, DonationCampaign>();
+    for (const c of localDb.campaigns || []) {
+      if (c && c.id && !deletedSet.has(c.id)) {
+        byId.set(c.id, c);
+      }
+    }
+
+    const incomingCloudList: DonationCampaign[] = [];
+    if (bundleDoc && Array.isArray(bundleDoc.campaigns)) {
+      incomingCloudList.push(...bundleDoc.campaigns);
+    }
+    if (Array.isArray(cloudDocs)) {
+      incomingCloudList.push(...cloudDocs);
+    }
+
+    let didChange = false;
+    for (const fc of incomingCloudList) {
+      if (!fc || !fc.id || deletedSet.has(fc.id)) continue;
+      const normalizedFc: DonationCampaign = {
+        ...fc,
+        coverImage: fc.coverImage ? String(fc.coverImage).trim() : '',
+        videoUrl: fc.videoUrl && String(fc.videoUrl).trim() ? String(fc.videoUrl).trim() : undefined,
+        tenantId: cleanTenant,
+        associationId: cleanTenant,
+      };
+      const existing = byId.get(fc.id);
+      if (!existing) {
+        byId.set(fc.id, normalizedFc);
+        didChange = true;
+      } else {
+        const merged = mergeCampaignRecordsAuthoritatively(existing, normalizedFc);
+        if (
+          merged.coverImage !== existing.coverImage ||
+          (merged.videoUrl || '') !== (existing.videoUrl || '') ||
+          merged.title !== existing.title ||
+          merged.description !== existing.description ||
+          merged.targetAmount !== existing.targetAmount ||
+          merged.status !== existing.status ||
+          merged.isVisibleOnStore !== existing.isVisibleOnStore
+        ) {
+          didChange = true;
+        }
+        byId.set(fc.id, merged);
+      }
+    }
+
+    if (didChange) {
+      localDb.campaigns = recalculateCampaignTotals(Array.from(byId.values()), localDb.contributions || []);
+      localDb.deletedCampaignIds = Array.from(deletedSet);
+      localDb.lastUpdated = new Date().toISOString();
+      const dbFile = getTenantCampaignsFile(cleanTenant);
+      writeJsonFileAtomicSync(dbFile, localDb, `campaign_${cleanTenant}`);
+    }
+  } catch (err) {
+    console.warn(`[CampaignsDB] Cloud hydration notice for ${cleanTenant}:`, err);
+  }
+
+  return localDb;
 }
 
 export function initializeTenantCampaigns(tenantId: string): CampaignsDatabase {
@@ -502,7 +673,7 @@ export async function handleCampaignsApi(
   const cleanPath = parsedUrl.pathname;
   const method = req.method?.toUpperCase() || 'GET';
 
-  const db = loadCampaignsDatabase(tenantId);
+  const db = await ensureCampaignsHydratedFromCloud(tenantId);
 
   // ================= 0. GLOBAL CONTRIBUTION TYPES & PRESETS =================
   if (
@@ -682,7 +853,8 @@ export async function handleCampaignsApi(
         const body = await readLargeJsonBody(req);
         const rawCamp = body?.campaign || body || {};
         const targetTenant = normalizeTenantId(rawCamp.tenantId || rawCamp.associationId || headerTenant || queryTenant || tenantId);
-        const targetDb = loadCampaignsDatabase(targetTenant);
+        const targetDb = await ensureCampaignsHydratedFromCloud(targetTenant);
+        const nowIso = new Date().toISOString();
         const newCamp: DonationCampaign = {
           id: rawCamp.id || `camp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           title: String(rawCamp.title || '').trim(),
@@ -692,26 +864,34 @@ export async function handleCampaignsApi(
           collectedAmount: Number(rawCamp.collectedAmount) || 0,
           progressPercentage: Number(rawCamp.progressPercentage) || 0,
           coverImage:
-            rawCamp.coverImage ||
-            'https://images.unsplash.com/photo-1488521787991-ed7bbaae773c?auto=format&fit=crop&w=1200&q=80',
+            rawCamp.coverImage && String(rawCamp.coverImage).trim()
+              ? String(rawCamp.coverImage).trim()
+              : 'https://images.unsplash.com/photo-1488521787991-ed7bbaae773c?auto=format&fit=crop&w=1200&q=80',
           videoUrl:
             rawCamp.videoUrl && typeof rawCamp.videoUrl === 'string' && rawCamp.videoUrl.trim()
               ? rawCamp.videoUrl.trim()
               : undefined,
-          startDate: rawCamp.startDate || new Date().toISOString().slice(0, 10),
+          startDate: rawCamp.startDate || nowIso.slice(0, 10),
           endDate: rawCamp.endDate || '',
           status: (rawCamp.status || 'active') as CampaignStatus,
           allowOverfunding: rawCamp.allowOverfunding ?? true,
           isVisibleOnStore: rawCamp.isVisibleOnStore !== false,
-          createdAt: rawCamp.createdAt || new Date().toISOString(),
+          createdAt: rawCamp.createdAt || nowIso,
+          updatedAt: nowIso,
           tenantId: targetTenant,
           associationId: targetTenant,
         };
 
+        targetDb.deletedCampaignIds = (targetDb.deletedCampaignIds || []).filter((id) => id !== newCamp.id);
         targetDb.campaigns = [newCamp, ...targetDb.campaigns.filter((c) => c.id !== newCamp.id)];
-        targetDb.lastUpdated = new Date().toISOString();
+        targetDb.lastUpdated = nowIso;
         saveCampaignsDatabase(targetDb, targetTenant);
-        await syncTenantCollectionToFirebaseServer('campaigns', targetTenant, targetDb.campaigns);
+        await syncTenantCollectionToFirebaseServer(
+          'campaigns',
+          targetTenant,
+          targetDb.campaigns,
+          targetDb.deletedCampaignIds
+        );
 
         const savedCamp = targetDb.campaigns.find((c) => c.id === newCamp.id) || newCamp;
         sendJson(res, 201, {
@@ -732,10 +912,50 @@ export async function handleCampaignsApi(
     try {
       const body = await readLargeJsonBody(req);
       const targetTenant = normalizeTenantId(body?.tenantId || tenantId);
-      const targetDb = loadCampaignsDatabase(targetTenant);
+      const targetDb = await ensureCampaignsHydratedFromCloud(targetTenant);
+      const deletedSet = new Set<string>(targetDb.deletedCampaignIds || []);
+
+      if (Array.isArray(body?.deletedCampaignIds)) {
+        for (const delId of body.deletedCampaignIds) {
+          if (delId) deletedSet.add(String(delId));
+        }
+      }
 
       if (Array.isArray(body?.campaigns)) {
-        targetDb.campaigns = body.campaigns;
+        const existingById = new Map<string, DonationCampaign>();
+        for (const c of targetDb.campaigns || []) {
+          if (c && c.id && !deletedSet.has(c.id)) {
+            existingById.set(c.id, c);
+          }
+        }
+
+        const mergedList: DonationCampaign[] = [];
+        const seenIds = new Set<string>();
+
+        for (const inc of body.campaigns) {
+          if (!inc || !inc.id || deletedSet.has(inc.id)) continue;
+          seenIds.add(inc.id);
+          const existing = existingById.get(inc.id);
+          if (existing) {
+            mergedList.push(mergeCampaignRecordsAuthoritatively(existing, inc));
+          } else {
+            mergedList.push({
+              ...inc,
+              tenantId: targetTenant,
+              associationId: targetTenant,
+              updatedAt: inc.updatedAt || inc.createdAt || new Date().toISOString(),
+            });
+          }
+        }
+
+        // Preserve any server-side campaigns that were created recently and not explicitly deleted
+        for (const [id, existing] of existingById.entries()) {
+          if (!seenIds.has(id) && !deletedSet.has(id)) {
+            mergedList.push(existing);
+          }
+        }
+
+        targetDb.campaigns = mergedList;
       }
       if (Array.isArray(body?.contributions)) {
         targetDb.contributions = body.contributions;
@@ -745,8 +965,16 @@ export async function handleCampaignsApi(
         targetDb.contributionTypes = sanitizedTypes;
         saveGlobalContributionTypesToDisk(sanitizedTypes);
       }
+      targetDb.deletedCampaignIds = Array.from(deletedSet);
+      targetDb.campaigns = recalculateCampaignTotals(targetDb.campaigns || [], targetDb.contributions || []);
       targetDb.lastUpdated = new Date().toISOString();
       saveCampaignsDatabase(targetDb, targetTenant);
+      await syncTenantCollectionToFirebaseServer(
+        'campaigns',
+        targetTenant,
+        targetDb.campaigns,
+        targetDb.deletedCampaignIds
+      );
 
       sendJson(res, 200, {
         success: true,
@@ -1062,11 +1290,11 @@ export async function handleCampaignsApi(
         const body = await readLargeJsonBody(req);
         const incoming = body?.campaign || body || {};
         const targetTenant = normalizeTenantId(incoming.tenantId || incoming.associationId || headerTenant || queryTenant || tenantId);
-        const targetDb = loadCampaignsDatabase(targetTenant);
+        const targetDb = await ensureCampaignsHydratedFromCloud(targetTenant);
 
         let idx = targetDb.campaigns.findIndex((c) => c.id === campaignId);
         if (idx === -1 && targetTenant !== 'tenant_nour') {
-          const nourDb = loadCampaignsDatabase('tenant_nour');
+          const nourDb = await ensureCampaignsHydratedFromCloud('tenant_nour');
           const nourCamp = nourDb.campaigns.find((c) => c.id === campaignId);
           if (nourCamp) {
             targetDb.campaigns.push({ ...nourCamp, tenantId: targetTenant, associationId: targetTenant });
@@ -1082,10 +1310,11 @@ export async function handleCampaignsApi(
         const currentCamp = targetDb.campaigns[idx];
         let resolvedVideoUrl = currentCamp.videoUrl;
         if (incoming.videoUrl !== undefined) {
-          resolvedVideoUrl =
-            incoming.videoUrl && typeof incoming.videoUrl === 'string' && incoming.videoUrl.trim()
-              ? incoming.videoUrl.trim()
-              : undefined;
+          if (typeof incoming.videoUrl === 'string' && incoming.videoUrl.trim()) {
+            resolvedVideoUrl = incoming.videoUrl.trim();
+          } else if (incoming.clearVideo === true || incoming.videoUrl === null || incoming.videoUrl === '') {
+            resolvedVideoUrl = undefined;
+          }
         }
 
         const resolvedCoverImage =
@@ -1093,7 +1322,8 @@ export async function handleCampaignsApi(
             ? incoming.coverImage.trim()
             : currentCamp.coverImage;
 
-        targetDb.campaigns[idx] = {
+        const nowIso = new Date().toISOString();
+        const updatedRecord: DonationCampaign = {
           ...currentCamp,
           ...incoming,
           coverImage: resolvedCoverImage,
@@ -1104,11 +1334,19 @@ export async function handleCampaignsApi(
           id: campaignId,
           tenantId: targetTenant,
           associationId: targetTenant,
-          updatedAt: new Date().toISOString(),
+          updatedAt: nowIso,
         };
-        targetDb.lastUpdated = new Date().toISOString();
+        delete (updatedRecord as any).clearVideo;
+
+        targetDb.campaigns[idx] = updatedRecord;
+        targetDb.lastUpdated = nowIso;
         saveCampaignsDatabase(targetDb, targetTenant);
-        await syncTenantCollectionToFirebaseServer('campaigns', targetTenant, targetDb.campaigns);
+        await syncTenantCollectionToFirebaseServer(
+          'campaigns',
+          targetTenant,
+          targetDb.campaigns,
+          targetDb.deletedCampaignIds || []
+        );
 
         const savedCamp = targetDb.campaigns.find((c) => c.id === campaignId) || targetDb.campaigns[idx];
         sendJson(res, 200, {
@@ -1125,12 +1363,20 @@ export async function handleCampaignsApi(
 
     if (method === 'DELETE') {
       const targetTenant = normalizeTenantId(headerTenant || queryTenant || tenantId);
-      const targetDb = loadCampaignsDatabase(targetTenant);
+      const targetDb = await ensureCampaignsHydratedFromCloud(targetTenant);
       targetDb.campaigns = targetDb.campaigns.filter((c) => c.id !== campaignId);
       targetDb.contributions = targetDb.contributions.filter((c) => c.campaignId !== campaignId);
+      const deletedSet = new Set<string>(targetDb.deletedCampaignIds || []);
+      deletedSet.add(campaignId);
+      targetDb.deletedCampaignIds = Array.from(deletedSet);
       targetDb.lastUpdated = new Date().toISOString();
       saveCampaignsDatabase(targetDb, targetTenant);
-      await syncTenantCollectionToFirebaseServer('campaigns', targetTenant, targetDb.campaigns, [campaignId]);
+      await syncTenantCollectionToFirebaseServer(
+        'campaigns',
+        targetTenant,
+        targetDb.campaigns,
+        targetDb.deletedCampaignIds
+      );
       sendJson(res, 200, {
         success: true,
         campaigns: targetDb.campaigns,

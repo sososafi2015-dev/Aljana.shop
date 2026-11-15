@@ -44,7 +44,7 @@ export const ContactPlatformAdminButton: React.FC<ContactPlatformAdminButtonProp
   customWhatsApp,
 }) => {
   const { identity } = usePlatformIdentity();
-  const platformTitle = identity.platformName || 'syoumax منصة العمل الجمعوي';
+  const platformTitle = identity.platformName || 'youx منصة العمل الجمعوي';
   const effectiveWhatsApp = customWhatsApp || identity.associationsWhatsapp || identity.whatsapp || DEFAULT_PLATFORM_ADMIN_WHATSAPP;
 
   const handleClick = () => {

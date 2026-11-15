@@ -1094,7 +1094,7 @@ export const initialUIElements: UIElementConfig[] = [
     descriptionFr: 'Accès au registre des adhérents et cartes d\'adhésion',
     descriptionEn: 'Access card and gateway to the Members and Subscribers directory',
     category: 'records_and_ledgers',
-    enabled: true,
+    enabled: false,
     visibleToNonMembers: true,
     order: 8,
     iconName: 'Users',
@@ -1670,6 +1670,7 @@ export const initialCampaigns: DonationCampaign[] = [
     allowOverfunding: true,
     isVisibleOnStore: true,
     createdAt: '2024-05-01T09:00:00.000Z',
+    updatedAt: '2026-11-03T12:06:32.175Z',
   },
   {
     id: 'camp-2',
@@ -1679,13 +1680,15 @@ export const initialCampaigns: DonationCampaign[] = [
     targetAmount: 80000, // ميزانية المشروع: 80,000 درهم
     collectedAmount: 52000, // تم جمع: 52,000 درهم
     progressPercentage: 65, // نسبة الإنجاز: 65%
-    coverImage: 'https://images.unsplash.com/photo-1541544741938-0af808871cc0?auto=format&fit=crop&w=1200&q=80',
+    coverImage: '/api/images/img-6915ec7b418900bd.jpg',
+    videoUrl: 'https://youtu.be/CUlwyO6rTQQ',
     startDate: '2024-06-15',
     endDate: '2024-11-30',
     status: 'active',
     allowOverfunding: true,
     isVisibleOnStore: true,
     createdAt: '2024-06-15T10:00:00.000Z',
+    updatedAt: '2026-11-14T21:17:30.225Z',
   },
   {
     id: 'camp-3',
@@ -1695,13 +1698,14 @@ export const initialCampaigns: DonationCampaign[] = [
     targetAmount: 50000, // ميزانية المشروع: 50,000 درهم
     collectedAmount: 55000, // تم جمع 55,000 درهم من أصل 50,000 درهم (اكتمل الهدف 110%)
     progressPercentage: 110,
-    coverImage: 'https://images.unsplash.com/photo-1469571486292-0ba58a3f068b?auto=format&fit=crop&w=1200&q=80',
+    coverImage: '/api/images/img-7606e551aefe4515.jpg',
     startDate: '2024-01-10',
     endDate: '2024-03-31',
     status: 'completed', // اكتمل الهدف
     allowOverfunding: true,
     isVisibleOnStore: true,
     createdAt: '2024-01-10T08:00:00.000Z',
+    updatedAt: '2026-11-14T21:18:16.329Z',
   },
 ];
 

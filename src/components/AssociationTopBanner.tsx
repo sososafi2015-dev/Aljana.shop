@@ -80,7 +80,7 @@ export const AssociationTopBanner: React.FC<AssociationTopBannerProps> = ({
               <div className="w-5 h-5 rounded-full bg-white border border-emerald-300 p-0.5 flex items-center justify-center shrink-0 overflow-hidden shadow-xs">
                 <img
                   src={platformIdentity.platformLogo}
-                  alt="syoumax"
+                  alt="youx"
                   className="w-full h-full object-contain rounded-full"
                   referrerPolicy="no-referrer"
                 />

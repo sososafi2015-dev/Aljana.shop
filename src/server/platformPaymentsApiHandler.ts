@@ -90,9 +90,93 @@ const defaultServerPaymentSettings = {
   adCreationFeeMad: 199,
   adCreationFeeUsd: 20,
   exchangeRate: 9.95,
+  bankAccount: {
+    enabled: true,
+    accountHolder: 'youx منصة العمل الجمعوي - الإدارة المركزية (SMART ASSOC SARL)',
+    bankName: 'التجاري وفا بنك (Attijariwafa Bank)',
+    rib: '007 780 0001234567890123 45',
+    iban: 'MA64007780000123456789012345',
+    additionalInstructions:
+      'يرجى كتابة اسم الجمعية في خانة موضوع التحويل البنكي، ثم إرفاق صورة أو ملف PDF لإشعار التحويل.',
+  },
+  cashPlus: {
+    enabled: true,
+    beneficiaryName: 'youx منصة العمل الجمعوي (Service Activation & Renewal)',
+    phone: '+212 661-234567',
+    accountOrRef: 'CP-8849201',
+    instructions:
+      'يمكنكم التوجه لأقرب وكالة كاش بليس بالمغرب وتقديم رقم الهاتف أو رقم المرجع أعلاه، ثم رفع صورة واضحة لوصل الإيداع من معرض الهاتف أو مدير الملفات وإرفاقه هنا.',
+  },
+  creditCard: {
+    enabled: true,
+    gatewayName: 'بوابة البطاقات البنكية الآمنة (CMI / Visa & Mastercard 3D-Secure)',
+    instructions: 'معاملة إلكترونية فورية ومؤمنة 100% بتشفير SSL عالي الأمان لبطاقات الائتمان المغربية والدولية.',
+  },
+  paypal: {
+    enabled: true,
+    email: 'payments@smart-associations.org',
+    instructions: 'إتمام عملية الدفع الآمن عبر حساب PayPal أو البطاقات الدولية المعتمدة من أي دولة حول العالم.',
+  },
   lastUpdated: new Date().toISOString(),
   updatedBy: 'الإدارة العامة للمنصة',
 };
+
+function mergePaymentSettingsSafe(base: any, incoming: any): any {
+  const defBank = defaultServerPaymentSettings.bankAccount;
+  const baseBank = base?.bankAccount || {};
+  const inBank = incoming?.bankAccount || {};
+
+  return {
+    ...defaultServerPaymentSettings,
+    ...(base || {}),
+    ...(incoming || {}),
+    activationNoticeText:
+      (incoming?.activationNoticeText && String(incoming.activationNoticeText).trim()) ||
+      (base?.activationNoticeText && String(base.activationNoticeText).trim()) ||
+      defaultServerPaymentSettings.activationNoticeText,
+    bankAccount: {
+      ...defBank,
+      ...baseBank,
+      ...inBank,
+      enabled: inBank.enabled ?? baseBank.enabled ?? defBank.enabled,
+      accountHolder:
+        (inBank.accountHolder && String(inBank.accountHolder).trim()) ||
+        (baseBank.accountHolder && String(baseBank.accountHolder).trim()) ||
+        defBank.accountHolder,
+      bankName:
+        (inBank.bankName && String(inBank.bankName).trim()) ||
+        (baseBank.bankName && String(baseBank.bankName).trim()) ||
+        defBank.bankName,
+      rib:
+        (inBank.rib && String(inBank.rib).trim()) ||
+        (baseBank.rib && String(baseBank.rib).trim()) ||
+        defBank.rib,
+      iban:
+        (inBank.iban && String(inBank.iban).trim()) ||
+        (baseBank.iban && String(baseBank.iban).trim()) ||
+        defBank.iban,
+      additionalInstructions:
+        (inBank.additionalInstructions && String(inBank.additionalInstructions).trim()) ||
+        (baseBank.additionalInstructions && String(baseBank.additionalInstructions).trim()) ||
+        defBank.additionalInstructions,
+    },
+    cashPlus: {
+      ...defaultServerPaymentSettings.cashPlus,
+      ...(base?.cashPlus || {}),
+      ...(incoming?.cashPlus || {}),
+    },
+    creditCard: {
+      ...defaultServerPaymentSettings.creditCard,
+      ...(base?.creditCard || {}),
+      ...(incoming?.creditCard || {}),
+    },
+    paypal: {
+      ...defaultServerPaymentSettings.paypal,
+      ...(base?.paypal || {}),
+      ...(incoming?.paypal || {}),
+    },
+  };
+}
 
 function readSettingsFromDisk(): any {
   ensureDataDir();
@@ -107,10 +191,7 @@ function readSettingsFromDisk(): any {
   try {
     const raw = fs.readFileSync(SETTINGS_FILE, 'utf-8');
     const parsed = JSON.parse(raw);
-    return {
-      ...defaultServerPaymentSettings,
-      ...parsed,
-    };
+    return mergePaymentSettingsSafe(defaultServerPaymentSettings, parsed);
   } catch (err) {
     console.error('[platformPaymentsApiHandler] Error reading platform_payment_settings.json:', err);
     return defaultServerPaymentSettings;
@@ -120,12 +201,11 @@ function readSettingsFromDisk(): any {
 function writeSettingsToDisk(settings: any): any {
   ensureDataDir();
   try {
-    const existing = readSettingsFromDisk() || {};
-    const merged = { 
-      ...existing, 
+    const existing = readSettingsFromDisk() || defaultServerPaymentSettings;
+    const merged = mergePaymentSettingsSafe(existing, {
       ...settings,
       lastUpdated: new Date().toISOString(),
-    };
+    });
     fs.writeFileSync(SETTINGS_FILE, JSON.stringify(merged, null, 2), 'utf-8');
     return merged;
   } catch (err) {

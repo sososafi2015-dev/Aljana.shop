@@ -260,5 +260,50 @@ service cloud.firestore {
                                request.resource.data.data is string;
       allow delete: if canDeleteTenantRecord();
     }
+
+    // ============================================================================
+    // 10. Super Admin Domain Management (`platform_domains`) & Audit Logs
+    // ============================================================================
+    function isValidDomainId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_.\\-]+$');
+    }
+
+    function isValidDomainPayload() {
+      let data = request.resource.data;
+      return isValidPayload() &&
+             ('id' in data) && data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+             ('domainName' in data) && data.domainName is string && data.domainName.size() >= 3 && data.domainName.size() <= 253 &&
+             ('targetUrl' in data) && data.targetUrl is string && data.targetUrl.size() >= 4 && data.targetUrl.size() <= 512 &&
+             ('nameservers' in data) && data.nameservers is list && data.nameservers.size() >= 2 && data.nameservers.size() <= 10 &&
+             ('dnsRecords' in data) && data.dnsRecords is list && data.dnsRecords.size() <= 100 &&
+             ('status' in data) && data.status in ['not_linked', 'pending_dns', 'connected', 'dns_error'] &&
+             ('sslEnabled' in data) && data.sslEnabled is bool &&
+             !('apiKey' in data) && !('apiSecret' in data) && !('hostingerPassword' in data);
+    }
+
+    function isValidDomainAuditPayload() {
+      let data = request.resource.data;
+      return isValidPayload() &&
+             ('id' in data) && data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+             ('domainId' in data) && data.domainId is string && data.domainId.size() > 0 && data.domainId.size() <= 128 &&
+             ('domainName' in data) && data.domainName is string && data.domainName.size() <= 253 &&
+             ('action' in data) && data.action in ['create', 'update', 'dns_add', 'dns_update', 'dns_delete', 'verify', 'delete'] &&
+             ('timestamp' in data) && data.timestamp is string && data.timestamp.size() <= 64;
+    }
+
+    match /platform_domains/{domainId} {
+      allow get: if isValidDomainId(domainId);
+      allow list: if true;
+      allow create, update: if isValidDomainId(domainId) && isValidDomainPayload();
+      allow delete: if isValidDomainId(domainId) && (isSuperAdmin() || (resource != null && resource.data.domainName is string));
+    }
+
+    match /domain_audit_logs/{logId} {
+      allow get: if isValidDomainId(logId);
+      allow list: if true;
+      allow create, update: if isValidDomainId(logId) && isValidDomainAuditPayload();
+      allow delete: if isSuperAdmin();
+    }
   }
 }
+

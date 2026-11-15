@@ -26,6 +26,7 @@ import { Language, UserRole, AssociationSettings, UIElementConfig, Member, Curre
 import { translations } from '../translations';
 import { isSectionVisibleForUser, isCurrentBalanceVisibleForUser } from '../utils/visibilityRules';
 import { WhatsAppIcon, buildWhatsAppChatUrl } from '../utils/whatsappUtils';
+import { resolveEffectiveBankSettings } from '../storage';
 
 interface NavbarProps {
   activeTab: string;
@@ -130,8 +131,10 @@ export const Navbar: React.FC<NavbarProps> = ({
     return isVisible(item.elementId);
   });
 
+  const effectiveBank = resolveEffectiveBankSettings(settings);
+
   const handleCopyRib = () => {
-    navigator.clipboard.writeText(settings.ribBank);
+    navigator.clipboard.writeText(effectiveBank.ribBank);
     setCopiedRib(true);
     setTimeout(() => setCopiedRib(false), 2000);
   };
@@ -164,7 +167,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 {t.financialHealth}
               </span>
               <span className="font-mono text-slate-400 hidden md:inline">
-                RIB: {settings.ribBank}
+                RIB: {effectiveBank.ribBank}
               </span>
             </div>
 
@@ -469,7 +472,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </div>
                 <div>
                   <h3 className="font-bold text-slate-900">{`الحساب البنكي لـ ${settings.name || 'الجمعية'}`}</h3>
-                  <p className="text-xs text-slate-500">{settings.bankName}</p>
+                  <p className="text-xs text-slate-500">{effectiveBank.bankName}</p>
                 </div>
               </div>
               <button
@@ -485,7 +488,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <span className="text-xs text-slate-500 block mb-1">رقم الحساب البنكي الموحد (RIB):</span>
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-mono font-bold text-slate-800 text-sm break-all">
-                    {settings.ribBank}
+                    {effectiveBank.ribBank}
                   </span>
                   <button
                     onClick={handleCopyRib}
@@ -500,7 +503,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <div className="grid grid-cols-2 gap-3 text-xs">
                 <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
                   <span className="text-slate-500 block mb-0.5">البنك:</span>
-                  <span className="font-semibold text-slate-800">{settings.bankName}</span>
+                  <span className="font-semibold text-slate-800">{effectiveBank.bankName}</span>
                 </div>
                 <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
                   <span className="text-slate-500 block mb-0.5">المدينة / الفرع:</span>

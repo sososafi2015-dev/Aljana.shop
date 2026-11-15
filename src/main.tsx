@@ -30,9 +30,9 @@ class RootErrorBoundary extends React.Component<{ children: React.ReactNode }, E
   componentDidCatch(error: unknown, errorInfo: React.ErrorInfo) {
     console.error('[RootErrorBoundary] Caught runtime error:', error, errorInfo);
     try {
-      const autoRecovered = sessionStorage.getItem('syoumax_auto_recovered');
+      const autoRecovered = sessionStorage.getItem('youx_auto_recovered');
       if (!autoRecovered) {
-        sessionStorage.setItem('syoumax_auto_recovered', 'true');
+        sessionStorage.setItem('youx_auto_recovered', 'true');
         localStorage.removeItem('chayef_assoc_current_admin_session_v1');
         localStorage.removeItem('chayef_assoc_logged_in_member_id_v1');
         this.setState({ hasError: false, errorMessage: '' });
@@ -58,9 +58,9 @@ class RootErrorBoundary extends React.Component<{ children: React.ReactNode }, E
         >
           <div className="max-w-md w-full bg-white rounded-3xl border border-slate-200 shadow-xl p-8 text-center space-y-4">
             <div className="w-14 h-14 rounded-2xl bg-emerald-600 text-white font-black text-xl flex items-center justify-center mx-auto shadow-md">
-              S
+              Y
             </div>
-            <h1 className="text-xl font-black text-slate-900">syoumax منصة العمل الجمعوي</h1>
+            <h1 className="text-xl font-black text-slate-900">youx منصة العمل الجمعوي</h1>
             <p className="text-sm text-slate-600 leading-relaxed">
               حدث خطأ مؤقت أثناء تحميل بيانات الجلسة. اضغط على الزر أدناه لتحديث الواجهة فوراً.
             </p>

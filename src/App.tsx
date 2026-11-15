@@ -15,6 +15,7 @@ import {
   saveAuditLogs, 
   getStoredSettings, 
   saveSettings,
+  resolveEffectiveBankSettings,
   getStoredRegistrationFields,
   saveRegistrationFields,
   getStoredUIElements,
@@ -57,6 +58,7 @@ import {
   setSubAdminsTimestamp,
   recordDeletedActivityId,
   getDeletedActivityIds,
+  getDeletedCampaignIds,
   recordDeletedOperationId,
   recordDeletedContributionId,
   getUIElementsTimestamp,
@@ -397,6 +399,42 @@ export default function App() {
       try {
         const rawActive = getActiveTenantId();
         const currentActive = (!rawActive || rawActive === 'portal') ? MASTER_TEMPLATE_TENANT_ID : rawActive;
+        const deletedIds = new Set(getDeletedCampaignIds(currentActive));
+
+        const isDefaultSeedCover = (url?: string) => {
+          if (!url) return true;
+          return [
+            'https://images.unsplash.com/photo-1580582932707-520aed937b7b',
+            'https://images.unsplash.com/photo-1542838132-92c53300491e',
+            'https://images.unsplash.com/photo-1576091160550-2173dba999ef',
+            'https://images.unsplash.com/photo-1488521787991-ed7bbaae773c',
+          ].some((seed) => url.startsWith(seed));
+        };
+
+        const mergeTwoCampaigns = (a: DonationCampaign, b: DonationCampaign): DonationCampaign => {
+          const aTime = a.updatedAt ? Date.parse(a.updatedAt) || 0 : 0;
+          const bTime = b.updatedAt ? Date.parse(b.updatedAt) || 0 : 0;
+          const primary = bTime >= aTime ? b : a;
+          const secondary = bTime >= aTime ? a : b;
+
+          let bestCover = primary.coverImage || secondary.coverImage || '';
+          if (isDefaultSeedCover(primary.coverImage) && secondary.coverImage && !isDefaultSeedCover(secondary.coverImage)) {
+            bestCover = secondary.coverImage;
+          }
+
+          let bestVideo = primary.videoUrl !== undefined ? primary.videoUrl : (secondary.videoUrl || '');
+          if (!bestVideo && secondary.videoUrl && bTime === aTime) {
+            bestVideo = secondary.videoUrl;
+          }
+
+          return {
+            ...secondary,
+            ...primary,
+            coverImage: bestCover,
+            videoUrl: bestVideo,
+            updatedAt: primary.updatedAt || secondary.updatedAt,
+          };
+        };
 
         const [remoteCampaigns, remoteContribs, remoteTypes, firestoreCampaigns] = await Promise.all([
           campaignsApi.getCampaigns(currentActive).catch(() => []),
@@ -405,24 +443,26 @@ export default function App() {
           firestoreSyncService.fetchCampaignsFromFirestore(currentActive).catch(() => []),
         ]);
 
-        let finalCampaigns = Array.isArray(remoteCampaigns) && remoteCampaigns.length > 0 ? remoteCampaigns : [];
-        if (Array.isArray(firestoreCampaigns) && firestoreCampaigns.length > 0) {
-          const byId = new Map<string, DonationCampaign>();
-          for (const c of finalCampaigns) {
+        const byId = new Map<string, DonationCampaign>();
+        for (const c of Array.isArray(remoteCampaigns) ? remoteCampaigns : []) {
+          if (c && c.id && !deletedIds.has(c.id)) {
             byId.set(c.id, c);
           }
-          for (const fc of firestoreCampaigns) {
-            const existing = byId.get(fc.id);
-            if (!existing || (fc.updatedAt && (!existing.updatedAt || fc.updatedAt >= existing.updatedAt))) {
-              byId.set(fc.id, fc);
-            }
-          }
-          finalCampaigns = Array.from(byId.values());
+        }
+        for (const fc of Array.isArray(firestoreCampaigns) ? firestoreCampaigns : []) {
+          if (!fc || !fc.id || deletedIds.has(fc.id)) continue;
+          const existing = byId.get(fc.id);
+          byId.set(fc.id, existing ? mergeTwoCampaigns(existing, fc) : fc);
+        }
+
+        let finalCampaigns = Array.from(byId.values());
+        if (Array.isArray(remoteContribs) && remoteContribs.length > 0 && finalCampaigns.length > 0) {
+          finalCampaigns = recalculateCampaignsFromContributions(finalCampaigns, remoteContribs);
         }
 
         if (finalCampaigns && finalCampaigns.length > 0) {
           setCampaigns(finalCampaigns);
-          saveCampaigns(finalCampaigns, currentActive);
+          saveCampaigns(finalCampaigns, currentActive, false);
         }
         if (remoteContribs && remoteContribs.length > 0) {
           setCampaignContributions(remoteContribs);
@@ -750,10 +790,13 @@ export default function App() {
               ? (prev.name && prev.name !== 'جمعية الشايف' ? prev.name : 'الجمعية')
               : (remoteName || prev.name);
 
+            const resolvedBank = resolveEffectiveBankSettings(remoteResult.settings, prev);
             const merged: AssociationSettings = {
               ...prev,
               ...remoteResult.settings,
               name: safeName,
+              ribBank: resolvedBank.ribBank,
+              bankName: resolvedBank.bankName,
               heroBadgeText: remoteResult.settings.heroBadgeText !== undefined
                 ? remoteResult.settings.heroBadgeText
                 : '',
@@ -890,11 +933,15 @@ export default function App() {
 
   const handleUpdateCampaigns = (updated: DonationCampaign[]) => {
     const rawActive = getActiveTenantId();
-    const cleanTenant = (!rawActive || rawActive === 'portal') ? (activeTenantId || MASTER_TEMPLATE_TENANT_ID) : rawActive;
+    const cleanTenant =
+      !rawActive || rawActive === 'portal'
+        ? activeTenantId && activeTenantId !== 'portal'
+          ? activeTenantId
+          : MASTER_TEMPLATE_TENANT_ID
+        : rawActive;
     setCampaigns(updated);
-    saveCampaigns(updated, cleanTenant);
+    saveCampaigns(updated, cleanTenant, true);
     campaignsApi.saveCampaigns(updated, cleanTenant).catch(console.error);
-    firestoreSyncService.syncCampaignsToFirestore(cleanTenant, updated).catch(console.error);
   };
 
   const handleUpdateCampaignContributions = (updated: CampaignContribution[]) => {
@@ -1240,9 +1287,15 @@ export default function App() {
     applyStoreTheme(newSettings.themeColors);
     apiFetchSettingsWithMeta(newTenantId).then((remote) => {
       if (remote && remote.settings) {
-        setSettings(remote.settings);
-        saveSettings(remote.settings, false, newTenantId);
-        applyStoreTheme(remote.settings.themeColors);
+        const resolvedBank = resolveEffectiveBankSettings(remote.settings, targetTenant || newSettings);
+        const safeSettings: AssociationSettings = {
+          ...remote.settings,
+          ribBank: resolvedBank.ribBank,
+          bankName: resolvedBank.bankName,
+        };
+        setSettings(safeSettings);
+        saveSettings(safeSettings, false, newTenantId);
+        applyStoreTheme(safeSettings.themeColors);
       }
     }).catch(console.warn);
     setRegistrationFields(getStoredRegistrationFields(newTenantId));
@@ -1264,16 +1317,22 @@ export default function App() {
     setCampaignContributions(getStoredCampaignContributions(newTenantId));
     setContributionTypes(getStoredContributionTypes(newTenantId));
     campaignsApi.getCampaigns(newTenantId).then(async (camps) => {
-      let finalCamps = camps;
+      const deletedIds = new Set(getDeletedCampaignIds(newTenantId));
+      let finalCamps = (camps || []).filter((c) => c && c.id && !deletedIds.has(c.id));
       try {
         const fsCamps = await firestoreSyncService.fetchCampaignsFromFirestore(newTenantId);
         if (fsCamps && fsCamps.length > 0) {
           const byId = new Map<string, DonationCampaign>();
-          for (const c of finalCamps || []) byId.set(c.id, c);
+          for (const c of finalCamps) byId.set(c.id, c);
           for (const fc of fsCamps) {
+            if (!fc || !fc.id || deletedIds.has(fc.id)) continue;
             const existing = byId.get(fc.id);
-            if (!existing || (fc.updatedAt && (!existing.updatedAt || fc.updatedAt >= existing.updatedAt))) {
+            if (!existing) {
               byId.set(fc.id, fc);
+            } else {
+              const eTime = existing.updatedAt ? Date.parse(existing.updatedAt) || 0 : 0;
+              const fTime = fc.updatedAt ? Date.parse(fc.updatedAt) || 0 : 0;
+              byId.set(fc.id, fTime >= eTime ? { ...existing, ...fc } : { ...fc, ...existing });
             }
           }
           finalCamps = Array.from(byId.values());
@@ -1281,7 +1340,7 @@ export default function App() {
       } catch {}
       if (finalCamps && finalCamps.length > 0) {
         setCampaigns(finalCamps);
-        saveCampaigns(finalCamps, newTenantId);
+        saveCampaigns(finalCamps, newTenantId, false);
       }
     }).catch(() => {});
 
@@ -3032,14 +3091,26 @@ export default function App() {
   const handleUpdateSettings = async (newSettings: AssociationSettings): Promise<boolean> => {
     const currentTenant = (!activeTenantId || activeTenantId === 'portal') ? MASTER_TEMPLATE_TENANT_ID : activeTenantId;
 
+    const resolvedIncomingBank = resolveEffectiveBankSettings(newSettings, settings);
+    const preparedSettings: AssociationSettings = {
+      ...newSettings,
+      ribBank: resolvedIncomingBank.ribBank,
+      bankName: resolvedIncomingBank.bankName,
+    };
+
     // 1. Persist permanently to backend database FIRST and verify
-    const res = await apiSyncSettings(newSettings, currentAdminSession, currentTenant);
+    const res = await apiSyncSettings(preparedSettings, currentAdminSession, currentTenant);
     if (!res || !res.success || !res.settings) {
       addToast('error', res?.error || 'تعذر حفظ الإعدادات في قاعدة البيانات الدائمة.');
       return false;
     }
 
-    const authoritativeSettings = res.settings;
+    const resolvedAuthBank = resolveEffectiveBankSettings(res.settings, preparedSettings);
+    const authoritativeSettings: AssociationSettings = {
+      ...res.settings,
+      ribBank: resolvedAuthBank.ribBank,
+      bankName: resolvedAuthBank.bankName,
+    };
     const now = Date.now();
     setSettingsTimestamp(now, currentTenant);
     saveSettings(authoritativeSettings, true, currentTenant);
@@ -3055,6 +3126,8 @@ export default function App() {
         bannerImageUrl: authoritativeSettings.bannerImageUrl,
         ownerPhone: authoritativeSettings.phone,
         whatsapp: authoritativeSettings.whatsapp,
+        rib: authoritativeSettings.ribBank,
+        bankName: authoritativeSettings.bankName,
         enablePublicDonations: authoritativeSettings.enablePublicDonations,
       });
     }
@@ -3940,35 +4013,64 @@ export default function App() {
 
         {activeTab === 'members' && (
           !isUIElementVisible('gateway_members') ? (
-            <div className="bg-white rounded-3xl p-8 sm:p-12 border border-slate-200 text-center max-w-xl mx-auto my-12 shadow-sm space-y-4" dir="rtl">
-              <div className="w-16 h-16 rounded-2xl bg-amber-50 text-amber-600 border border-amber-200 flex items-center justify-center mx-auto shadow-sm">
-                <ShieldCheck className="w-8 h-8" />
-              </div>
-              <h3 className="text-xl font-bold text-slate-800">
-                قسم «سجل المنخرطين والمشتركين» متاح حصرياً للمنخرطين
-              </h3>
-              <p className="text-sm text-slate-600 leading-relaxed">
-                تم تخصيص هذا القسم ليكون مرئياً ومتاحاً فقط للمنخرطين المسجلين في الجمعية. إذا كنت منخرطاً، يرجى تسجيل الدخول إلى حسابك لعرض هذا القسم فوراً.
-              </p>
-              <div className="flex flex-wrap items-center justify-center gap-3 pt-3">
-                <button
-                  onClick={() => setIsMemberAuthOpen(true)}
-                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm transition-all shadow-sm flex items-center gap-2 cursor-pointer"
-                >
-                  <UserCheck className="w-4 h-4" />
-                  <span>تسجيل دخول المنخرطين</span>
-                </button>
-                <button
-                  onClick={() => {
-                    setActiveTab('home');
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                  }}
-                  className="px-5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-sm transition-all cursor-pointer"
-                >
-                  العودة للواجهة الرئيسية
-                </button>
-              </div>
-            </div>
+            (() => {
+              const membersGatewayEl = uiElements.find((e) => e.id === 'gateway_members');
+              const isGloballyHidden = !membersGatewayEl || membersGatewayEl.enabled === false;
+              return isGloballyHidden ? (
+                <div className="bg-white rounded-3xl p-8 sm:p-12 border border-slate-200 text-center max-w-xl mx-auto my-12 shadow-sm space-y-4" dir="rtl">
+                  <div className="w-16 h-16 rounded-2xl bg-slate-100 text-slate-500 border border-slate-200 flex items-center justify-center mx-auto shadow-sm">
+                    <ShieldCheck className="w-8 h-8" />
+                  </div>
+                  <h3 className="text-xl font-bold text-slate-800">
+                    قسم «بوابة سجل المنخرطين والمشتركين» مخفي حالياً
+                  </h3>
+                  <p className="text-sm text-slate-600 leading-relaxed">
+                    تم إخفاء هذا القسم بصرياً من واجهة المنصة مع الحفاظ الكامل على جميع البيانات والسجلات وإمكانيات الإدارة.
+                  </p>
+                  <div className="flex flex-wrap items-center justify-center gap-3 pt-3">
+                    <button
+                      onClick={() => {
+                        setActiveTab('home');
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                      className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm transition-all shadow-sm cursor-pointer"
+                    >
+                      العودة للواجهة الرئيسية
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-white rounded-3xl p-8 sm:p-12 border border-slate-200 text-center max-w-xl mx-auto my-12 shadow-sm space-y-4" dir="rtl">
+                  <div className="w-16 h-16 rounded-2xl bg-amber-50 text-amber-600 border border-amber-200 flex items-center justify-center mx-auto shadow-sm">
+                    <ShieldCheck className="w-8 h-8" />
+                  </div>
+                  <h3 className="text-xl font-bold text-slate-800">
+                    قسم «سجل المنخرطين والمشتركين» متاح حصرياً للمنخرطين
+                  </h3>
+                  <p className="text-sm text-slate-600 leading-relaxed">
+                    تم تخصيص هذا القسم ليكون مرئياً ومتاحاً فقط للمنخرطين المسجلين في الجمعية. إذا كنت منخرطاً، يرجى تسجيل الدخول إلى حسابك لعرض هذا القسم فوراً.
+                  </p>
+                  <div className="flex flex-wrap items-center justify-center gap-3 pt-3">
+                    <button
+                      onClick={() => setIsMemberAuthOpen(true)}
+                      className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm transition-all shadow-sm flex items-center gap-2 cursor-pointer"
+                    >
+                      <UserCheck className="w-4 h-4" />
+                      <span>تسجيل دخول المنخرطين</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setActiveTab('home');
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                      className="px-5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-sm transition-all cursor-pointer"
+                    >
+                      العودة للواجهة الرئيسية
+                    </button>
+                  </div>
+                </div>
+              );
+            })()
           ) : (
             <MembersSection
               members={members}
@@ -4135,6 +4237,7 @@ export default function App() {
             member={loggedInMember}
             allOperations={operations}
             contributions={contributions}
+            settings={settings}
             onAddContribution={handleAddContribution}
             polls={polls}
             lang={lang}
@@ -4397,18 +4500,20 @@ export default function App() {
                       <span>سجل الشفافية المباشر</span>
                     </button>
                   </li>
-                  <li>
-                    <button
-                      onClick={() => {
-                        setActiveTab('members');
-                        window.scrollTo({ top: 0, behavior: 'smooth' });
-                      }}
-                      className="text-slate-400 hover:text-emerald-400 transition-colors flex items-center gap-1.5"
-                    >
-                      <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
-                      <span>سجل المنخرطين والمشتركين</span>
-                    </button>
-                  </li>
+                  {isUIElementVisible('gateway_members') && (
+                    <li>
+                      <button
+                        onClick={() => {
+                          setActiveTab('members');
+                          window.scrollTo({ top: 0, behavior: 'smooth' });
+                        }}
+                        className="text-slate-400 hover:text-emerald-400 transition-colors flex items-center gap-1.5"
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
+                        <span>سجل المنخرطين والمشتركين</span>
+                      </button>
+                    </li>
+                  )}
                   <li>
                     <button
                       onClick={() => {
@@ -4429,13 +4534,18 @@ export default function App() {
             {isUIElementVisible('footer_contact_info') && (
               <div className="space-y-3 text-xs">
                 <h4 className="font-bold text-white text-sm">بيانات التواصل والبنك</h4>
-                <div className="p-3 rounded-xl bg-slate-800/80 border border-slate-700/60 space-y-1.5">
-                  <span className="text-slate-400 block text-[11px]">رقم الحساب البنكي (RIB):</span>
-                  <span className="font-mono text-emerald-400 font-bold block text-xs break-all">
-                    {settings.ribBank}
-                  </span>
-                  <span className="text-[10px] text-slate-500 block">{settings.bankName}</span>
-                </div>
+                {isUIElementVisible('bank_rib_card') && (() => {
+                  const effectiveFooterBank = resolveEffectiveBankSettings(settings);
+                  return (
+                    <div className="p-3 rounded-xl bg-slate-800/80 border border-slate-700/60 space-y-1.5">
+                      <span className="text-slate-400 block text-[11px]">رقم الحساب البنكي (RIB):</span>
+                      <span className="font-mono text-emerald-400 font-bold block text-xs break-all">
+                        {effectiveFooterBank.ribBank}
+                      </span>
+                      <span className="text-[10px] text-slate-500 block">{effectiveFooterBank.bankName}</span>
+                    </div>
+                  );
+                })()}
                 <p className="text-slate-400 text-[11px] leading-relaxed">
                   الهاتف: {settings.phone} {settings.whatsapp && settings.whatsapp !== settings.phone ? `| واتساب: ${settings.whatsapp} ` : ''}| المقر: {settings.city || settings.address || 'المغرب'}
                 </p>

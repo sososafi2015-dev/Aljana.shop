@@ -13,7 +13,7 @@ const DB_FILE = path.join(DB_DIR, 'section_visibility.json');
 
 const DEFAULT_VISIBILITY: Record<string, boolean> = {
   featured_activities: true,
-  gateway_members: true,
+  gateway_members: false,
   board_members: true,
   campaigns_section: true,
   gateway_ledger: true,

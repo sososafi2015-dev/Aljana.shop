@@ -776,7 +776,7 @@ export async function handlePayPalApi(req: IncomingMessage, res: ServerResponse)
                   ? 'تجديد اشتراك منصة الجمعية'
                   : purpose === 'activation'
                   ? 'أداء رسوم تفعيل اشتراك منصة الجمعية'
-                  : 'دعم وتطوير syoumax منصة العمل الجمعوي',
+                  : 'دعم وتطوير youx منصة العمل الجمعوي',
               custom_id: JSON.stringify({
                 donorName: donorName || 'مشرف الجمعية',
                 donorPhone: donorPhone || '',
@@ -799,7 +799,7 @@ export async function handlePayPalApi(req: IncomingMessage, res: ServerResponse)
             },
           ],
           application_context: {
-            brand_name: 'syoumax منصة العمل الجمعوي',
+            brand_name: 'youx منصة العمل الجمعوي',
             shipping_preference: 'NO_SHIPPING',
             user_action: 'PAY_NOW',
           },

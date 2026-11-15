@@ -788,7 +788,15 @@ export const HomeSection: React.FC<HomeSectionProps> = ({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div
+            className={`grid grid-cols-1 ${
+              [isVisible('gateway_ledger'), isVisible('gateway_members'), isVisible('board_members')].filter(Boolean).length === 2
+                ? 'md:grid-cols-2'
+                : [isVisible('gateway_ledger'), isVisible('gateway_members'), isVisible('board_members')].filter(Boolean).length === 1
+                  ? 'md:grid-cols-1'
+                  : 'md:grid-cols-3'
+            } gap-4`}
+          >
             {/* Gateway 1: سجل الشفافية المباشر */}
             {isVisible('gateway_ledger') && (
               <div 

@@ -126,7 +126,7 @@ export const PlatformActivationScreen: React.FC<PlatformActivationScreenProps> =
             <Globe className="w-5 h-5" />
           </div>
           <div>
-            <span className="text-xs font-bold text-indigo-300 block">syoumax منصة العمل الجمعوي</span>
+            <span className="text-xs font-bold text-indigo-300 block">youx منصة العمل الجمعوي</span>
             <span className="text-sm font-semibold text-white truncate max-w-xs">{tenant.name}</span>
           </div>
         </div>
@@ -468,7 +468,7 @@ export const PlatformActivationScreen: React.FC<PlatformActivationScreenProps> =
 
       {/* Footer Notice */}
       <footer className="w-full max-w-5xl mx-auto text-center text-xs text-white/50 pt-6">
-        syoumax منصة العمل الجمعوي بالمملكة المغربية • نظام تفعيل المنصات المستقلة الموحد © {new Date().getFullYear()}
+        youx منصة العمل الجمعوي بالمملكة المغربية • نظام تفعيل المنصات المستقلة الموحد © {new Date().getFullYear()}
       </footer>
 
       {/* Payment Method Modal */}

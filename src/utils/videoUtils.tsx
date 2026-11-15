@@ -110,7 +110,7 @@ export function parseVideoUrl(rawUrl?: string): ParsedVideoInfo {
     };
   }
 
-  // 7. Direct video file (.mp4, .webm, .ogg, .mov, data:video/, server /api/videos/ routes)
+  // 7. Direct video file (.mp4, .webm, .ogg, .mov, data:video/, server /api/videos/ routes, Firebase Storage video URLs)
   const isDirectVideo =
     /\.(mp4|webm|ogg|mov|m4v)(\?.*)?$/i.test(trimmed) ||
     /^data:video\//i.test(trimmed) ||
@@ -118,7 +118,9 @@ export function parseVideoUrl(rawUrl?: string): ParsedVideoInfo {
     trimmed.startsWith('/api/videos/') ||
     trimmed.startsWith('/uploads/videos/') ||
     trimmed.includes('/api/videos/stream/') ||
-    trimmed.includes('/api/videos/');
+    trimmed.includes('/api/videos/') ||
+    ((trimmed.includes('firebasestorage.googleapis.com') || trimmed.includes('.firebasestorage.app')) &&
+      (trimmed.toLowerCase().includes('video') || /\.(mp4|webm|ogg|mov|m4v)/i.test(trimmed)));
 
   if (isDirectVideo) {
     // Generate permanent thumbnail URL if it's a server stream endpoint

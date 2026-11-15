@@ -99,8 +99,13 @@
       "campaignsCount": 3
     },
     "recoveredAccount": true,
-    "updatedAt": "2026-10-26T08:08:26.045Z",
-    "ownerUsername": "istithmar24"
+    "updatedAt": "2026-11-13T18:26:33.359Z",
+    "ownerUsername": "istithmar24",
+    "whatsapp": "0661000202",
+    "phone": "0661000202",
+    "rib": "011 780 0000 123456789012 45",
+    "ribBank": "011 780 0000 123456789012 45",
+    "bankName": "التجاري وفا بنك / Attijariwafa Bank"
   },
   {
     "id": "tenant_1789045972557_t35i",
@@ -128,8 +133,14 @@
       "totalBalance": 32000,
       "campaignsCount": 3
     },
-    "updatedAt": "2026-10-19T15:58:11.562Z",
-    "ownerUsername": "atlas2024"
+    "updatedAt": "2026-11-13T18:26:51.893Z",
+    "ownerUsername": "atlas2024",
+    "whatsapp": "0612458765",
+    "phone": "0612458765",
+    "rib": "011 780 0000 123456789012 45",
+    "ribBank": "011 780 0000 123456789012 45",
+    "bankName": "التجاري وفا بنك / Attijariwafa Bank",
+    "enablePublicDonations": true
   },
   {
     "id": "tenant_1789212385161_k79d",
@@ -157,7 +168,14 @@
       "totalBalance": 51200,
       "campaignsCount": 2
     },
-    "ownerUsername": "albir2024"
+    "ownerUsername": "albir2024",
+    "whatsapp": "+212 6 89 56 23 56",
+    "phone": "+212 6 89 56 23 56",
+    "rib": "011 780 0000 123456789012 45",
+    "ribBank": "011 780 0000 123456789012 45",
+    "bankName": "التجاري وفا بنك / Attijariwafa Bank",
+    "enablePublicDonations": true,
+    "updatedAt": "2026-11-13T18:26:51.898Z"
   },
   {
     "id": "tenant_ihsan_sa",
@@ -185,7 +203,14 @@
       "totalBalance": 98500,
       "campaignsCount": 2
     },
-    "ownerUsername": "ihsan2024"
+    "ownerUsername": "ihsan2024",
+    "whatsapp": "+966501234567",
+    "phone": "+966501234567",
+    "rib": "011 780 0000 123456789012 45",
+    "ribBank": "011 780 0000 123456789012 45",
+    "bankName": "التجاري وفا بنك / Attijariwafa Bank",
+    "enablePublicDonations": true,
+    "updatedAt": "2026-11-13T18:26:51.905Z"
   },
   {
     "id": "tenant_takafol_eg",
@@ -213,7 +238,14 @@
       "totalBalance": 65000,
       "campaignsCount": 2
     },
-    "ownerUsername": "takafol2024"
+    "ownerUsername": "takafol2024",
+    "whatsapp": "+201012345678",
+    "phone": "+201012345678",
+    "rib": "011 780 0000 123456789012 45",
+    "ribBank": "011 780 0000 123456789012 45",
+    "bankName": "التجاري وفا بنك / Attijariwafa Bank",
+    "enablePublicDonations": true,
+    "updatedAt": "2026-11-13T18:26:51.912Z"
   },
   {
     "id": "tenant_1792430222354_klrf",
@@ -243,7 +275,13 @@
       "totalBalance": 0,
       "campaignsCount": 3
     },
-    "ownerUsername": "basma2024"
+    "ownerUsername": "basma2024",
+    "whatsapp": "0611223344",
+    "phone": "0611223344",
+    "rib": "011 780 0000 123456789012 45",
+    "ribBank": "011 780 0000 123456789012 45",
+    "bankName": "التجاري وفا بنك / Attijariwafa Bank",
+    "updatedAt": "2026-11-13T18:26:51.918Z"
   },
   {
     "id": "tenant_1792661526529_a545",
@@ -291,8 +329,13 @@
       "totalBalance": 0,
       "campaignsCount": 3
     },
-    "updatedAt": "2026-10-22T10:32:26.429Z",
-    "ownerUsername": "nador2024"
+    "updatedAt": "2026-11-13T18:26:33.366Z",
+    "ownerUsername": "nador2024",
+    "whatsapp": "+212 6 89 56 23 56",
+    "phone": "+212 6 89 56 23 56",
+    "rib": "011 780 0000 123456789012 45",
+    "ribBank": "011 780 0000 123456789012 45",
+    "bankName": "التجاري وفا بنك / Attijariwafa Bank"
   },
   {
     "id": "tenant_1792874152357_46fk",
@@ -356,7 +399,7 @@
       }
     ],
     "createdAt": "2026-10-24T20:35:52.358Z",
-    "updatedAt": "2026-10-26T08:27:33.476Z",
+    "updatedAt": "2026-11-13T18:26:33.374Z",
     "tier": "pro",
     "monthlyFee": 299,
     "isTemplate": false,
@@ -377,6 +420,11 @@
     "lastRenewalDate": "2026-10-25T13:32:09.202Z",
     "activationFeePaid": 199,
     "activationFeeDate": "2026-10-25T12:30:07.481Z",
-    "ownerUsername": "taqwa2024"
+    "ownerUsername": "taqwa2024",
+    "whatsapp": "+212 6 59 86 53 26",
+    "phone": "+212 6 59 86 53 26",
+    "rib": "011 780 0000 123456789012 45",
+    "ribBank": "011 780 0000 123456789012 45",
+    "bankName": "التجاري وفا بنك / Attijariwafa Bank"
   }
 ]

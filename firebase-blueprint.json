@@ -293,7 +293,44 @@
       "allowCreate": "request.resource.data is map && request.resource.data.tenantId is string",
       "allowUpdate": "request.resource.data is map && request.resource.data.tenantId is string",
       "allowDelete": "true"
+    },
+    "platform_domains": {
+      "description": "Super Admin external domain configurations, Hostinger/custom nameservers, DNS records, and real verification status",
+      "fields": {
+        "id": { "type": "string", "description": "Domain record ID" },
+        "domainName": { "type": "string", "description": "Normalized domain name e.g. youx.ai.studio" },
+        "targetUrl": { "type": "string", "description": "Target platform URL" },
+        "providerPreset": { "type": "string", "description": "hostinger or custom" },
+        "nameservers": { "type": "list", "description": "Configured DNS nameservers" },
+        "dnsRecords": { "type": "list", "description": "Configured DNS records (A, AAAA, CNAME, TXT, MX, NS)" },
+        "status": { "type": "string", "description": "not_linked, pending_dns, connected, dns_error" },
+        "sslEnabled": { "type": "boolean", "description": "Real verified SSL certificate status" },
+        "createdAt": { "type": "string", "description": "ISO timestamp" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp" },
+        "updatedBy": { "type": "string", "description": "Super Admin identifier" }
+      },
+      "allowRead": "true",
+      "allowCreate": "request.resource.data is map && request.resource.data.domainName is string",
+      "allowUpdate": "request.resource.data is map && request.resource.data.domainName is string",
+      "allowDelete": "true"
+    },
+    "domain_audit_logs": {
+      "description": "Timestamped audit logs for domain, DNS record, and verification changes",
+      "fields": {
+        "id": { "type": "string", "description": "Audit log entry ID" },
+        "domainId": { "type": "string", "description": "Associated domain ID" },
+        "domainName": { "type": "string", "description": "Domain name" },
+        "action": { "type": "string", "description": "create, update, dns_add, dns_update, dns_delete, verify, delete" },
+        "details": { "type": "string", "description": "Human-readable change details" },
+        "performedBy": { "type": "string", "description": "Super Admin name" },
+        "timestamp": { "type": "string", "description": "ISO timestamp" }
+      },
+      "allowRead": "true",
+      "allowCreate": "request.resource.data is map && request.resource.data.domainId is string",
+      "allowUpdate": "request.resource.data is map && request.resource.data.domainId is string",
+      "allowDelete": "true"
     }
   },
-  "securityRulesSummary": "Role-based access with bootstrapped super admin soso.safi.2015@gmail.com, tenant isolation per association, and validated media/chunk storage rules."
+  "securityRulesSummary": "Role-based access with bootstrapped super admin soso.safi.2015@gmail.com, tenant isolation per association, Super Admin domain/DNS validation, and validated media/chunk storage rules."
 }
+

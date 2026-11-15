@@ -87,7 +87,7 @@ export const PlatformIdentityAdminSettings: React.FC<Props> = ({
   // Initialize values when identity is loaded
   useEffect(() => {
     if (identity) {
-      setPlatformNameInput(identity.platformName || 'syoumax منصة العمل الجمعوي');
+      setPlatformNameInput(identity.platformName || 'youx منصة العمل الجمعوي');
       setPreviewLogo(identity.platformLogo || '');
       setWhatsappInput(identity.whatsapp || '00212718861646');
       setAssocWhatsappInput(identity.associationsWhatsapp || identity.whatsapp || '00212718861646');
@@ -762,14 +762,14 @@ export const PlatformIdentityAdminSettings: React.FC<Props> = ({
                       setNameSuccessMsg(null);
                       setNameErrorMsg(null);
                     }}
-                    placeholder="مثال: syoumax منصة العمل الجمعوي"
+                    placeholder="مثال: youx منصة العمل الجمعوي"
                     className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 transition-all outline-none font-bold text-slate-900"
                     required
                     minLength={2}
                   />
                 </div>
                 <span className="text-[10px] text-slate-400 mt-1 block">
-                  الاسم المسجل حالياً: <strong className="text-slate-700">{identity.platformName || 'syoumax منصة العمل الجمعوي'}</strong>
+                  الاسم المسجل حالياً: <strong className="text-slate-700">{identity.platformName || 'youx منصة العمل الجمعوي'}</strong>
                 </span>
               </div>
 

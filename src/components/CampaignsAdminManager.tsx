@@ -56,6 +56,7 @@ import {
   apiSubmitDonationContribution,
 } from '../api/campaignsApi';
 import { ensurePermanentImageUrl } from '../api/imageApi';
+import { uploadToFirebaseStorage } from '../firebase';
 import {
   getStoredContributions,
   getStoredOperations,
@@ -130,8 +131,16 @@ export const CampaignsAdminManager: React.FC<CampaignsAdminManagerProps> = ({
   const [selectedCampaignFilter, setSelectedCampaignFilter] = useState<string>('all');
   const [isTogglingVisibility, setIsTogglingVisibility] = useState<Record<string, boolean>>({});
   const [imageUploadProgress, setImageUploadProgress] = useState<number | null>(null);
+  const [videoUploadProgress, setVideoUploadProgress] = useState<number | null>(null);
+  const [isSavingCampaign, setIsSavingCampaign] = useState(false);
+  const [videoExplicitlyCleared, setVideoExplicitlyCleared] = useState(false);
   const [previewVideoCampaign, setPreviewVideoCampaign] = useState<DonationCampaign | null>(null);
   const [previewProofContribution, setPreviewProofContribution] = useState<CampaignContribution | null>(null);
+
+  const resolveActiveCampaignTenantId = (): string => {
+    const raw = (settings as any)?.id || currentSession?.tenantId || getActiveTenantIdFromStorage() || 'tenant_nour';
+    return !raw || raw === 'portal' ? 'tenant_nour' : raw;
+  };
 
   // Campaign Form State
   const [formData, setFormData] = useState({
@@ -150,6 +159,7 @@ export const CampaignsAdminManager: React.FC<CampaignsAdminManagerProps> = ({
 
   const openCreateModal = () => {
     setEditingCampaign(null);
+    setVideoExplicitlyCleared(false);
     setFormData({
       title: '',
       description: '',
@@ -168,6 +178,7 @@ export const CampaignsAdminManager: React.FC<CampaignsAdminManagerProps> = ({
 
   const openEditModal = (camp: DonationCampaign) => {
     setEditingCampaign(camp);
+    setVideoExplicitlyCleared(false);
     setFormData({
       title: camp.title,
       description: camp.description,
@@ -198,7 +209,7 @@ export const CampaignsAdminManager: React.FC<CampaignsAdminManagerProps> = ({
     }
     try {
       setImageUploadProgress(10);
-      const currentActiveTenant = (settings as any)?.id || currentSession?.tenantId || getActiveTenantIdFromStorage() || 'tenant_nour';
+      const currentActiveTenant = resolveActiveCampaignTenantId();
       const permanentUrl = await ensurePermanentImageUrl(file, {
         category: 'campaigns',
         fileName: file.name || 'campaign-cover.jpg',
@@ -216,8 +227,48 @@ export const CampaignsAdminManager: React.FC<CampaignsAdminManagerProps> = ({
     }
   };
 
+  // Video Upload helper (uploads video file to Firebase Cloud Storage / permanent server & Firestore storage)
+  const handleVideoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('video/')) {
+      addToast('error', 'يرجى اختيار ملف فيديو صالح (MP4, WebM, MOV).');
+      return;
+    }
+    if (file.size > 200 * 1024 * 1024) {
+      addToast('error', 'حجم الفيديو كبير جداً، يرجى اختيار فيديو أقل من 200 ميغابايت.');
+      return;
+    }
+    try {
+      setVideoUploadProgress(5);
+      const currentActiveTenant = resolveActiveCampaignTenantId();
+      const permanentVideoUrl = await uploadToFirebaseStorage(file, 'campaigns', {
+        tenantId: currentActiveTenant,
+        category: 'campaigns',
+        recordId: editingCampaign?.id,
+        fileName: file.name || 'campaign-video.mp4',
+        contentType: file.type || 'video/mp4',
+        onProgress: (pct) => setVideoUploadProgress(pct),
+      });
+      setVideoExplicitlyCleared(false);
+      setFormData((prev) => ({ ...prev, videoUrl: permanentVideoUrl }));
+      addToast('success', 'تم رفع وحفظ فيديو الحملة في التخزين الدائم بنجاح (100%).');
+    } catch (err: any) {
+      addToast('error', err?.message || 'فشل رفع ملف الفيديو.');
+    } finally {
+      setVideoUploadProgress(null);
+      if (e.target) e.target.value = '';
+    }
+  };
+
   const handleSaveCampaign = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (imageUploadProgress !== null || videoUploadProgress !== null) {
+      addToast('info', 'يرجى الانتظار حتى اكتمال رفع الملفات المرفقة قبل حفظ الحملة.');
+      return;
+    }
+    if (isSavingCampaign) return;
 
     if (!formData.title.trim()) {
       addToast('error', 'يرجى إدخال عنوان الحملة.');
@@ -247,60 +298,89 @@ export const CampaignsAdminManager: React.FC<CampaignsAdminManagerProps> = ({
       }
     }
 
-    const targetTenantId = (settings as any)?.id || currentSession?.tenantId || getActiveTenantIdFromStorage() || 'tenant_nour';
+    const targetTenantId = resolveActiveCampaignTenantId();
+    setIsSavingCampaign(true);
 
-    let finalCoverImage = formData.coverImage;
-    if (finalCoverImage && finalCoverImage.startsWith('data:')) {
-      try {
+    try {
+      let finalCoverImage = (formData.coverImage || '').trim();
+      if (!finalCoverImage && editingCampaign?.coverImage) {
+        finalCoverImage = editingCampaign.coverImage;
+      }
+      if (finalCoverImage && finalCoverImage.startsWith('data:')) {
         finalCoverImage = await ensurePermanentImageUrl(finalCoverImage, {
           category: 'campaigns',
           fileName: 'campaign-cover.jpg',
           recordId: editingCampaign?.id,
           tenantId: targetTenantId,
         });
-      } catch {}
-    }
-
-    const payload: Partial<DonationCampaign> = {
-      ...(editingCampaign
-        ? {
-            id: editingCampaign.id,
-            collectedAmount: editingCampaign.collectedAmount,
-            progressPercentage: editingCampaign.progressPercentage,
-            createdAt: editingCampaign.createdAt,
-          }
-        : {
-            collectedAmount: 0,
-            progressPercentage: 0,
-            createdAt: new Date().toISOString(),
-          }),
-      ...formData,
-      coverImage: finalCoverImage,
-      videoUrl: cleanVideoUrl !== '' ? cleanVideoUrl : '',
-      tenantId: targetTenantId,
-      associationId: targetTenantId,
-    };
-
-    if (editingCampaign) {
-      const res = await apiUpdateCampaign(editingCampaign.id, payload, currentSession, targetTenantId);
-      if (res.success && res.campaign) {
-        const updated = campaigns.map((c) => (c.id === editingCampaign.id ? res.campaign! : c));
-        onCampaignsUpdated(updated);
-        addToast('success', 'تم تعديل وتحديث بيانات حملة التبرع وحفظها في قاعدة البيانات بنجاح.');
-        setIsFormOpen(false);
-      } else {
-        addToast('error', res.error || 'فشل تحديث الحملة في قاعدة البيانات.');
       }
-    } else {
-      const res = await apiCreateCampaign(payload, currentSession, targetTenantId);
-      if (res.success && res.campaign) {
-        const updated = [res.campaign, ...campaigns];
-        onCampaignsUpdated(updated);
-        addToast('success', 'تم إنشاء وتفعيل حملة التبرع الجديدة وحفظها في قاعدة البيانات بنجاح.');
-        setIsFormOpen(false);
-      } else {
-        addToast('error', res.error || 'فشل إنشاء الحملة في قاعدة البيانات.');
+
+      // Preserve existing videoUrl on edit unless a new one was entered or explicitly cleared
+      let finalVideoUrl = cleanVideoUrl;
+      if (editingCampaign && !cleanVideoUrl && !videoExplicitlyCleared && editingCampaign.videoUrl) {
+        finalVideoUrl = editingCampaign.videoUrl;
       }
+
+      const nowIso = new Date().toISOString();
+      const payload: Partial<DonationCampaign> & { clearVideo?: boolean } = {
+        ...(editingCampaign
+          ? {
+              id: editingCampaign.id,
+              collectedAmount: editingCampaign.collectedAmount,
+              progressPercentage: editingCampaign.progressPercentage,
+              createdAt: editingCampaign.createdAt,
+            }
+          : {
+              collectedAmount: 0,
+              progressPercentage: 0,
+              createdAt: nowIso,
+            }),
+        ...formData,
+        coverImage: finalCoverImage,
+        videoUrl: finalVideoUrl,
+        clearVideo: videoExplicitlyCleared && !finalVideoUrl,
+        updatedAt: nowIso,
+        tenantId: targetTenantId,
+        associationId: targetTenantId,
+      };
+
+      if (editingCampaign) {
+        const res = await apiUpdateCampaign(editingCampaign.id, payload, currentSession, targetTenantId);
+        if (res.success && res.campaign) {
+          const savedCamp: DonationCampaign = {
+            ...res.campaign,
+            coverImage: res.campaign.coverImage || finalCoverImage,
+            videoUrl: res.campaign.videoUrl !== undefined ? res.campaign.videoUrl : finalVideoUrl,
+            updatedAt: res.campaign.updatedAt || nowIso,
+          };
+          const updated = campaigns.map((c) => (c.id === editingCampaign.id ? savedCamp : c));
+          onCampaignsUpdated(updated);
+          addToast('success', 'تم تعديل وتحديث بيانات حملة التبرع وحفظها في قاعدة البيانات بنجاح.');
+          setIsFormOpen(false);
+        } else {
+          addToast('error', res.error || 'فشل تحديث الحملة في قاعدة البيانات.');
+        }
+      } else {
+        const res = await apiCreateCampaign(payload, currentSession, targetTenantId);
+        if (res.success && res.campaign) {
+          const savedCamp: DonationCampaign = {
+            ...res.campaign,
+            coverImage: res.campaign.coverImage || finalCoverImage,
+            videoUrl: res.campaign.videoUrl !== undefined ? res.campaign.videoUrl : finalVideoUrl,
+            updatedAt: res.campaign.updatedAt || nowIso,
+          };
+          const updated = [savedCamp, ...campaigns.filter((c) => c.id !== savedCamp.id)];
+          onCampaignsUpdated(updated);
+          addToast('success', 'تم إنشاء وتفعيل حملة التبرع الجديدة وحفظها في قاعدة البيانات بنجاح.');
+          setIsFormOpen(false);
+        } else {
+          addToast('error', res.error || 'فشل إنشاء الحملة في قاعدة البيانات.');
+        }
+      }
+    } catch (err: any) {
+      addToast('error', err?.message || 'حدث خطأ أثناء حفظ بيانات الحملة.');
+    } finally {
+      setIsSavingCampaign(false);
     }
   };
 
@@ -809,6 +889,7 @@ export const CampaignsAdminManager: React.FC<CampaignsAdminManagerProps> = ({
                       {/* Image header */}
                       <div className="relative h-44 w-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
                         <img
+                          key={`${camp.id}-${camp.coverImage}-${camp.updatedAt || ''}`}
                           src={camp.coverImage}
                           alt={camp.title}
                           referrerPolicy="no-referrer"
@@ -1394,12 +1475,12 @@ export const CampaignsAdminManager: React.FC<CampaignsAdminManagerProps> = ({
                 )}
               </div>
 
-              {/* Promotional Video URL & Live Preview */}
+              {/* Promotional Video URL & Direct Video Upload & Live Preview */}
               <div className="p-4 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/50 space-y-3">
                 <div className="flex items-center justify-between">
                   <label className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-200">
                     <Video className="w-4 h-4 text-rose-500" />
-                    <span>رابط الفيديو التعريفي للحملة</span>
+                    <span>فيديو تعريفي للحملة (رابط أو رفع فيديو من الجهاز)</span>
                     <span className="text-[10px] font-normal text-slate-500 dark:text-slate-400">
                       (اختياري)
                     </span>
@@ -1407,43 +1488,75 @@ export const CampaignsAdminManager: React.FC<CampaignsAdminManagerProps> = ({
                   {formData.videoUrl && formData.videoUrl.trim() && (
                     <button
                       type="button"
-                      onClick={() => setFormData({ ...formData, videoUrl: '' })}
+                      onClick={() => {
+                        setVideoExplicitlyCleared(true);
+                        setFormData({ ...formData, videoUrl: '' });
+                      }}
                       className="text-[11px] font-bold text-rose-600 dark:text-rose-400 hover:text-rose-700 flex items-center gap-1 cursor-pointer transition-colors"
-                      title="حذف رابط الفيديو"
+                      title="حذف الفيديو"
                     >
                       <Trash2 className="w-3 h-3" />
-                      <span>حذف رابط الفيديو</span>
+                      <span>حذف الفيديو</span>
                     </button>
                   )}
                 </div>
 
                 <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
-                  أدخل رابط فيديو ترويجي أو تعريفي للحملة من <strong>YouTube</strong> أو <strong>Vimeo</strong> أو رابط فيديو مباشر <strong>(MP4 / WebM)</strong> لتعزيز مصداقية الحملة وجذب المساهمين.
+                  أدخل رابط فيديو ترويجي من <strong>YouTube</strong> أو <strong>Vimeo</strong> أو قم برفع ملف فيديو مباشر <strong>(MP4 / WebM)</strong> لحفظه بشكل دائم مع الحملة.
                 </p>
 
-                <div className="relative">
-                  <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-slate-400">
-                    <Film className="w-4 h-4" />
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-slate-400">
+                      <Film className="w-4 h-4" />
+                    </div>
+                    <input
+                      type="text"
+                      value={formData.videoUrl}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val.trim()) setVideoExplicitlyCleared(false);
+                        setFormData({ ...formData, videoUrl: val });
+                      }}
+                      placeholder="https://www.youtube.com/watch?v=... أو https://vimeo.com/... أو رابط فيديو مباشر"
+                      dir="ltr"
+                      className="w-full pr-9 pl-9 py-2.5 text-xs font-mono rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-rose-500 focus:border-rose-500 outline-none transition-all placeholder:font-sans placeholder:text-slate-400"
+                    />
+                    {formData.videoUrl && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setVideoExplicitlyCleared(true);
+                          setFormData({ ...formData, videoUrl: '' });
+                        }}
+                        className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 hover:text-rose-500 transition-colors cursor-pointer"
+                        title="مسح الحقل"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
-                  <input
-                    type="url"
-                    value={formData.videoUrl}
-                    onChange={(e) => setFormData({ ...formData, videoUrl: e.target.value })}
-                    placeholder="https://www.youtube.com/watch?v=... أو https://vimeo.com/... أو https://.../video.mp4"
-                    dir="ltr"
-                    className="w-full pr-9 pl-9 py-2.5 text-xs font-mono rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-rose-500 focus:border-rose-500 outline-none transition-all placeholder:font-sans placeholder:text-slate-400"
-                  />
-                  {formData.videoUrl && (
-                    <button
-                      type="button"
-                      onClick={() => setFormData({ ...formData, videoUrl: '' })}
-                      className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 hover:text-rose-500 transition-colors cursor-pointer"
-                      title="مسح الحقل"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  )}
+
+                  <label className="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 border border-slate-300 dark:border-slate-600 text-xs font-semibold cursor-pointer flex items-center gap-1.5 text-slate-700 dark:text-slate-300 shrink-0">
+                    <Upload className="w-3.5 h-3.5 text-rose-500" />
+                    <span>{videoUploadProgress !== null ? `جارٍ الرفع (${videoUploadProgress}%)` : 'رفع فيديو'}</span>
+                    <input
+                      type="file"
+                      accept="video/mp4,video/webm,video/quicktime,video/*"
+                      onChange={handleVideoFileChange}
+                      className="hidden"
+                    />
+                  </label>
                 </div>
+
+                {videoUploadProgress !== null && (
+                  <div className="mt-2 w-full bg-slate-200 dark:bg-slate-700 rounded-full h-1.5 overflow-hidden">
+                    <div
+                      className="bg-rose-600 h-full transition-all duration-200"
+                      style={{ width: `${videoUploadProgress}%` }}
+                    />
+                  </div>
+                )}
 
                 {/* Live Video Preview Box Before Saving */}
                 {formData.videoUrl && formData.videoUrl.trim() && (
@@ -1623,15 +1736,23 @@ export const CampaignsAdminManager: React.FC<CampaignsAdminManagerProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsFormOpen(false)}
-                  className="px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 cursor-pointer"
+                  disabled={isSavingCampaign || imageUploadProgress !== null || videoUploadProgress !== null}
+                  className="px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 cursor-pointer disabled:opacity-50"
                 >
                   إلغاء
                 </button>
                 <button
                   type="submit"
-                  className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md cursor-pointer"
+                  disabled={isSavingCampaign || imageUploadProgress !== null || videoUploadProgress !== null}
+                  className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md cursor-pointer disabled:opacity-60"
                 >
-                  {editingCampaign ? 'حفظ التعديلات' : 'إنشاء وتفعيل الحملة'}
+                  {imageUploadProgress !== null || videoUploadProgress !== null
+                    ? 'جارٍ رفع الملفات...'
+                    : isSavingCampaign
+                    ? 'جارٍ حفظ الحملة وتأكيد قاعدة البيانات...'
+                    : editingCampaign
+                    ? 'حفظ التعديلات'
+                    : 'إنشاء وتفعيل الحملة'}
                 </button>
               </div>
             </form>

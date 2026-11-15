@@ -36,14 +36,34 @@ export async function apiFetchSettingsWithMeta(tenantId?: string): Promise<Setti
           : 0;
 
         if (firestoreSettings && fbTs > serverTs) {
+          const merged = { ...data.settings, ...firestoreSettings };
+          merged.ribBank =
+            (firestoreSettings.ribBank && String(firestoreSettings.ribBank).trim()) ||
+            (data.settings.ribBank && String(data.settings.ribBank).trim()) ||
+            '011 780 0000 123456789012 45';
+          merged.bankName =
+            (firestoreSettings.bankName && String(firestoreSettings.bankName).trim()) ||
+            (data.settings.bankName && String(data.settings.bankName).trim()) ||
+            'التجاري وفا بنك / Attijariwafa Bank';
           return {
-            settings: { ...data.settings, ...firestoreSettings },
+            settings: merged,
             lastUpdated: (firestoreSettings as any)._updatedAt,
           };
         }
 
+        const safeServerSettings = {
+          ...data.settings,
+          ribBank:
+            (data.settings.ribBank && String(data.settings.ribBank).trim()) ||
+            (firestoreSettings?.ribBank && String(firestoreSettings.ribBank).trim()) ||
+            '011 780 0000 123456789012 45',
+          bankName:
+            (data.settings.bankName && String(data.settings.bankName).trim()) ||
+            (firestoreSettings?.bankName && String(firestoreSettings.bankName).trim()) ||
+            'التجاري وفا بنك / Attijariwafa Bank',
+        };
         return {
-          settings: data.settings,
+          settings: safeServerSettings,
           lastUpdated: data.lastUpdated,
         };
       }
@@ -51,7 +71,11 @@ export async function apiFetchSettingsWithMeta(tenantId?: string): Promise<Setti
 
     if (firestoreSettings) {
       return {
-        settings: firestoreSettings,
+        settings: {
+          ...firestoreSettings,
+          ribBank: (firestoreSettings.ribBank && String(firestoreSettings.ribBank).trim()) || '011 780 0000 123456789012 45',
+          bankName: (firestoreSettings.bankName && String(firestoreSettings.bankName).trim()) || 'التجاري وفا بنك / Attijariwafa Bank',
+        },
         lastUpdated: (firestoreSettings as any)._updatedAt,
       };
     }

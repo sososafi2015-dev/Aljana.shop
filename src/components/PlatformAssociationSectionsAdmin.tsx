@@ -536,14 +536,14 @@ export const PlatformAssociationSectionsAdmin: React.FC<PlatformAssociationSecti
               <span className="text-slate-300">/</span>
               <span className="text-emerald-700 font-bold flex items-center gap-1">
                 <HeartHandshake className="w-3.5 h-3.5" />
-                <span>اجعل منصتك ظاهرة للعموم للحصول على التبرعات المالية (syoumax)</span>
+                <span>اجعل منصتك ظاهرة للعموم للحصول على التبرعات المالية (youx)</span>
               </span>
             </div>
           </div>
 
           <span className="px-3 py-1 rounded-full text-xs font-black bg-emerald-50 text-emerald-800 border border-emerald-200 flex items-center gap-1.5 shadow-xs">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-            <span>واجهة syoumax المعتمدة للحصول على التبرعات المالية</span>
+            <span>واجهة youx المعتمدة للحصول على التبرعات المالية</span>
           </span>
         </div>
 
@@ -552,7 +552,7 @@ export const PlatformAssociationSectionsAdmin: React.FC<PlatformAssociationSecti
           lang="ar"
           addToast={(type, message) => onShowToast(message, type)}
           onLogAudit={(action, description) =>
-            addAuditLog(action, 'settings', `[الإدارة العامة - syoumax] ${description}`, adminName, 'super_admin')
+            addAuditLog(action, 'settings', `[الإدارة العامة - youx] ${description}`, adminName, 'super_admin')
           }
           currentAdminSession={currentAdminSession}
         />
@@ -1136,7 +1136,7 @@ export const PlatformAssociationSectionsAdmin: React.FC<PlatformAssociationSecti
                   <div className="mt-4 pt-3 border-t border-emerald-200 bg-emerald-50/80 -mx-5 -mb-5 p-4 rounded-b-2xl flex flex-col sm:flex-row items-center justify-between gap-3 border-b-2 border-b-emerald-600/30">
                     <div className="flex items-center gap-2 text-xs text-emerald-950 font-bold">
                       <HeartHandshake className="w-4 h-4 text-emerald-700 shrink-0" />
-                      <span>إدارة إعدادات الظهور بواجهة syoumax للحصول على التبرعات المالية</span>
+                      <span>إدارة إعدادات الظهور بواجهة youx للحصول على التبرعات المالية</span>
                     </div>
 
                     <button
@@ -1146,7 +1146,7 @@ export const PlatformAssociationSectionsAdmin: React.FC<PlatformAssociationSecti
                       className="w-full sm:w-auto px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-black flex items-center justify-center gap-2 shadow-sm hover:shadow-md transition-all cursor-pointer"
                     >
                       <Eye className="w-4 h-4" />
-                      <span>فتح وإدارة القسم (syoumax)</span>
+                      <span>فتح وإدارة القسم (youx)</span>
                     </button>
                   </div>
                 )}

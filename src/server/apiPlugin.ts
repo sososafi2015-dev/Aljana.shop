@@ -23,6 +23,7 @@ import { handlePlatformPaymentsApi } from './platformPaymentsApiHandler';
 import { handlePlatformSupportApi } from './platformSupportApiHandler';
 import { handleSetupServiceApi } from './setupServiceApiHandler';
 import { handlePayPalApi } from './paypalApiHandler';
+import { handleDomainsApi } from './domainsApiHandler';
 import {
   getStorageSystemMetrics,
   normalizeTenantId,
@@ -53,6 +54,12 @@ function sendJson(res: ServerResponse, statusCode: number, data: any) {
 export function associationApiPlugin(): Plugin {
   const apiMiddleware = async (req: IncomingMessage, res: ServerResponse, next: () => void) => {
     const url = req.url || '';
+    const rawHost = String(req.headers['x-forwarded-host'] || req.headers.host || '').toLowerCase();
+    if (rawHost.includes('al-shaif-association.ai.studio')) {
+      res.writeHead(301, { Location: `https://youx.ai.studio${url || '/'}` });
+      res.end();
+      return;
+    }
 
     if (!url.startsWith('/api/')) {
       return next();
@@ -161,6 +168,12 @@ export function associationApiPlugin(): Plugin {
         // 0.8 Handle Platform Secondary Admins & Audit Logs (/api/platform-subadmins* & /api/platform-audit-logs*)
         const handledByPlatformSubAdmins = await handlePlatformSubAdminsApi(req, res);
         if (handledByPlatformSubAdmins) {
+          return;
+        }
+
+        // 0.8b Handle Platform Domain & DNS Management (/api/platform-domains*, Super Admin only)
+        const handledByDomains = await handleDomainsApi(req, res, url);
+        if (handledByDomains) {
           return;
         }
 

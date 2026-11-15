@@ -279,9 +279,13 @@ class FirestoreSyncService {
     try {
       const cleanTenant = tenantId || 'tenant_nour';
       const docRef = doc(db, 'settings', cleanTenant);
+      const cleanRibBank = (settings?.ribBank && String(settings.ribBank).trim()) || '011 780 0000 123456789012 45';
+      const cleanBankName = (settings?.bankName && String(settings.bankName).trim()) || 'التجاري وفا بنك / Attijariwafa Bank';
       const payload = JSON.parse(
         JSON.stringify({
           ...settings,
+          ribBank: cleanRibBank,
+          bankName: cleanBankName,
           tenantId: cleanTenant,
           _updatedAt: new Date().toISOString(),
         })
@@ -300,7 +304,12 @@ class FirestoreSyncService {
       const docRef = doc(db, 'settings', cleanTenant);
       const snap = await getDoc(docRef);
       if (snap.exists()) {
-        return snap.data() as AssociationSettings;
+        const data = snap.data() as AssociationSettings;
+        return {
+          ...data,
+          ribBank: (data?.ribBank && String(data.ribBank).trim()) || '011 780 0000 123456789012 45',
+          bankName: (data?.bankName && String(data.bankName).trim()) || 'التجاري وفا بنك / Attijariwafa Bank',
+        };
       }
       return null;
     } catch (err) {
@@ -679,19 +688,152 @@ class FirestoreSyncService {
   // ==========================================
   // CAMPAIGNS, CONTRIBUTIONS & POLLS SYNC
   // ==========================================
-  public async syncCampaignsToFirestore(tenantId: string, campaigns: DonationCampaign[]): Promise<boolean> {
-    return this.syncTenantCollectionWithDeletions('campaigns', tenantId, campaigns);
+  public async syncCampaignsToFirestore(
+    tenantId: string,
+    campaigns: DonationCampaign[],
+    removedCampaignIds: string[] = []
+  ): Promise<boolean> {
+    try {
+      const cleanTenant = !tenantId || tenantId === 'portal' ? 'tenant_nour' : tenantId;
+      const col = collection(db, 'campaigns');
+      const nowIso = new Date().toISOString();
+      const removedSet = new Set<string>(removedCampaignIds || []);
+
+      for (const camp of campaigns || []) {
+        if (!camp || !camp.id || removedSet.has(camp.id)) continue;
+        const docId = `${cleanTenant}_${camp.id}`.replace(/[^a-zA-Z0-9_.-]/g, '_');
+        const payload = JSON.parse(
+          JSON.stringify({
+            ...camp,
+            coverImage: camp.coverImage ? String(camp.coverImage).trim() : '',
+            videoUrl: camp.videoUrl ? String(camp.videoUrl).trim() : '',
+            tenantId: cleanTenant,
+            associationId: cleanTenant,
+            updatedAt: camp.updatedAt || camp.createdAt || nowIso,
+            _updatedAt: nowIso,
+          })
+        );
+        await setDoc(doc(col, docId), payload, { merge: true });
+      }
+
+      if (removedSet.size > 0) {
+        const delPromises: Promise<void>[] = [];
+        for (const remId of removedSet) {
+          const docId = `${cleanTenant}_${remId}`.replace(/[^a-zA-Z0-9_.-]/g, '_');
+          delPromises.push(deleteDoc(doc(col, docId)).catch(() => {}));
+        }
+        await Promise.all(delPromises);
+      }
+
+      try {
+        const sanitizedList = JSON.parse(
+          JSON.stringify(
+            (campaigns || [])
+              .filter((c) => c && c.id && !removedSet.has(c.id))
+              .map((c) => ({
+                ...c,
+                coverImage: c.coverImage ? String(c.coverImage).trim() : '',
+                videoUrl: c.videoUrl ? String(c.videoUrl).trim() : '',
+                tenantId: cleanTenant,
+                associationId: cleanTenant,
+                updatedAt: c.updatedAt || c.createdAt || nowIso,
+              }))
+          )
+        );
+        await setDoc(
+          doc(db, 'settings', `${cleanTenant}_campaigns_bundle`),
+          {
+            tenantId: cleanTenant,
+            campaigns: sanitizedList,
+            ...(removedSet.size > 0 ? { removedIds: Array.from(removedSet) } : {}),
+            lastUpdated: nowIso,
+            _updatedAt: nowIso,
+          },
+          { merge: true }
+        );
+      } catch {}
+
+      return true;
+    } catch (err) {
+      console.warn('[Firestore] Sync campaigns error:', err);
+      return false;
+    }
   }
 
   public async fetchCampaignsFromFirestore(tenantId: string): Promise<DonationCampaign[]> {
     try {
-      const cleanTenant = tenantId || 'tenant_nour';
+      const cleanTenant = !tenantId || tenantId === 'portal' ? 'tenant_nour' : tenantId;
       const col = collection(db, 'campaigns');
       const q = query(col, where('tenantId', '==', cleanTenant));
-      const snap = await getDocs(q);
-      const list: DonationCampaign[] = [];
-      snap.forEach((d) => list.push(d.data() as DonationCampaign));
-      return list;
+      const [snap, bundleSnap] = await Promise.all([
+        getDocs(q).catch(() => null),
+        getDoc(doc(db, 'settings', `${cleanTenant}_campaigns_bundle`)).catch(() => null),
+      ]);
+
+      const removedSet = new Set<string>();
+      const byId = new Map<string, DonationCampaign>();
+
+      const seedCovers = new Set([
+        'https://images.unsplash.com/photo-1488521787991-ed7bbaae773c?auto=format&fit=crop&w=1200&q=80',
+        'https://images.unsplash.com/photo-1541544741938-0af808871cc0?auto=format&fit=crop&w=1200&q=80',
+        'https://images.unsplash.com/photo-1469571486292-0ba58a3f068b?auto=format&fit=crop&w=1200&q=80',
+      ]);
+
+      const mergeItem = (raw: any) => {
+        if (!raw || !raw.id || removedSet.has(raw.id)) return;
+        const incoming: DonationCampaign = {
+          ...raw,
+          coverImage: raw.coverImage ? String(raw.coverImage).trim() : '',
+          videoUrl: raw.videoUrl && String(raw.videoUrl).trim() ? String(raw.videoUrl).trim() : undefined,
+          tenantId: cleanTenant,
+          associationId: cleanTenant,
+        };
+        const existing = byId.get(incoming.id);
+        if (!existing) {
+          byId.set(incoming.id, incoming);
+          return;
+        }
+        const exTs = new Date(existing.updatedAt || existing.createdAt || 0).getTime() || 0;
+        const inTs = new Date(incoming.updatedAt || incoming.createdAt || 0).getTime() || 0;
+        const primary = inTs >= exTs ? incoming : existing;
+        const secondary = inTs >= exTs ? existing : incoming;
+        let resolvedCover = primary.coverImage || secondary.coverImage;
+        if (
+          (!resolvedCover || seedCovers.has(resolvedCover)) &&
+          secondary.coverImage &&
+          !seedCovers.has(secondary.coverImage)
+        ) {
+          resolvedCover = secondary.coverImage;
+        }
+        byId.set(incoming.id, {
+          ...secondary,
+          ...primary,
+          coverImage: resolvedCover,
+          videoUrl: primary.videoUrl || (exTs === inTs ? secondary.videoUrl : undefined),
+        });
+      };
+
+      if (bundleSnap && bundleSnap.exists()) {
+        const bData = bundleSnap.data();
+        if (Array.isArray(bData?.removedIds)) {
+          for (const rId of bData.removedIds) {
+            if (rId) removedSet.add(String(rId));
+          }
+        }
+        if (Array.isArray(bData?.campaigns)) {
+          for (const c of bData.campaigns) {
+            mergeItem(c);
+          }
+        }
+      }
+
+      if (snap) {
+        snap.forEach((d) => {
+          mergeItem(d.data());
+        });
+      }
+
+      return Array.from(byId.values());
     } catch (err) {
       console.warn('[Firestore] Fetch campaigns error:', err);
       return [];
@@ -700,9 +842,13 @@ class FirestoreSyncService {
 
   public async deleteCampaignFromFirestore(tenantId: string, campaignId: string): Promise<void> {
     try {
-      const cleanTenant = tenantId || 'tenant_nour';
-      const docRef = doc(db, 'campaigns', `${cleanTenant}_${campaignId}`);
-      await deleteDoc(docRef);
+      const cleanTenant = !tenantId || tenantId === 'portal' ? 'tenant_nour' : tenantId;
+      const docId = `${cleanTenant}_${campaignId}`.replace(/[^a-zA-Z0-9_.-]/g, '_');
+      await deleteDoc(doc(db, 'campaigns', docId));
+      if (cleanTenant === 'tenant_nour') {
+        const portalDocId = `portal_${campaignId}`.replace(/[^a-zA-Z0-9_.-]/g, '_');
+        await deleteDoc(doc(db, 'campaigns', portalDocId)).catch(() => {});
+      }
     } catch (err) {
       console.warn('[Firestore] Delete campaign notice:', err);
     }

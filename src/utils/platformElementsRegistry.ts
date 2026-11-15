@@ -221,7 +221,7 @@ export const AVAILABLE_PLATFORM_TARGETS: PlatformTargetDefinition[] = [
     page: 'home',
     iconName: 'Users',
     defaultOrder: 8,
-    defaultEnabled: true,
+    defaultEnabled: false,
     defaultVisibleToNonMembers: true,
     isCoreSystem: true,
   },

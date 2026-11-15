@@ -26,7 +26,7 @@ export const defaultPlatformSupportSettings: PlatformSupportSettings = {
   minCustomAmountUsd: 5,
   bankAccount: {
     enabled: true,
-    accountHolder: 'syoumax منصة العمل الجمعوي - حساب دعم المنصة (SMART ASSOC SARL)',
+    accountHolder: 'youx منصة العمل الجمعوي - حساب دعم المنصة (SMART ASSOC SARL)',
     bankName: 'التجاري وفا بنك (Attijariwafa Bank)',
     rib: '007 780 0001234567890123 45',
     iban: 'MA64007780000123456789012345',
@@ -36,7 +36,7 @@ export const defaultPlatformSupportSettings: PlatformSupportSettings = {
   },
   cashPlus: {
     enabled: true,
-    beneficiaryName: 'syoumax منصة العمل الجمعوي (صندوق دعم وتطوير المنصة)',
+    beneficiaryName: 'youx منصة العمل الجمعوي (صندوق دعم وتطوير المنصة)',
     phone: '+212 661-234567',
     accountOrRef: 'CP-8849201',
     instructions: 'يمكنكم التوجه لأقرب وكالة كاش بليس بالمغرب وتقديم رقم الهاتف أو رقم المرجع، أو مسح رمز QR Code للدفع الفوري.',
@@ -50,7 +50,7 @@ export const defaultPlatformSupportSettings: PlatformSupportSettings = {
   creditCard: {
     enabled: true,
     gatewayName: 'بوابة البطاقات البنكية المباشرة (Visa / Mastercard / CMI)',
-    instructions: 'معاملة إلكترونية فورية وآمنة 100% لدعم استمرارية وتطوير syoumax منصة العمل الجمعوي.',
+    instructions: 'معاملة إلكترونية فورية وآمنة 100% لدعم استمرارية وتطوير youx منصة العمل الجمعوي.',
     countriesMode: 'all',
     allowedCountries: [],
   },
@@ -58,7 +58,7 @@ export const defaultPlatformSupportSettings: PlatformSupportSettings = {
     enabled: true,
     email: 'sb-onuud40741552@business.example.com',
     paymentUrl: '',
-    instructions: 'الدفع المباشر والآمن عبر حساب PayPal أو البطاقات البنكية الدولية لدعم برامج وتطوير syoumax منصة العمل الجمعوي.',
+    instructions: 'الدفع المباشر والآمن عبر حساب PayPal أو البطاقات البنكية الدولية لدعم برامج وتطوير youx منصة العمل الجمعوي.',
     clientId: 'AaJbsftKG9QmDMZmcWCiJEGXISIeDhuWL7z7qSYDHT48-QcsJ6QhY_gMEWuvOuvFnhFRHZ4HwiOpjtZT',
     mode: 'sandbox',
     isConnected: true,
@@ -91,8 +91,8 @@ export function getPlatformSupportSettings(): PlatformSupportSettings {
       ...defaultPlatformSupportSettings.bankAccount,
       ...(loaded.bankAccount || {}),
       accountHolder: (loaded.bankAccount?.accountHolder || defaultPlatformSupportSettings.bankAccount.accountHolder)
-        .replace(/\byoux\b/gi, 'syoumax')
-        .replace(/\bAljana\b/gi, 'syoumax'),
+        .replace(/\bsyoumax\b/gi, 'youx')
+        .replace(/\bAljana\b/gi, 'youx'),
       countriesMode: loaded.bankAccount?.countriesMode || 'all',
       allowedCountries: Array.isArray(loaded.bankAccount?.allowedCountries)
         ? loaded.bankAccount.allowedCountries
@@ -102,8 +102,8 @@ export function getPlatformSupportSettings(): PlatformSupportSettings {
       ...defaultPlatformSupportSettings.cashPlus,
       ...(loaded.cashPlus || {}),
       beneficiaryName: (loaded.cashPlus?.beneficiaryName || defaultPlatformSupportSettings.cashPlus.beneficiaryName)
-        .replace(/\byoux\b/gi, 'syoumax')
-        .replace(/\bAljana\b/gi, 'syoumax'),
+        .replace(/\bsyoumax\b/gi, 'youx')
+        .replace(/\bAljana\b/gi, 'youx'),
       qrCodeEnabled: typeof loaded.cashPlus?.qrCodeEnabled === 'boolean' ? loaded.cashPlus.qrCodeEnabled : false,
       qrCodeUrl: loaded.cashPlus?.qrCodeUrl || '',
       qrCodeFileName: loaded.cashPlus?.qrCodeFileName || '',
@@ -117,8 +117,8 @@ export function getPlatformSupportSettings(): PlatformSupportSettings {
       ...defaultPlatformSupportSettings.creditCard,
       ...(loaded.creditCard || {}),
       instructions: (loaded.creditCard?.instructions || defaultPlatformSupportSettings.creditCard.instructions)
-        .replace(/\byoux\b/gi, 'syoumax')
-        .replace(/\bAljana\b/gi, 'syoumax'),
+        .replace(/\bsyoumax\b/gi, 'youx')
+        .replace(/\bAljana\b/gi, 'youx'),
       countriesMode: loaded.creditCard?.countriesMode || 'all',
       allowedCountries: Array.isArray(loaded.creditCard?.allowedCountries)
         ? loaded.creditCard.allowedCountries
@@ -128,8 +128,8 @@ export function getPlatformSupportSettings(): PlatformSupportSettings {
       ...defaultPlatformSupportSettings.paypal,
       ...(loaded.paypal || {}),
       instructions: (loaded.paypal?.instructions || defaultPlatformSupportSettings.paypal.instructions)
-        .replace(/\byoux\b/gi, 'syoumax')
-        .replace(/\bAljana\b/gi, 'syoumax'),
+        .replace(/\bsyoumax\b/gi, 'youx')
+        .replace(/\bAljana\b/gi, 'youx'),
       countriesMode: loaded.paypal?.countriesMode || 'all',
       allowedCountries: Array.isArray(loaded.paypal?.allowedCountries)
         ? loaded.paypal.allowedCountries

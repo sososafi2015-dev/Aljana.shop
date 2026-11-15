@@ -24,7 +24,7 @@ export const defaultPlatformPaymentSettings: PlatformPaymentSettings = {
   exchangeRate: 9.95,
   bankAccount: {
     enabled: true,
-    accountHolder: 'syoumax منصة العمل الجمعوي - الإدارة المركزية (SMART ASSOC SARL)',
+    accountHolder: 'youx منصة العمل الجمعوي - الإدارة المركزية (SMART ASSOC SARL)',
     bankName: 'التجاري وفا بنك (Attijariwafa Bank)',
     rib: '007 780 0001234567890123 45',
     iban: 'MA64007780000123456789012345',
@@ -32,7 +32,7 @@ export const defaultPlatformPaymentSettings: PlatformPaymentSettings = {
   },
   cashPlus: {
     enabled: true,
-    beneficiaryName: 'syoumax منصة العمل الجمعوي (Service Activation & Renewal)',
+    beneficiaryName: 'youx منصة العمل الجمعوي (Service Activation & Renewal)',
     phone: '+212 661-234567',
     accountOrRef: 'CP-8849201',
     instructions: 'يمكنكم التوجه لأقرب وكالة كاش بليس بالمغرب وتقديم رقم الهاتف أو رقم المرجع أعلاه، ثم رفع صورة واضحة لوصل الإيداع من معرض الهاتف أو مدير الملفات وإرفاقه هنا.',
@@ -54,26 +54,40 @@ export const defaultPlatformPaymentSettings: PlatformPaymentSettings = {
 export function getPlatformPaymentSettings(): PlatformPaymentSettings {
   const loaded = loadData<PlatformPaymentSettings>(PAYMENT_STORAGE_KEYS.SETTINGS, defaultPlatformPaymentSettings);
   const supportSettings = getPlatformSupportSettings();
+  const defBank = defaultPlatformPaymentSettings.bankAccount;
+  const srcBank = supportSettings.bankAccount || loaded.bankAccount || ({} as any);
 
   return {
     ...defaultPlatformPaymentSettings,
     ...loaded,
     activationNoticeText: (loaded.activationNoticeText || '').trim() || defaultPlatformPaymentSettings.activationNoticeText,
     bankAccount: {
-      ...defaultPlatformPaymentSettings.bankAccount,
-      ...(supportSettings.bankAccount || loaded.bankAccount || {}),
+      ...defBank,
+      ...srcBank,
+      enabled: srcBank.enabled ?? defBank.enabled,
+      accountHolder: ((srcBank.accountHolder && srcBank.accountHolder.trim()) || (loaded.bankAccount?.accountHolder && loaded.bankAccount.accountHolder.trim()) || defBank.accountHolder).replace(/\bsyoumax\b/gi, 'youx'),
+      bankName: (srcBank.bankName && srcBank.bankName.trim()) || (loaded.bankAccount?.bankName && loaded.bankAccount.bankName.trim()) || defBank.bankName,
+      rib: (srcBank.rib && srcBank.rib.trim()) || (loaded.bankAccount?.rib && loaded.bankAccount.rib.trim()) || defBank.rib,
+      iban: (srcBank.iban && srcBank.iban.trim()) || (loaded.bankAccount?.iban && loaded.bankAccount.iban.trim()) || defBank.iban,
+      additionalInstructions:
+        (srcBank.additionalInstructions && srcBank.additionalInstructions.trim()) ||
+        (loaded.bankAccount?.additionalInstructions && loaded.bankAccount.additionalInstructions.trim()) ||
+        defBank.additionalInstructions,
     },
     cashPlus: {
       ...defaultPlatformPaymentSettings.cashPlus,
-      ...(supportSettings.cashPlus || loaded.cashPlus || {}),
+      ...(loaded.cashPlus || {}),
+      ...(supportSettings.cashPlus || {}),
     },
     creditCard: {
       ...defaultPlatformPaymentSettings.creditCard,
-      ...(supportSettings.creditCard || loaded.creditCard || {}),
+      ...(loaded.creditCard || {}),
+      ...(supportSettings.creditCard || {}),
     },
     paypal: {
       ...defaultPlatformPaymentSettings.paypal,
-      ...(supportSettings.paypal || loaded.paypal || {}),
+      ...(loaded.paypal || {}),
+      ...(supportSettings.paypal || {}),
     },
   };
 }
@@ -180,10 +194,45 @@ export async function syncPlatformPaymentSettingsFromBackend(): Promise<Platform
   }
 
   const current = getPlatformPaymentSettings();
+  const defBank = defaultPlatformPaymentSettings.bankAccount;
+  const mergedBank = {
+    ...defBank,
+    ...(current.bankAccount || {}),
+    ...(backendSettings?.bankAccount || {}),
+    ...(firestoreSettings?.bankAccount || {}),
+  };
+
   const merged: PlatformPaymentSettings = {
     ...current,
     ...(backendSettings || {}),
     ...(firestoreSettings || {}),
+    bankAccount: {
+      ...mergedBank,
+      enabled: mergedBank.enabled ?? defBank.enabled,
+      accountHolder: (mergedBank.accountHolder && String(mergedBank.accountHolder).trim()) || current.bankAccount.accountHolder || defBank.accountHolder,
+      bankName: (mergedBank.bankName && String(mergedBank.bankName).trim()) || current.bankAccount.bankName || defBank.bankName,
+      rib: (mergedBank.rib && String(mergedBank.rib).trim()) || current.bankAccount.rib || defBank.rib,
+      iban: (mergedBank.iban && String(mergedBank.iban).trim()) || current.bankAccount.iban || defBank.iban,
+      additionalInstructions:
+        (mergedBank.additionalInstructions && String(mergedBank.additionalInstructions).trim()) ||
+        current.bankAccount.additionalInstructions ||
+        defBank.additionalInstructions,
+    },
+    cashPlus: {
+      ...current.cashPlus,
+      ...(backendSettings?.cashPlus || {}),
+      ...(firestoreSettings?.cashPlus || {}),
+    },
+    creditCard: {
+      ...current.creditCard,
+      ...(backendSettings?.creditCard || {}),
+      ...(firestoreSettings?.creditCard || {}),
+    },
+    paypal: {
+      ...current.paypal,
+      ...(backendSettings?.paypal || {}),
+      ...(firestoreSettings?.paypal || {}),
+    },
   };
 
   // Reconcile activation notice text with fallback to default
@@ -1289,7 +1338,7 @@ export function submitPlatformSupportPayment(input: SubmitPlatformSupportInput):
   const virtualTicket: TenantPaymentRecord = {
     id: `sup_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
     tenantId: 'platform_support',
-    tenantName: 'syoumax منصة العمل الجمعوي (حساب دعم وتطوير المنصة)',
+    tenantName: 'youx منصة العمل الجمعوي (حساب دعم وتطوير المنصة)',
     tenantSlug: 'platform-support',
     ownerId: `supporter_${Date.now()}`,
     ownerName: (input.supporterName && input.supporterName.trim()) || 'فاعل خير / داعم للمنصة',

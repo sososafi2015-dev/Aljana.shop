@@ -12,8 +12,14 @@ async function startServer() {
   const distPath = path.resolve(__dirname, 'dist');
   const indexHtmlPath = path.join(distPath, 'index.html');
 
-  // Allow all custom domains and CORS headers
+  // Redirect legacy domain (al-shaif-association.ai.studio) to official domain (youx.ai.studio) and allow CORS
   app.use((req, res, next) => {
+    const rawHost = String(req.headers['x-forwarded-host'] || req.headers.host || '').toLowerCase();
+    if (rawHost.includes('al-shaif-association.ai.studio')) {
+      res.redirect(301, `https://youx.ai.studio${req.originalUrl || req.url || '/'}`);
+      return;
+    }
+
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
     res.setHeader(

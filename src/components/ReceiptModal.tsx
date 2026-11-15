@@ -4,6 +4,7 @@ import { X, Printer, CheckCircle2, Building2, Phone, Mail, FileCheck, Shield, Qr
 import { Member, FinancialOperation, AssociationSettings, Language, MemberCardSettings, MemberCardField, MemberContribution } from '../types';
 import { translations } from '../translations';
 import { initialMemberCardSettings } from '../initialData';
+import { resolveEffectiveBankSettings } from '../storage';
 
 interface ReceiptModalProps {
   isOpen: boolean;
@@ -550,7 +551,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                   </span>
                 </p>
                 <p className="font-mono text-slate-500">
-                  RIB: {settings.ribBank} ({settings.bankName})
+                  RIB: {resolveEffectiveBankSettings(settings).ribBank} ({resolveEffectiveBankSettings(settings).bankName})
                 </p>
               </div>
             )}

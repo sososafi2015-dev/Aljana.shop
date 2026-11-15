@@ -84,6 +84,11 @@ export const loadData = <T>(key: string, fallback: T): T => {
   };
 
   try {
+    // 1. Check in-memory session cache first if written during current session
+    if (memoryStorageFallback[key]) {
+      return validateParsed(JSON.parse(memoryStorageFallback[key]));
+    }
+
     if (typeof window !== 'undefined' && window.localStorage) {
       const item = localStorage.getItem(key);
       if (item) return validateParsed(JSON.parse(item));
@@ -96,11 +101,6 @@ export const loadData = <T>(key: string, fallback: T): T => {
         if (sItem) return validateParsed(JSON.parse(sItem));
       }
     } catch {}
-
-    // Check memory fallback
-    if (memoryStorageFallback[key]) {
-      return validateParsed(JSON.parse(memoryStorageFallback[key]));
-    }
 
     return fallback;
   } catch (error) {
@@ -147,7 +147,10 @@ export const saveData = <T>(key: string, data: T): void => {
       return;
     } catch {}
 
-    // Attempt 3: Fallback to sessionStorage
+    // Attempt 3: Remove stale localStorage entry so it never shadows memoryStorageFallback or sessionStorage
+    try {
+      localStorage.removeItem(key);
+    } catch {}
     try {
       const aggressiveSanitized = sanitizeLargePayload(data, true);
       sessionStorage.setItem(key, JSON.stringify(aggressiveSanitized));
@@ -219,7 +222,8 @@ export const recordDeletedActivityId = (activityId: string, tenantId?: string): 
 };
 
 export const getDeletedCampaignIds = (tenantId?: string): string[] => {
-  const current = tenantId || getActiveTenantIdFromStorage();
+  const rawTenant = tenantId || getActiveTenantIdFromStorage();
+  const current = !rawTenant || rawTenant === 'portal' ? 'tenant_nour' : rawTenant;
   const key = `chayef_tenant_${current}_deleted_campaign_ids`;
   try {
     const raw = localStorage.getItem(key);
@@ -232,7 +236,8 @@ export const getDeletedCampaignIds = (tenantId?: string): string[] => {
 };
 
 export const recordDeletedCampaignId = (campaignId: string, tenantId?: string): void => {
-  const current = tenantId || getActiveTenantIdFromStorage();
+  const rawTenant = tenantId || getActiveTenantIdFromStorage();
+  const current = !rawTenant || rawTenant === 'portal' ? 'tenant_nour' : rawTenant;
   const key = `chayef_tenant_${current}_deleted_campaign_ids`;
   const existing = getDeletedCampaignIds(current);
   if (!existing.includes(campaignId)) {
@@ -1294,12 +1299,16 @@ export const getStoredSettings = (tenantId?: string): AssociationSettings => {
     resolvedNameEn = loaded?.nameEn || initialSettings.nameEn;
   }
 
+  const resolvedBank = resolveEffectiveBankSettings(loaded, tenantMeta as any);
+
   const withAccessControl: AssociationSettings = {
     ...initialSettings,
     ...loaded,
     name: resolvedName,
     nameFr: resolvedNameFr,
     nameEn: resolvedNameEn,
+    ribBank: resolvedBank.ribBank,
+    bankName: resolvedBank.bankName,
     tagline: (loaded?.tagline && loaded.tagline !== initialSettings.tagline)
       ? loaded.tagline
       : ((current && current !== 'tenant_nour' && current !== 'portal' && tenantMeta?.tagline)
@@ -1339,18 +1348,44 @@ export const getStoredSettings = (tenantId?: string): AssociationSettings => {
   }
   return withAccessControl;
 };
+
+export const DEFAULT_ASSOCIATION_RIB = initialSettings.ribBank || '011 780 0000 123456789012 45';
+export const DEFAULT_ASSOCIATION_BANK_NAME = initialSettings.bankName || 'التجاري وفا بنك / Attijariwafa Bank';
+
+export function resolveEffectiveBankSettings(
+  settings?: Partial<AssociationSettings> | null,
+  tenantMeta?: { rib?: string; ribBank?: string; bankName?: string } | null
+): { ribBank: string; bankName: string } {
+  const ribBank =
+    (settings?.ribBank && String(settings.ribBank).trim()) ||
+    (tenantMeta?.ribBank && String(tenantMeta.ribBank).trim()) ||
+    (tenantMeta?.rib && String(tenantMeta.rib).trim()) ||
+    DEFAULT_ASSOCIATION_RIB;
+  const bankName =
+    (settings?.bankName && String(settings.bankName).trim()) ||
+    (tenantMeta?.bankName && String(tenantMeta.bankName).trim()) ||
+    DEFAULT_ASSOCIATION_BANK_NAME;
+  return { ribBank, bankName };
+}
+
 export const saveSettings = (settings: AssociationSettings, updateTimestamp: boolean = true, tenantId?: string) => {
   const current = tenantId || getActiveTenantIdFromStorage();
-  saveData(getScopedKey(KEYS.SETTINGS, current), settings);
+  const resolvedBank = resolveEffectiveBankSettings(settings);
+  const normalizedSettings: AssociationSettings = {
+    ...settings,
+    ribBank: resolvedBank.ribBank,
+    bankName: resolvedBank.bankName,
+  };
+  saveData(getScopedKey(KEYS.SETTINGS, current), normalizedSettings);
   if (updateTimestamp) {
     setSettingsTimestamp(Date.now(), current);
     // Mirror to Cloud Firestore on explicit updates
-    firestoreSyncService.saveSettingsToFirestore(current, settings).catch((err) => {
+    firestoreSyncService.saveSettingsToFirestore(current, normalizedSettings).catch((err) => {
       console.warn('[Storage] Firestore sync settings notice:', err);
     });
   }
-  if (settings?.themeColors) {
-    applyStoreTheme(settings.themeColors);
+  if (normalizedSettings?.themeColors) {
+    applyStoreTheme(normalizedSettings.themeColors);
   }
   // Keep tenant registry in sync for any association (including tenant_nour and isolated tenants)
   if (current && current !== 'portal') {
@@ -1364,34 +1399,37 @@ export const saveSettings = (settings: AssociationSettings, updateTimestamp: boo
             const isIsolated = current !== 'tenant_nour';
             // Guard: Never allow 'جمعية الشايف' or Nour template default to overwrite an isolated tenant's name
             const cleanNewName = isIsolated
-              ? ((settings.name && settings.name.trim() !== 'جمعية الشايف' && settings.name.trim() !== initialSettings.name)
-                  ? settings.name.trim()
+              ? ((normalizedSettings.name && normalizedSettings.name.trim() !== 'جمعية الشايف' && normalizedSettings.name.trim() !== initialSettings.name)
+                  ? normalizedSettings.name.trim()
                   : allTenants[idx].name)
-              : (settings.name?.trim() || allTenants[idx].name);
+              : (normalizedSettings.name?.trim() || allTenants[idx].name);
 
             const cleanNewNameFr = isIsolated
-              ? ((settings.nameFr && settings.nameFr.trim() !== 'Association El Chayef' && settings.nameFr.trim() !== initialSettings.nameFr)
-                  ? settings.nameFr.trim()
+              ? ((normalizedSettings.nameFr && normalizedSettings.nameFr.trim() !== 'Association El Chayef' && normalizedSettings.nameFr.trim() !== initialSettings.nameFr)
+                  ? normalizedSettings.nameFr.trim()
                   : allTenants[idx].nameFr)
-              : (settings.nameFr?.trim() || allTenants[idx].nameFr);
+              : (normalizedSettings.nameFr?.trim() || allTenants[idx].nameFr);
 
             const cleanNewNameEn = isIsolated
-              ? ((settings.nameEn && settings.nameEn.trim() !== 'El Chayef Association' && settings.nameEn.trim() !== initialSettings.nameEn)
-                  ? settings.nameEn.trim()
+              ? ((normalizedSettings.nameEn && normalizedSettings.nameEn.trim() !== 'El Chayef Association' && normalizedSettings.nameEn.trim() !== initialSettings.nameEn)
+                  ? normalizedSettings.nameEn.trim()
                   : (cleanNewNameFr || allTenants[idx].nameEn))
-              : (settings.nameEn?.trim() || allTenants[idx].nameEn);
+              : (normalizedSettings.nameEn?.trim() || allTenants[idx].nameEn);
 
             allTenants[idx] = {
               ...allTenants[idx],
               name: cleanNewName,
               nameFr: cleanNewNameFr,
               nameEn: cleanNewNameEn,
-              tagline: settings.tagline !== undefined ? settings.tagline : allTenants[idx].tagline,
-              whatsapp: settings.whatsapp !== undefined ? settings.whatsapp : allTenants[idx].whatsapp,
-              phone: settings.phone !== undefined ? settings.phone : allTenants[idx].phone,
-              ownerPhone: settings.phone !== undefined ? settings.phone : allTenants[idx].ownerPhone,
-              logoUrl: settings.logoUrl || allTenants[idx].logoUrl,
-              bannerImageUrl: settings.bannerImageUrl || allTenants[idx].bannerImageUrl,
+              tagline: normalizedSettings.tagline !== undefined ? normalizedSettings.tagline : allTenants[idx].tagline,
+              whatsapp: normalizedSettings.whatsapp !== undefined ? normalizedSettings.whatsapp : allTenants[idx].whatsapp,
+              phone: normalizedSettings.phone !== undefined ? normalizedSettings.phone : allTenants[idx].phone,
+              ownerPhone: normalizedSettings.phone !== undefined ? normalizedSettings.phone : allTenants[idx].ownerPhone,
+              rib: normalizedSettings.ribBank,
+              ribBank: normalizedSettings.ribBank,
+              bankName: normalizedSettings.bankName,
+              logoUrl: normalizedSettings.logoUrl || allTenants[idx].logoUrl,
+              bannerImageUrl: normalizedSettings.bannerImageUrl || allTenants[idx].bannerImageUrl,
               updatedAt: new Date().toISOString(),
             };
             localStorage.setItem('chayef_all_tenants_v2', JSON.stringify(allTenants));
@@ -1680,14 +1718,35 @@ export const getStoredUIElements = (tenantId?: string): UIElementConfig[] => {
     );
   if (!Array.isArray(loaded) || loaded.length === 0) return cleanInitial;
 
+  const migrationKey = `chayef_migration_hide_gateway_members_v1_${current || 'default'}`;
+  let needsHideMigration = false;
+  if (typeof window !== 'undefined') {
+    try {
+      needsHideMigration = localStorage.getItem(migrationKey) !== '1';
+    } catch {}
+  }
+
   // Filter out any deprecated elements and ensure current_financial_balance is hidden from visitors
-  return loaded
+  const normalized = loaded
     .filter((el) => el && el.id && el.id !== 'pillars_section' && el.id !== 'gateway_financials')
-    .map((el) =>
-      el.id === 'current_financial_balance'
-        ? { ...el, enabled: true, visibleToNonMembers: false }
-        : el
-    );
+    .map((el) => {
+      if (el.id === 'current_financial_balance') {
+        return { ...el, enabled: true, visibleToNonMembers: false };
+      }
+      if (needsHideMigration && el.id === 'gateway_members') {
+        return { ...el, enabled: false };
+      }
+      return el;
+    });
+
+  if (needsHideMigration && typeof window !== 'undefined') {
+    try {
+      saveData(getScopedKey(KEYS.UI_ELEMENTS, current), normalized);
+      localStorage.setItem(migrationKey, '1');
+    } catch {}
+  }
+
+  return normalized;
 };
 export const getUIElementsTimestamp = (tenantId?: string): number => {
   try {
@@ -2343,9 +2402,10 @@ export const getStoredCampaignContributions = (tenantId?: string): CampaignContr
 };
 
 export const saveCampaignContributions = (contributions: CampaignContribution[], tenantId?: string) => {
-  const current = tenantId || getActiveTenantIdFromStorage();
+  const rawTenant = tenantId || getActiveTenantIdFromStorage();
+  const current = !rawTenant || rawTenant === 'portal' ? 'tenant_nour' : rawTenant;
   saveData(getScopedKey(KEYS.CAMPAIGN_CONTRIBUTIONS, current), contributions);
-  // Auto-sync campaigns amounts when contributions change
+  // Auto-sync campaigns amounts when contributions change without losing custom coverImage/videoUrl
   const isMaster = !current || current === 'tenant_nour' || current === 'portal';
   const currentCampaigns = loadData<DonationCampaign[]>(getScopedKey(KEYS.CAMPAIGNS, current), isMaster ? initialCampaigns : []);
   const updatedCampaigns = recalculateCampaignsFromContributions(currentCampaigns, contributions);
@@ -2353,15 +2413,24 @@ export const saveCampaignContributions = (contributions: CampaignContribution[],
 };
 
 export const getStoredCampaigns = (tenantId?: string): DonationCampaign[] => {
-  const current = tenantId || getActiveTenantIdFromStorage();
+  const rawTenant = tenantId || getActiveTenantIdFromStorage();
+  const current = !rawTenant || rawTenant === 'portal' ? 'tenant_nour' : rawTenant;
   const isMaster = !current || current === 'tenant_nour' || current === 'portal';
   const initKey = `chayef_tenant_${current}_campaigns_initialized`;
-  const wasInitialized = typeof window !== 'undefined' && localStorage.getItem(initKey) === 'true';
   const key = getScopedKey(KEYS.CAMPAIGNS, current);
 
   let loaded: DonationCampaign[] | null = null;
-  if (typeof window !== 'undefined') {
-    const item = localStorage.getItem(key);
+  if (memoryStorageFallback[key]) {
+    try {
+      const parsed = JSON.parse(memoryStorageFallback[key]);
+      if (Array.isArray(parsed)) {
+        loaded = parsed;
+      }
+    } catch {}
+  }
+
+  if (loaded === null && typeof window !== 'undefined') {
+    const item = localStorage.getItem(key) || sessionStorage.getItem(key);
     if (item !== null) {
       try {
         const parsed = JSON.parse(item);
@@ -2433,31 +2502,44 @@ export const getStoredCampaigns = (tenantId?: string): DonationCampaign[] => {
     saveData(key, fallback);
     loaded = fallback;
     if (typeof window !== 'undefined') {
-      localStorage.setItem(initKey, 'true');
+      try {
+        localStorage.setItem(initKey, 'true');
+      } catch {}
     }
   }
 
   const deletedIds = getDeletedCampaignIds(current);
   const filtered = (loaded || []).filter((c) => c && c.id && !deletedIds.includes(c.id)).map((c) => ({
     ...c,
-    tenantId: c.tenantId || current,
-    associationId: c.associationId || current,
+    tenantId: c.tenantId && c.tenantId !== 'portal' ? c.tenantId : current,
+    associationId: c.associationId && c.associationId !== 'portal' ? c.associationId : current,
   }));
   const contributions = getStoredCampaignContributions(current);
   return recalculateCampaignsFromContributions(filtered, contributions);
 };
 
-export const saveCampaigns = (campaigns: DonationCampaign[], tenantId?: string) => {
-  const current = tenantId || getActiveTenantIdFromStorage();
+export const saveCampaigns = (campaigns: DonationCampaign[], tenantId?: string, syncFirestore = false) => {
+  const rawTenant = tenantId || getActiveTenantIdFromStorage();
+  const current = !rawTenant || rawTenant === 'portal' ? 'tenant_nour' : rawTenant;
   if (typeof window !== 'undefined') {
-    localStorage.setItem(`chayef_tenant_${current}_campaigns_initialized`, 'true');
+    try {
+      localStorage.setItem(`chayef_tenant_${current}_campaigns_initialized`, 'true');
+    } catch {}
   }
+  const deletedIds = getDeletedCampaignIds(current);
+  const cleanList = (campaigns || []).filter((c) => c && c.id && !deletedIds.includes(c.id)).map((c) => ({
+    ...c,
+    tenantId: current,
+    associationId: current,
+  }));
   const contributions = getStoredCampaignContributions(current);
-  const recalculated = recalculateCampaignsFromContributions(campaigns, contributions);
+  const recalculated = recalculateCampaignsFromContributions(cleanList, contributions);
   saveData(getScopedKey(KEYS.CAMPAIGNS, current), recalculated);
-  firestoreSyncService.syncCampaignsToFirestore(current, recalculated).catch((err) => {
-    console.warn('[Storage] Firestore sync campaigns notice:', err);
-  });
+  if (syncFirestore) {
+    firestoreSyncService.syncCampaignsToFirestore(current, recalculated, deletedIds).catch((err) => {
+      console.warn('[Storage] Firestore sync campaigns notice:', err);
+    });
+  }
 };
 
 export const VOTING_RESTRICTED_MESSAGE =
@@ -2635,7 +2717,7 @@ export const resetToDefaults = () => {
 export const exportBackupJSON = () => {
   const currentSettings = getStoredSettings();
   const data = {
-    app: currentSettings.name ? `${currentSettings.name} - syoumax` : 'syoumax منصة العمل الجمعوي',
+    app: currentSettings.name ? `${currentSettings.name} - youx` : 'youx منصة العمل الجمعوي',
     exportedAt: new Date().toISOString(),
     settings: currentSettings,
     memberCardSettings: getStoredMemberCardSettings(),
@@ -2684,7 +2766,7 @@ export const exportOperationsCSV = (operations: FinancialOperation[]) => {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `سجل_العمليات_المالية_syoumax_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = `سجل_العمليات_المالية_youx_${new Date().toISOString().slice(0, 10)}.csv`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

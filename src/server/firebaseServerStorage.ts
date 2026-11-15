@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore, setLogLevel, doc, getDoc, setDoc, deleteDoc, collection, getDocs } from 'firebase/firestore';
+import { getFirestore, setLogLevel, doc, getDoc, setDoc, deleteDoc, collection, getDocs, query, where } from 'firebase/firestore';
 import firebaseConfigData from '../../firebase-applet-config.json';
 import { IMAGES_DIR, VIDEOS_DIR, ensureStorageDirectories } from './storageEngine';
 
@@ -336,23 +336,27 @@ export async function syncTenantCollectionToFirebaseServer(
   removedItemIds: string[] = []
 ): Promise<void> {
   try {
-    const cleanTenant = tenantId || 'tenant_nour';
+    const cleanTenant = !tenantId || tenantId === 'portal' ? 'tenant_nour' : tenantId;
+    const nowIso = new Date().toISOString();
     const promises: Promise<any>[] = [];
 
     for (const item of items || []) {
       if (!item || !item.id) continue;
       const docId = `${cleanTenant}_${item.id}`.replace(/[^a-zA-Z0-9_.-]/g, '_');
+      const rawPayload: Record<string, any> = {
+        ...item,
+        tenantId: item.tenantId && item.tenantId !== 'portal' ? item.tenantId : cleanTenant,
+        associationId: item.associationId && item.associationId !== 'portal' ? item.associationId : cleanTenant,
+        updatedAt: item.updatedAt || item.createdAt || nowIso,
+        _updatedAt: nowIso,
+      };
+      if (collectionName === 'campaigns') {
+        rawPayload.coverImage = item.coverImage ? String(item.coverImage).trim() : '';
+        rawPayload.videoUrl = item.videoUrl ? String(item.videoUrl).trim() : '';
+      }
+      const sanitizedPayload = JSON.parse(JSON.stringify(rawPayload));
       promises.push(
-        setDoc(
-          doc(serverDb, collectionName, docId),
-          {
-            ...item,
-            tenantId: item.tenantId || cleanTenant,
-            associationId: item.associationId || cleanTenant,
-            updatedAt: new Date().toISOString(),
-          },
-          { merge: true }
-        )
+        setDoc(doc(serverDb, collectionName, docId), sanitizedPayload, { merge: true })
       );
     }
 
@@ -360,6 +364,38 @@ export async function syncTenantCollectionToFirebaseServer(
       if (!remId) continue;
       const docId = `${cleanTenant}_${remId}`.replace(/[^a-zA-Z0-9_.-]/g, '_');
       promises.push(deleteDoc(doc(serverDb, collectionName, docId)).catch(() => {}));
+      if (cleanTenant === 'tenant_nour') {
+        const portalDocId = `portal_${remId}`.replace(/[^a-zA-Z0-9_.-]/g, '_');
+        promises.push(deleteDoc(doc(serverDb, collectionName, portalDocId)).catch(() => {}));
+      }
+    }
+
+    if (collectionName === 'campaigns') {
+      const sanitizedList = JSON.parse(
+        JSON.stringify(
+          (items || []).map((c) => ({
+            ...c,
+            coverImage: c?.coverImage ? String(c.coverImage).trim() : '',
+            videoUrl: c?.videoUrl ? String(c.videoUrl).trim() : '',
+            tenantId: cleanTenant,
+            associationId: cleanTenant,
+            updatedAt: c?.updatedAt || c?.createdAt || nowIso,
+          }))
+        )
+      );
+      promises.push(
+        setDoc(
+          doc(serverDb, 'settings', `${cleanTenant}_campaigns_bundle`),
+          {
+            tenantId: cleanTenant,
+            campaigns: sanitizedList,
+            removedIds: removedItemIds || [],
+            lastUpdated: nowIso,
+            _updatedAt: nowIso,
+          },
+          { merge: true }
+        ).catch(() => {})
+      );
     }
 
     await Promise.all(promises);
@@ -367,5 +403,28 @@ export async function syncTenantCollectionToFirebaseServer(
     console.warn(`[FirebaseServerStorage] syncTenantCollection (${collectionName}) notice:`, err);
   }
 }
+
+export async function fetchTenantCollectionFromFirebaseServer<T = any>(
+  collectionName: string,
+  tenantId: string
+): Promise<T[]> {
+  try {
+    const cleanTenant = !tenantId || tenantId === 'portal' ? 'tenant_nour' : tenantId;
+    const q = query(collection(serverDb, collectionName), where('tenantId', '==', cleanTenant));
+    const snap = await getDocs(q);
+    const list: T[] = [];
+    snap.forEach((d) => {
+      const data = d.data();
+      if (data) {
+        list.push(data as T);
+      }
+    });
+    return list;
+  } catch (err) {
+    console.warn(`[FirebaseServerStorage] fetchTenantCollection (${collectionName}/${tenantId}) notice:`, err);
+    return [];
+  }
+}
+
 
 

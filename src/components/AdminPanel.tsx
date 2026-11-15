@@ -85,6 +85,7 @@ import { getTenantById, defaultTenants, getMasterAdminSession } from '../tenantS
 import { getTenantSubscriptionDetails } from '../paymentStorage';
 import { useAssociationSectionsConfig } from '../associationSectionsStorage';
 import { WhatsAppIcon, validateWhatsAppPhone, buildWhatsAppChatUrl } from '../utils/whatsappUtils';
+import { resolveEffectiveBankSettings } from '../storage';
 
 interface AdminPanelProps {
   settings: AssociationSettings;
@@ -525,19 +526,32 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   };
 
-  const [formData, setFormData] = useState<AssociationSettings>({ ...settings });
+  const initialResolvedBank = resolveEffectiveBankSettings(settings);
+  const [formData, setFormData] = useState<AssociationSettings>({
+    ...settings,
+    ribBank: initialResolvedBank.ribBank,
+    bankName: initialResolvedBank.bankName,
+  });
   const [savedSuccess, setSavedSuccess] = useState(false);
 
   // Keep formData in sync whenever external settings change (e.g. from Branding or Access Control updates)
   useEffect(() => {
-    setFormData({ ...settings });
+    const resolvedBank = resolveEffectiveBankSettings(settings);
+    setFormData({
+      ...settings,
+      ribBank: resolvedBank.ribBank,
+      bankName: resolvedBank.bankName,
+    });
   }, [settings]);
 
   const handleSettingsSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const resolvedBank = resolveEffectiveBankSettings(formData, settings);
     const mergedSettings: AssociationSettings = {
       ...settings,
       ...formData,
+      ribBank: resolvedBank.ribBank,
+      bankName: resolvedBank.bankName,
       // Preserve critical branding and access control settings so they are never erased
       logoUrl: formData.logoUrl !== undefined ? formData.logoUrl : settings.logoUrl,
       bannerImageUrl: formData.bannerImageUrl !== undefined ? formData.bannerImageUrl : settings.bannerImageUrl,

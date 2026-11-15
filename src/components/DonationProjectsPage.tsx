@@ -775,7 +775,7 @@ export const DonationProjectsPage: React.FC<DonationProjectsPageProps> = ({
 
         {/* Back to Home Portal Bottom Banner */}
         <div className="pt-6 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
-          <span>syoumax منصة العمل الجمعوي • منظومة موحدة للتنمية والتضامن</span>
+          <span>youx منصة العمل الجمعوي • منظومة موحدة للتنمية والتضامن</span>
           <button
             onClick={onBackToHome}
             className="inline-flex items-center gap-2 text-emerald-700 hover:text-emerald-800 font-bold cursor-pointer"

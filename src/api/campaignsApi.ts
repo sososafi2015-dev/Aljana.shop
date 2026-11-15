@@ -11,6 +11,7 @@ import {
   getStoredCurrentAdminSession,
   getActiveTenantIdFromStorage,
   recordDeletedCampaignId,
+  getDeletedCampaignIds,
 } from '../storage';
 import {
   saveGlobalContributionTypes,
@@ -28,13 +29,19 @@ import type {
 } from '../types';
 import { firestoreSyncService } from '../services/firestoreSyncService';
 
+function normalizeCampaignTenant(tenantId?: string | null): string {
+  const raw = (tenantId || '').trim();
+  if (!raw || raw === 'portal') return 'tenant_nour';
+  return raw;
+}
+
 function getAdminHeader(session: CurrentAdminSession | null | undefined): Record<string, string> {
   const resolved = session || getStoredCurrentAdminSession() || {
     type: 'super_admin',
     role: 'main_admin',
     fullName: 'إدارة الجمعية',
   };
-  const activeTenant = (session as any)?.tenantId || getActiveTenantIdFromStorage() || 'tenant_nour';
+  const activeTenant = normalizeCampaignTenant((session as any)?.tenantId || getActiveTenantIdFromStorage());
   return {
     'x-admin-session': encodeURIComponent(JSON.stringify(resolved)),
     'x-tenant-id': activeTenant,
@@ -48,18 +55,23 @@ export async function apiFetchCampaigns(tenantId?: string): Promise<{
   campaigns: DonationCampaign[];
   contributionTypes: ContributionTypeConfig[];
 }> {
-  const currentTenant = tenantId || getActiveTenantIdFromStorage() || 'tenant_nour';
+  const currentTenant = normalizeCampaignTenant(tenantId || getActiveTenantIdFromStorage());
   try {
-    const res = await fetch(`/api/campaigns?tenantId=${encodeURIComponent(currentTenant)}`, {
+    const res = await fetch(`/api/campaigns?tenantId=${encodeURIComponent(currentTenant)}&_t=${Date.now()}`, {
+      cache: 'no-store',
       headers: {
         'Accept': 'application/json',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
         'x-tenant-id': currentTenant,
       },
     });
     if (res.ok) {
       const data = await res.json();
       if (data.success && Array.isArray(data.campaigns)) {
-        saveCampaigns(data.campaigns, currentTenant);
+        const deletedIds = getDeletedCampaignIds(currentTenant);
+        const cleanCampaigns = data.campaigns.filter((c: any) => c && c.id && !deletedIds.includes(c.id));
+        // Cache locally WITHOUT triggering a Firestore write on a read operation
+        saveCampaigns(cleanCampaigns, currentTenant, false);
         if (Array.isArray(data.contributionTypes)) {
           const activeOnly = data.contributionTypes.filter((t: any) => !t.isDeleted);
           saveContributionTypes(activeOnly, currentTenant);
@@ -68,7 +80,7 @@ export async function apiFetchCampaigns(tenantId?: string): Promise<{
           ? data.contributionTypes.filter((t: any) => !t.isDeleted)
           : getStoredContributionTypes(currentTenant);
         return {
-          campaigns: data.campaigns,
+          campaigns: cleanCampaigns,
           contributionTypes: activeTypes,
         };
       }
@@ -91,14 +103,18 @@ export async function apiCreateCampaign(
   session: CurrentAdminSession | null,
   tenantId?: string
 ): Promise<{ success: boolean; campaign?: DonationCampaign; error?: string }> {
-  const activeTenant = tenantId || (campaignData as any).tenantId || (session as any)?.tenantId || getActiveTenantIdFromStorage() || 'tenant_nour';
+  const activeTenant = normalizeCampaignTenant(
+    tenantId || (campaignData as any).tenantId || (session as any)?.tenantId || getActiveTenantIdFromStorage()
+  );
   const cleanVideoUrl = (campaignData.videoUrl || '').trim() || undefined;
+  const nowIso = new Date().toISOString();
 
   const payload: Partial<DonationCampaign> = {
     ...campaignData,
     videoUrl: cleanVideoUrl,
     tenantId: activeTenant,
     associationId: activeTenant,
+    updatedAt: nowIso,
   };
 
   try {
@@ -116,9 +132,9 @@ export async function apiCreateCampaign(
     if (res.ok && data.success && data.campaign) {
       const current = getStoredCampaigns(activeTenant);
       const updated = [data.campaign, ...current.filter((c) => c.id !== data.campaign.id)];
-      saveCampaigns(updated, activeTenant);
+      saveCampaigns(updated, activeTenant, false);
       // Synchronize directly with Firestore for immediate multi-client and refresh persistence
-      await firestoreSyncService.syncCampaignsToFirestore(activeTenant, updated);
+      await firestoreSyncService.syncCampaignsToFirestore(activeTenant, updated, getDeletedCampaignIds(activeTenant));
       return { success: true, campaign: data.campaign };
     }
     return { success: false, error: data.error || 'فشل حفظ وإضافة الحملة في قاعدة البيانات.' };
@@ -135,20 +151,21 @@ export async function apiCreateCampaign(
         progressPercentage: Number(campaignData.progressPercentage) || 0,
         coverImage: campaignData.coverImage || 'https://images.unsplash.com/photo-1488521787991-ed7bbaae773c?auto=format&fit=crop&w=1200&q=80',
         videoUrl: cleanVideoUrl,
-        startDate: campaignData.startDate || new Date().toISOString().slice(0, 10),
+        startDate: campaignData.startDate || nowIso.slice(0, 10),
         endDate: campaignData.endDate || '',
         status: campaignData.status || 'active',
         allowOverfunding: campaignData.allowOverfunding ?? true,
         isVisibleOnStore: campaignData.isVisibleOnStore !== false,
-        createdAt: new Date().toISOString(),
+        createdAt: nowIso,
+        updatedAt: nowIso,
         tenantId: activeTenant,
         associationId: activeTenant,
       };
       const current = getStoredCampaigns(activeTenant);
       const updated = [newCamp, ...current.filter((c) => c.id !== newCamp.id)];
-      const fsOk = await firestoreSyncService.syncCampaignsToFirestore(activeTenant, updated);
+      const fsOk = await firestoreSyncService.syncCampaignsToFirestore(activeTenant, updated, getDeletedCampaignIds(activeTenant));
       if (fsOk) {
-        saveCampaigns(updated, activeTenant);
+        saveCampaigns(updated, activeTenant, false);
         return { success: true, campaign: newCamp };
       }
     } catch (fsErr) {
@@ -170,7 +187,7 @@ export async function apiToggleCampaignVisibility(
   explicitVisibility?: boolean,
   tenantId?: string
 ): Promise<{ success: boolean; campaign?: DonationCampaign; message?: string; error?: string }> {
-  const activeTenant = tenantId || (session as any)?.tenantId || getActiveTenantIdFromStorage() || 'tenant_nour';
+  const activeTenant = normalizeCampaignTenant(tenantId || (session as any)?.tenantId || getActiveTenantIdFromStorage());
   try {
     const res = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/visibility?tenantId=${encodeURIComponent(activeTenant)}`, {
       method: 'PATCH',
@@ -188,8 +205,8 @@ export async function apiToggleCampaignVisibility(
     if (res.ok && data.success && data.campaign) {
       const current = getStoredCampaigns(activeTenant);
       const updated = current.map((c) => (c.id === campaignId ? data.campaign : c));
-      saveCampaigns(updated, activeTenant);
-      firestoreSyncService.syncCampaignsToFirestore(activeTenant, updated).catch(() => {});
+      saveCampaigns(updated, activeTenant, false);
+      await firestoreSyncService.syncCampaignsToFirestore(activeTenant, updated, getDeletedCampaignIds(activeTenant));
       return { success: true, campaign: data.campaign, message: data.message };
     }
     return { success: false, error: data.error || 'فشل تعديل ظهور الحملة على المتجر' };
@@ -201,8 +218,8 @@ export async function apiToggleCampaignVisibility(
     const updated = current.map((c) =>
       c.id === campaignId ? { ...c, isVisibleOnStore: nextVis, updatedAt: new Date().toISOString() } : c
     );
-    saveCampaigns(updated, activeTenant);
-    firestoreSyncService.syncCampaignsToFirestore(activeTenant, updated).catch(() => {});
+    saveCampaigns(updated, activeTenant, false);
+    await firestoreSyncService.syncCampaignsToFirestore(activeTenant, updated, getDeletedCampaignIds(activeTenant));
     const updatedCamp = updated.find((c) => c.id === campaignId);
     return {
       success: true,
@@ -217,21 +234,26 @@ export async function apiToggleCampaignVisibility(
  */
 export async function apiUpdateCampaign(
   campaignId: string,
-  campaignData: Partial<DonationCampaign>,
+  campaignData: Partial<DonationCampaign> & { clearVideo?: boolean },
   session: CurrentAdminSession | null,
   tenantId?: string
 ): Promise<{ success: boolean; campaign?: DonationCampaign; error?: string }> {
-  const activeTenant = tenantId || (campaignData as any).tenantId || (session as any)?.tenantId || getActiveTenantIdFromStorage() || 'tenant_nour';
+  const activeTenant = normalizeCampaignTenant(
+    tenantId || (campaignData as any).tenantId || (session as any)?.tenantId || getActiveTenantIdFromStorage()
+  );
   const cleanVideoUrl =
     campaignData.videoUrl !== undefined
       ? (typeof campaignData.videoUrl === 'string' && campaignData.videoUrl.trim() ? campaignData.videoUrl.trim() : null)
       : undefined;
+  const nowIso = new Date().toISOString();
 
-  const payload: Partial<DonationCampaign> = {
+  const payload: Partial<DonationCampaign> & { clearVideo?: boolean } = {
     ...campaignData,
     ...(cleanVideoUrl !== undefined ? { videoUrl: cleanVideoUrl as any } : {}),
+    ...(campaignData.clearVideo !== undefined ? { clearVideo: campaignData.clearVideo } : {}),
     tenantId: activeTenant,
     associationId: activeTenant,
+    updatedAt: nowIso,
   };
 
   try {
@@ -248,10 +270,13 @@ export async function apiUpdateCampaign(
     const data = await res.json();
     if (res.ok && data.success && data.campaign) {
       const current = getStoredCampaigns(activeTenant);
-      const updated = current.map((c) => (c.id === campaignId ? data.campaign : c));
-      saveCampaigns(updated, activeTenant);
+      const existsInCurrent = current.some((c) => c.id === campaignId);
+      const updated = existsInCurrent
+        ? current.map((c) => (c.id === campaignId ? data.campaign : c))
+        : [data.campaign, ...current];
+      saveCampaigns(updated, activeTenant, false);
       // Synchronize directly with Firestore for permanent persistence
-      await firestoreSyncService.syncCampaignsToFirestore(activeTenant, updated);
+      await firestoreSyncService.syncCampaignsToFirestore(activeTenant, updated, getDeletedCampaignIds(activeTenant));
       return { success: true, campaign: data.campaign };
     }
     return { success: false, error: data.error || 'فشل تحديث بيانات الحملة في قاعدة البيانات.' };
@@ -261,23 +286,29 @@ export async function apiUpdateCampaign(
       const current = getStoredCampaigns(activeTenant);
       const updated = current.map((c) => {
         if (c.id === campaignId) {
-          return {
+          const nextCamp: DonationCampaign = {
             ...c,
             ...campaignData,
+            coverImage:
+              campaignData.coverImage && campaignData.coverImage.trim()
+                ? campaignData.coverImage.trim()
+                : c.coverImage,
             videoUrl:
               cleanVideoUrl !== undefined
                 ? (cleanVideoUrl ? cleanVideoUrl : undefined)
                 : c.videoUrl,
             tenantId: activeTenant,
             associationId: activeTenant,
-            updatedAt: new Date().toISOString(),
+            updatedAt: nowIso,
           };
+          delete (nextCamp as any).clearVideo;
+          return nextCamp;
         }
         return c;
       });
-      const fsOk = await firestoreSyncService.syncCampaignsToFirestore(activeTenant, updated);
+      const fsOk = await firestoreSyncService.syncCampaignsToFirestore(activeTenant, updated, getDeletedCampaignIds(activeTenant));
       if (fsOk) {
-        saveCampaigns(updated, activeTenant);
+        saveCampaigns(updated, activeTenant, false);
         const updatedCamp = updated.find((c) => c.id === campaignId);
         return { success: true, campaign: updatedCamp };
       }
@@ -944,8 +975,9 @@ export const campaignsApi = {
     return res.contributionTypes;
   },
   saveCampaigns: async (campaigns: DonationCampaign[], tenantId?: string) => {
-    const activeTenant = tenantId || getActiveTenantIdFromStorage() || 'tenant_nour';
-    saveCampaigns(campaigns, activeTenant);
+    const activeTenant = normalizeCampaignTenant(tenantId || getActiveTenantIdFromStorage());
+    const deletedIds = getDeletedCampaignIds(activeTenant);
+    saveCampaigns(campaigns, activeTenant, false);
     try {
       await fetch(`/api/campaigns/sync?tenantId=${encodeURIComponent(activeTenant)}`, {
         method: 'POST',
@@ -953,18 +985,18 @@ export const campaignsApi = {
           'Content-Type': 'application/json',
           'x-tenant-id': activeTenant,
         },
-        body: JSON.stringify({ campaigns, tenantId: activeTenant }),
+        body: JSON.stringify({ campaigns, deletedCampaignIds: deletedIds, tenantId: activeTenant }),
       });
     } catch (e) {
       console.warn('[CampaignsAPI] Failed to sync campaigns to server:', e);
     }
     // Also guarantee Firestore persistence
-    firestoreSyncService.syncCampaignsToFirestore(activeTenant, campaigns).catch((fsErr) => {
+    await firestoreSyncService.syncCampaignsToFirestore(activeTenant, campaigns, deletedIds).catch((fsErr) => {
       console.warn('[CampaignsAPI] Firestore background sync notice:', fsErr);
     });
   },
   saveContributions: async (contributions: CampaignContribution[], tenantId?: string) => {
-    const activeTenant = tenantId || getActiveTenantIdFromStorage() || 'tenant_nour';
+    const activeTenant = normalizeCampaignTenant(tenantId || getActiveTenantIdFromStorage());
     saveCampaignContributions(contributions, activeTenant);
     try {
       await fetch(`/api/campaigns/sync?tenantId=${encodeURIComponent(activeTenant)}`, {
@@ -980,7 +1012,7 @@ export const campaignsApi = {
     }
   },
   saveContributionTypes: async (types: ContributionTypeConfig[], tenantId?: string) => {
-    const activeTenant = tenantId || getActiveTenantIdFromStorage() || 'tenant_nour';
+    const activeTenant = normalizeCampaignTenant(tenantId || getActiveTenantIdFromStorage());
     saveContributionTypes(types, activeTenant);
     return saveGlobalContributionTypesToServer(types);
   },

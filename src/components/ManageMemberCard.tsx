@@ -48,6 +48,7 @@ import {
   Language,
   MemberRegistrationField
 } from '../types';
+import { resolveEffectiveBankSettings } from '../storage';
 import { translations } from '../translations';
 import { initialMemberCardSettings } from '../initialData';
 import { ensurePermanentImageUrl } from '../api/imageApi';
@@ -1089,7 +1090,7 @@ export const ManageMemberCard: React.FC<ManageMemberCardProps> = ({
                     <span>الهاتف / واتساب: {associationSettings.phone}</span>
                   </p>
                   <p className="font-mono text-slate-500">
-                    RIB: {associationSettings.ribBank} ({associationSettings.bankName})
+                    RIB: {resolveEffectiveBankSettings(associationSettings).ribBank} ({resolveEffectiveBankSettings(associationSettings).bankName})
                   </p>
                 </div>
               )}

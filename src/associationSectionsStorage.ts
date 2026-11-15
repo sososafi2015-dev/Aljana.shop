@@ -82,11 +82,11 @@ export const ALL_ASSOCIATION_SECTIONS: AssociationSectionDefinition[] = [
   {
     key: 'donationsBenefit',
     nameAr: 'اجعل منصتك ظاهرة للعموم للحصول على التبرعات المالية',
-    nameFr: 'Rendre votre plateforme visible au public pour recevoir des dons financiers (syoumax)',
-    nameEn: 'Make Your Platform Publicly Visible to Receive Financial Donations (syoumax)',
+    nameFr: 'Rendre votre plateforme visible au public pour recevoir des dons financiers (youx)',
+    nameEn: 'Make Your Platform Publicly Visible to Receive Financial Donations (youx)',
     category: 'financial',
     categoryLabelAr: 'المالية والمحاسبة',
-    descriptionAr: 'تحكم في ظهور جمعيتكم بواجهة syoumax منصة العمل الجمعوي وضبط وتفعيل الحسابات البنكية وطرق الدفع لتلقي التبرعات المالية.',
+    descriptionAr: 'تحكم في ظهور جمعيتكم بواجهة youx منصة العمل الجمعوي وضبط وتفعيل الحسابات البنكية وطرق الدفع لتلقي التبرعات المالية.',
     iconName: 'HeartHandshake',
     isCore: false,
     enabledByDefault: true,
@@ -376,7 +376,7 @@ export const defaultAssociationSectionsConfig: AssociationSectionsConfig = {
     donationsBenefit: 'اجعل منصتك ظاهرة للعموم للحصول على التبرعات المالية',
   },
   sectionBrandNames: {
-    donationsBenefit: 'syoumax',
+    donationsBenefit: 'youx',
   },
   lastUpdated: new Date().toISOString(),
   updatedBy: 'الإدارة العامة للمنصة',
@@ -405,7 +405,7 @@ export function getAssociationSectionsConfig(): AssociationSectionsConfig {
     },
     sectionBrandNames: {
       ...(loaded.sectionBrandNames || {}),
-      donationsBenefit: 'syoumax',
+      donationsBenefit: 'youx',
     },
   };
 }
@@ -489,7 +489,7 @@ export async function syncAssociationSectionsFromServer(force = false): Promise<
           },
           sectionBrandNames: {
             ...(serverConfig.sectionBrandNames || {}),
-            donationsBenefit: 'syoumax',
+            donationsBenefit: 'youx',
           },
         };
 
@@ -535,7 +535,7 @@ export async function saveAssociationSectionsConfig(
     sectionBrandNames: {
       ...(current.sectionBrandNames || {}),
       ...(config.sectionBrandNames || {}),
-      donationsBenefit: 'syoumax',
+      donationsBenefit: 'youx',
     },
     lastUpdated: new Date().toISOString(),
     updatedBy,

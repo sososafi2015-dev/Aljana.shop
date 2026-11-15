@@ -1147,8 +1147,8 @@ export function createAssociationPlatform(input: CreateAssociationInput): { tena
     licenseNumber: `W/${new Date().getFullYear()}/${Math.floor(1000 + Math.random() * 9000)}-MA`,
     foundingYear: new Date().getFullYear().toString(),
     adminPin: '1234',
-    ribBank: '',
-    bankName: '',
+    ribBank: (input as any).ribBank?.trim() || (input as any).rib?.trim() || initialSettings.ribBank,
+    bankName: (input as any).bankName?.trim() || initialSettings.bankName,
     email: `contact@${newTenant.slug}.org`,
     themeColors: { ...defaultStoreThemeColors },
   };
@@ -1698,8 +1698,19 @@ export async function updateTenantDetailsPermanent(
     saveAllTenants(tenants);
 
     // 4. Synchronize settings for this tenant in localStorage
+    let preservedRibBank = initialSettings.ribBank;
+    let preservedBankName = initialSettings.bankName;
     try {
       const currentSettings = loadTenantData<AssociationSettings>('settings', initialSettings, tenantId);
+      preservedRibBank =
+        (serverTenant.rib && serverTenant.rib.trim()) ||
+        ((serverTenant as any).ribBank && String((serverTenant as any).ribBank).trim()) ||
+        (currentSettings.ribBank && currentSettings.ribBank.trim()) ||
+        initialSettings.ribBank;
+      preservedBankName =
+        (serverTenant.bankName && serverTenant.bankName.trim()) ||
+        (currentSettings.bankName && currentSettings.bankName.trim()) ||
+        initialSettings.bankName;
       const updatedSettings: AssociationSettings = {
         ...currentSettings,
         name: serverTenant.name || currentSettings.name,
@@ -1713,8 +1724,8 @@ export async function updateTenantDetailsPermanent(
         email: serverTenant.email || currentSettings.email,
         logoUrl: serverTenant.logoUrl || currentSettings.logoUrl,
         bannerImageUrl: serverTenant.bannerImageUrl || currentSettings.bannerImageUrl,
-        ribBank: serverTenant.rib || currentSettings.ribBank,
-        bankName: serverTenant.bankName || currentSettings.bankName,
+        ribBank: preservedRibBank,
+        bankName: preservedBankName,
         licenseNumber: serverTenant.licenseNumber || currentSettings.licenseNumber,
       };
       saveTenantData('settings', updatedSettings, tenantId);
@@ -1756,8 +1767,8 @@ export async function updateTenantDetailsPermanent(
             email: serverTenant.email || '',
             logoUrl: serverTenant.logoUrl || '',
             bannerImageUrl: serverTenant.bannerImageUrl || '',
-            ribBank: serverTenant.rib || '',
-            bankName: serverTenant.bankName || '',
+            ribBank: preservedRibBank,
+            bankName: preservedBankName,
             licenseNumber: serverTenant.licenseNumber || '',
             tenantId,
             _updatedAt: new Date().toISOString(),

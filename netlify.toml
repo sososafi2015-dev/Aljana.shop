@@ -3,6 +3,19 @@
   publish = "dist"
 
 [[redirects]]
+  from = "https://al-shaif-association.ai.studio/*"
+  to = "https://youx.ai.studio/:splat"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "http://al-shaif-association.ai.studio/*"
+  to = "https://youx.ai.studio/:splat"
+  status = 301
+  force = true
+
+[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
+

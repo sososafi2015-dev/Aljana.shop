@@ -232,7 +232,7 @@ export const PayPalCheckoutButton: React.FC<PayPalCheckoutButtonProps> = ({
                         ? 'أداء رسوم تفعيل اشتراك منصة الجمعية'
                         : purpose === 'ad_campaign'
                         ? 'تسديد رسوم الحملة الإعلانية'
-                        : 'دعم وتطوير syoumax منصة العمل الجمعوي',
+                        : 'دعم وتطوير youx منصة العمل الجمعوي',
                     amount: {
                       currency_code: orderRes.paypalCurrency || targetCurrency,
                       value: Number(orderRes.paypalAmount || targetAmount).toFixed(2),

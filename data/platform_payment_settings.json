@@ -4,6 +4,14 @@
   "adCreationFeeMad": 199,
   "adCreationFeeUsd": 20,
   "exchangeRate": 9.95,
+  "bankAccount": {
+    "enabled": true,
+    "accountHolder": "youx منصة العمل الجمعوي - الإدارة المركزية (SMART ASSOC SARL)",
+    "bankName": "التجاري وفا بنك (Attijariwafa Bank)",
+    "rib": "007 780 0001234567890123 45",
+    "iban": "MA64007780000123456789012345",
+    "additionalInstructions": "يرجى كتابة اسم الجمعية في خانة موضوع التحويل البنكي، ثم إرفاق صورة أو ملف PDF لإشعار التحويل."
+  },
   "lastUpdated": "2026-10-27T18:03:03.689Z",
   "updatedBy": "الإدارة العامة للمنصة",
   "activationNoticeText": "لا يُسمح بالدخول إلى لوحة التحكم أو استخدام واجهة المنصة أو عرضها للعموم قبل تسديد مبلغ الاشتراك المطلوب والحصول على موافقة الإدارة العامة."

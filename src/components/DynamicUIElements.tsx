@@ -29,6 +29,7 @@ import {
   Clock
 } from 'lucide-react';
 import { UIElementConfig, Language, AssociationSettings, FinancialOperation } from '../types';
+import { resolveEffectiveBankSettings } from '../storage';
 
 interface DynamicUIElementsProps {
   category?: string;
@@ -342,7 +343,7 @@ export const DynamicUIElementsSection: React.FC<DynamicUIElementsProps> = ({
                   <CreditCard className="w-4 h-4 text-purple-600 flex-shrink-0" />
                   <div>
                     <span className="text-slate-400 block text-[10px]">الحساب البنكي (RIB):</span>
-                    <span className="font-bold text-slate-800 font-mono text-[11px] truncate block max-w-[170px]">{settings.ribBank}</span>
+                    <span className="font-bold text-slate-800 font-mono text-[11px] truncate block max-w-[170px]">{resolveEffectiveBankSettings(settings).ribBank}</span>
                   </div>
                 </div>
               </div>

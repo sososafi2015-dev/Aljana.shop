@@ -43,8 +43,8 @@ export const ManageDonationsBenefit: React.FC<ManageDonationsBenefitProps> = ({
   const currentTenantId = activeTenantId || 'tenant_nour';
   const tenant = getTenantById(currentTenantId);
   const { config: sectionsConfig } = useAssociationSectionsConfig();
-  const rawBrandName = sectionsConfig.sectionBrandNames?.donationsBenefit || 'syoumax';
-  const brandName = rawBrandName.toLowerCase() === 'youx' || rawBrandName.toLowerCase() === 'aljana' ? 'syoumax' : rawBrandName;
+  const rawBrandName = sectionsConfig.sectionBrandNames?.donationsBenefit || 'youx';
+  const brandName = rawBrandName.toLowerCase() === 'syoumax' || rawBrandName.toLowerCase() === 'aljana' ? 'youx' : rawBrandName;
   const settings = useMemo(() => propSettings || getStoredSettings(currentTenantId), [propSettings, currentTenantId]);
 
   // Initialize toggle state from settings or tenant

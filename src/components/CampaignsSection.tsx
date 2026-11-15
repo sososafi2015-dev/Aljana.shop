@@ -150,6 +150,7 @@ export const CampaignsSection: React.FC<CampaignsSectionProps> = ({
                 {/* Campaign Image */}
                 <div className="relative h-52 sm:h-56 w-full overflow-hidden bg-slate-100 dark:bg-slate-800">
                   <img
+                    key={`${camp.id}-${camp.coverImage}-${camp.updatedAt || ''}`}
                     src={camp.coverImage || 'https://images.unsplash.com/photo-1488521787991-ed7bbaae773c?auto=format&fit=crop&w=800&q=80'}
                     alt={camp.title}
                     referrerPolicy="no-referrer"
