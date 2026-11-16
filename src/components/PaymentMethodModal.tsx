@@ -27,9 +27,11 @@ import {
   Send,
   ZoomIn
 } from 'lucide-react';
-import { AssociationTenant, PaymentMethod, PlatformSupportSettings, CustomSupportPaymentMethod, SupportedCurrency, TenantPaymentRecord } from '../types';
+import { AssociationTenant, PaymentMethod, PlatformSupportSettings, CustomSupportPaymentMethod, SupportedCurrency, TenantPaymentRecord, PlatformPaymentSettings } from '../types';
 import { 
   getActivationFeeForCountry, 
+  getPlatformPaymentSettings,
+  syncPlatformPaymentSettingsFromBackend,
   submitTenantPayment,
   getAllTenantPayments,
   saveAllTenantPayments
@@ -82,8 +84,13 @@ export const PaymentMethodModal: React.FC<PaymentMethodModalProps> = ({
 
   // Unified settings directly from platformSupportStorage (Single source of truth)
   const [settings, setSettings] = useState<PlatformSupportSettings>(() => getPlatformSupportSettings());
+  const [paymentSettings, setPaymentSettings] = useState<PlatformPaymentSettings>(() => getPlatformPaymentSettings());
 
   useEffect(() => {
+    syncPlatformPaymentSettingsFromBackend().then((synced) => {
+      if (synced) setPaymentSettings(synced);
+    }).catch(() => {});
+
     const handler = (e: any) => {
       if (e?.detail) {
         setSettings(e.detail);
@@ -91,11 +98,18 @@ export const PaymentMethodModal: React.FC<PaymentMethodModalProps> = ({
         setSettings(getPlatformSupportSettings());
       }
     };
+    const paymentSettingsHandler = (e: any) => {
+      setPaymentSettings(e?.detail || getPlatformPaymentSettings());
+    };
     window.addEventListener('platform-support-settings-updated', handler);
-    return () => window.removeEventListener('platform-support-settings-updated', handler);
+    window.addEventListener('platform-payment-settings-updated', paymentSettingsHandler);
+    return () => {
+      window.removeEventListener('platform-support-settings-updated', handler);
+      window.removeEventListener('platform-payment-settings-updated', paymentSettingsHandler);
+    };
   }, []);
 
-  const defaultFeeInfo = getActivationFeeForCountry(tenant.country);
+  const defaultFeeInfo = getActivationFeeForCountry(tenant.country, paymentSettings);
 
   const effectiveAmount = customAmount !== undefined ? customAmount : defaultFeeInfo.amount;
   const effectiveCurrency = customCurrency || defaultFeeInfo.currency;

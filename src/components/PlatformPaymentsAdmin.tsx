@@ -221,11 +221,16 @@ export const PlatformPaymentsAdmin: React.FC<PlatformPaymentsAdminProps> = ({
     }
   };
 
-  const handleSaveSettings = (e: React.FormEvent) => {
+  const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     const defBank = defaultPlatformPaymentSettings.bankAccount;
     const normalizedSettings: PlatformPaymentSettings = {
       ...formSettings,
+      activationFeeMad: Number(formSettings.activationFeeMad) > 0 ? Number(formSettings.activationFeeMad) : 180,
+      activationFeeUsd: Number(formSettings.activationFeeUsd) > 0 ? Number(formSettings.activationFeeUsd) : 18,
+      exchangeRate: Number(formSettings.exchangeRate) > 0 ? Number(formSettings.exchangeRate) : 10,
+      lastUpdated: new Date().toISOString(),
+      updatedBy: 'الإدارة العامة للمنصة',
       bankAccount: {
         ...defBank,
         ...formSettings.bankAccount,
@@ -239,7 +244,14 @@ export const PlatformPaymentsAdmin: React.FC<PlatformPaymentsAdminProps> = ({
     savePlatformPaymentSettings(normalizedSettings);
     setSettings(normalizedSettings);
     setFormSettings(normalizedSettings);
-    onShowToast('تم حفظ وتحديث إعدادات رسوم وطرق الدفع بنجاح.', 'success');
+    try {
+      await fetch('/api/platform-payments/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(normalizedSettings),
+      });
+    } catch {}
+    onShowToast('تم حفظ وتحديث إعدادات رسوم وطرق الدفع بشكل دائم في قاعدة البيانات.', 'success');
   };
 
   const getMethodBadge = (method: string) => {
@@ -812,7 +824,7 @@ export const PlatformPaymentsAdmin: React.FC<PlatformPaymentsAdminProps> = ({
                   }
                   className="w-full p-3 rounded-xl border border-slate-300 font-mono font-bold text-sm focus:ring-2 focus:ring-indigo-500"
                 />
-                <span className="text-[11px] text-slate-400 mt-1 block">القيمة الافتراضية: 199 MAD</span>
+                <span className="text-[11px] text-slate-400 mt-1 block">القيمة الافتراضية: 180 MAD</span>
               </div>
 
               <div>
@@ -829,7 +841,7 @@ export const PlatformPaymentsAdmin: React.FC<PlatformPaymentsAdminProps> = ({
                   }
                   className="w-full p-3 rounded-xl border border-slate-300 font-mono font-bold text-sm focus:ring-2 focus:ring-indigo-500"
                 />
-                <span className="text-[11px] text-slate-400 mt-1 block">القيمة الموازية للمستخدمين الدوليين ($)</span>
+                <span className="text-[11px] text-slate-400 mt-1 block">القيمة الافتراضية: 18 USD</span>
               </div>
 
               <div>

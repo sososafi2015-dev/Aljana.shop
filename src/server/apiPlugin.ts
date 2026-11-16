@@ -54,8 +54,8 @@ function sendJson(res: ServerResponse, statusCode: number, data: any) {
 export function associationApiPlugin(): Plugin {
   const apiMiddleware = async (req: IncomingMessage, res: ServerResponse, next: () => void) => {
     const url = req.url || '';
-    const rawHost = String(req.headers['x-forwarded-host'] || req.headers.host || '').toLowerCase();
-    if (rawHost.includes('al-shaif-association.ai.studio')) {
+    const rawHost = String(req.headers['x-forwarded-host'] || req.headers.host || '').toLowerCase().split(':')[0];
+    if (rawHost.endsWith('.ai.studio') && rawHost !== 'youx.ai.studio') {
       res.writeHead(301, { Location: `https://youx.ai.studio${url || '/'}` });
       res.end();
       return;

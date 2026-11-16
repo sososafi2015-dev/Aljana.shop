@@ -44,7 +44,7 @@ export function normalizeDomainNameClient(raw: string): string {
   clean = clean.split('/')[0].split('?')[0].split('#')[0];
   clean = clean.split(':')[0];
   clean = clean.replace(/\.+$/, '');
-  if (clean === 'al-shaif-association.ai.studio' || clean === 'syoumax.org') {
+  if (clean.endsWith('.ai.studio') && clean !== OFFICIAL_PLATFORM_DOMAIN) {
     return OFFICIAL_PLATFORM_DOMAIN;
   }
   return clean;
@@ -63,8 +63,8 @@ export function normalizeTargetUrlClient(raw: string): string {
     const parsed = new URL(withScheme);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
     if (
-      parsed.hostname.toLowerCase() === 'al-shaif-association.ai.studio' ||
-      parsed.hostname.toLowerCase() === 'syoumax.org'
+      parsed.hostname.toLowerCase().endsWith('.ai.studio') &&
+      parsed.hostname.toLowerCase() !== OFFICIAL_PLATFORM_DOMAIN
     ) {
       return OFFICIAL_PLATFORM_URL;
     }

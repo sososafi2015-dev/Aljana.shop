@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { readTenantsFromDisk, writeTenantsToDisk } from './tenantsApiHandler';
 import { readSupportDonationsFromDisk, writeSupportDonationsToDisk } from './platformSupportApiHandler';
+import { saveDocToFirebaseServer, getDocFromFirebaseServer } from './firebaseServerStorage';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const PAYMENTS_FILE = path.join(DATA_DIR, 'platform_payments.json');
@@ -83,13 +84,13 @@ export function writePaymentsToDisk(payments: any[]): void {
 }
 
 const defaultServerPaymentSettings = {
-  activationFeeMad: 199,
-  activationFeeUsd: 20,
+  activationFeeMad: 180,
+  activationFeeUsd: 18,
   activationNoticeText:
     'لا يُسمح بالدخول إلى لوحة التحكم أو استخدام واجهة المنصة أو عرضها للعموم قبل تسديد مبلغ الاشتراك المطلوب والحصول على موافقة الإدارة العامة.',
   adCreationFeeMad: 199,
   adCreationFeeUsd: 20,
-  exchangeRate: 9.95,
+  exchangeRate: 10,
   bankAccount: {
     enabled: true,
     accountHolder: 'youx منصة العمل الجمعوي - الإدارة المركزية (SMART ASSOC SARL)',
@@ -265,19 +266,50 @@ export async function handlePlatformPaymentsApi(req: IncomingMessage, res: Serve
   }
 
   const method = req.method?.toUpperCase();
+  const cleanPath = url.split('?')[0];
 
   try {
     // 1. GET /api/platform-payments/settings
-    if (method === 'GET' && url === '/api/platform-payments/settings') {
-      const settings = readSettingsFromDisk();
+    if (method === 'GET' && cleanPath === '/api/platform-payments/settings') {
+      let settings = readSettingsFromDisk();
+      try {
+        const cloudSettings = await getDocFromFirebaseServer<any>('platform_payment_settings', 'main');
+        if (cloudSettings && typeof cloudSettings.activationFeeMad === 'number') {
+          const diskTime = settings?.lastUpdated ? new Date(settings.lastUpdated).getTime() : 0;
+          const cloudTime = cloudSettings?.lastUpdated ? new Date(cloudSettings.lastUpdated).getTime() : 0;
+          if (cloudTime > diskTime) {
+            settings = writeSettingsToDisk(cloudSettings);
+          } else {
+            await saveDocToFirebaseServer('platform_payment_settings', 'main', {
+              ...settings,
+              _updatedAt: new Date().toISOString(),
+            });
+          }
+        } else {
+          await saveDocToFirebaseServer('platform_payment_settings', 'main', {
+            ...settings,
+            _updatedAt: new Date().toISOString(),
+          });
+        }
+      } catch (e) {
+        console.warn('[platformPaymentsApiHandler] Firestore settings sync notice:', e);
+      }
       return sendJson(res, 200, { success: true, settings });
     }
 
     // 2. POST /api/platform-payments/settings
-    if (method === 'POST' && url === '/api/platform-payments/settings') {
+    if (method === 'POST' && cleanPath === '/api/platform-payments/settings') {
       const body = await readBody(req);
-      writeSettingsToDisk(body);
-      return sendJson(res, 200, { success: true, message: 'تم حفظ إعدادات الدفع بنجاح.' });
+      const saved = writeSettingsToDisk(body);
+      try {
+        await saveDocToFirebaseServer('platform_payment_settings', 'main', {
+          ...saved,
+          _updatedAt: new Date().toISOString(),
+        });
+      } catch (e) {
+        console.warn('[platformPaymentsApiHandler] Firestore settings write notice:', e);
+      }
+      return sendJson(res, 200, { success: true, settings: saved, message: 'تم حفظ إعدادات الدفع بنجاح.' });
     }
 
     // 3. GET /api/platform-payments
@@ -462,13 +494,13 @@ export async function handlePlatformPaymentsApi(req: IncomingMessage, res: Serve
 
       let tenantId = '';
       let isRenewal = false;
-      let paymentAmount = 199;
+      let paymentAmount = 180;
       let submittedDate = now;
 
       if (pIdx !== -1) {
         tenantId = payments[pIdx].tenantId;
         isRenewal = payments[pIdx].type === 'renewal';
-        paymentAmount = payments[pIdx].amount || 199;
+        paymentAmount = payments[pIdx].amount || 180;
         submittedDate = payments[pIdx].submittedAt || payments[pIdx].createdAt || now;
       }
 

@@ -59,7 +59,7 @@ const TTL_PRESETS = [
 
 function getDefaultTargetUrl(): string {
   if (typeof window !== 'undefined' && window.location?.origin) {
-    if (window.location.origin.includes('al-shaif-association.ai.studio')) {
+    if (window.location.hostname.endsWith('.ai.studio')) {
       return 'https://youx.ai.studio';
     }
     return window.location.origin;

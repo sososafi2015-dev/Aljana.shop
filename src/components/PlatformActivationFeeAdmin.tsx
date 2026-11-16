@@ -35,16 +35,16 @@ interface PlatformActivationFeeAdminProps {
   currentSession?: MasterAdminSession | null;
 }
 
-const PRESET_AMOUNTS_MAD = [99, 149, 199, 249, 299, 349, 399, 499];
+const PRESET_AMOUNTS_MAD = [99, 149, 180, 199, 249, 299, 349, 499];
 
 export const PlatformActivationFeeAdmin: React.FC<PlatformActivationFeeAdminProps> = ({
   onShowToast,
   currentSession,
 }) => {
   const [settings, setSettings] = useState<PlatformPaymentSettings>(() => getPlatformPaymentSettings());
-  const [amountMad, setAmountMad] = useState<number>(settings.activationFeeMad || 199);
-  const [amountUsd, setAmountUsd] = useState<number>(settings.activationFeeUsd || 20);
-  const [exchangeRate, setExchangeRate] = useState<number>(settings.exchangeRate || 9.95);
+  const [amountMad, setAmountMad] = useState<number>(settings.activationFeeMad || 180);
+  const [amountUsd, setAmountUsd] = useState<number>(settings.activationFeeUsd || 18);
+  const [exchangeRate, setExchangeRate] = useState<number>(settings.exchangeRate || 10);
   const [isAutoCalcUsd, setIsAutoCalcUsd] = useState<boolean>(true);
   const [noticeText, setNoticeText] = useState<string>(
     settings.activationNoticeText || DEFAULT_ACTIVATION_NOTICE_TEXT
@@ -61,9 +61,9 @@ export const PlatformActivationFeeAdmin: React.FC<PlatformActivationFeeAdminProp
     syncPlatformPaymentSettingsFromBackend().then((synced) => {
       if (isMounted && synced) {
         setSettings(synced);
-        setAmountMad(synced.activationFeeMad || 199);
-        setAmountUsd(synced.activationFeeUsd || 20);
-        setExchangeRate(synced.exchangeRate || 9.95);
+        setAmountMad(synced.activationFeeMad || 180);
+        setAmountUsd(synced.activationFeeUsd || 18);
+        setExchangeRate(synced.exchangeRate || 10);
         if (synced.activationNoticeText) {
           setNoticeText(synced.activationNoticeText);
         }
@@ -73,9 +73,9 @@ export const PlatformActivationFeeAdmin: React.FC<PlatformActivationFeeAdminProp
     const handleSettingsUpdate = (e: any) => {
       const updated = e?.detail || getPlatformPaymentSettings();
       setSettings(updated);
-      setAmountMad(updated.activationFeeMad || 199);
-      setAmountUsd(updated.activationFeeUsd || 20);
-      setExchangeRate(updated.exchangeRate || 9.95);
+      setAmountMad(updated.activationFeeMad || 180);
+      setAmountUsd(updated.activationFeeUsd || 18);
+      setExchangeRate(updated.exchangeRate || 10);
       if (updated.activationNoticeText) {
         setNoticeText(updated.activationNoticeText);
       }
@@ -93,13 +93,13 @@ export const PlatformActivationFeeAdmin: React.FC<PlatformActivationFeeAdminProp
     const num = isNaN(val) ? 0 : Math.max(0, val);
     setAmountMad(num);
     if (isAutoCalcUsd) {
-      const calculatedUsd = Math.max(1, Math.round(num / (exchangeRate || 9.95)));
+      const calculatedUsd = Math.max(1, Math.round(num / (exchangeRate || 10)));
       setAmountUsd(calculatedUsd);
     }
   };
 
   const handleRateChange = (val: number) => {
-    const rate = isNaN(val) ? 9.95 : Math.max(0.1, val);
+    const rate = isNaN(val) ? 10 : Math.max(0.1, val);
     setExchangeRate(rate);
     if (isAutoCalcUsd) {
       const calculatedUsd = Math.max(1, Math.round(amountMad / rate));
@@ -177,11 +177,11 @@ export const PlatformActivationFeeAdmin: React.FC<PlatformActivationFeeAdminProp
     setNoticeText(DEFAULT_ACTIVATION_NOTICE_TEXT);
   };
 
-  // Restore default fee (199 MAD)
+  // Restore default fee (180 MAD / 18 USD)
   const handleResetToDefault = () => {
-    handleMadChange(199);
-    setExchangeRate(9.95);
-    setAmountUsd(20);
+    handleMadChange(180);
+    setExchangeRate(10);
+    setAmountUsd(18);
     setIsAutoCalcUsd(true);
   };
 
@@ -276,7 +276,7 @@ export const PlatformActivationFeeAdmin: React.FC<PlatformActivationFeeAdminProp
             <div className="flex flex-col sm:flex-row sm:items-baseline gap-4 sm:gap-6 py-2">
               <div className="flex items-baseline gap-2">
                 <span className="text-5xl sm:text-6xl font-black text-white font-mono tracking-tight text-emerald-300 drop-shadow">
-                  {(settings.activationFeeMad || 199).toLocaleString()}
+                  {(settings.activationFeeMad || 180).toLocaleString()}
                 </span>
                 <span className="text-xl sm:text-2xl font-bold text-slate-200">
                   درهم مغربي
@@ -290,7 +290,7 @@ export const PlatformActivationFeeAdmin: React.FC<PlatformActivationFeeAdminProp
                 <div className="text-sm text-slate-300">
                   المعادل الدولي:
                   <span className="font-mono font-bold text-white text-lg mx-1.5">
-                    ${settings.activationFeeUsd || 20}
+                    ${settings.activationFeeUsd || 18}
                   </span>
                   USD
                 </div>
@@ -341,7 +341,7 @@ export const PlatformActivationFeeAdmin: React.FC<PlatformActivationFeeAdminProp
             onClick={handleResetToDefault}
             className="w-full py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50 text-xs font-bold transition-all text-center cursor-pointer"
           >
-            استعادة المبلغ الافتراضي للمنصة (199 د.م)
+            استعادة المبلغ الافتراضي للمنصة (180 د.م / 18 $)
           </button>
         </div>
       </div>
@@ -383,7 +383,7 @@ export const PlatformActivationFeeAdmin: React.FC<PlatformActivationFeeAdminProp
                   onChange={(e) => handleMadChange(parseFloat(e.target.value) || 0)}
                   id="activation-fee-mad-input"
                   className="w-full text-2xl font-black text-slate-900 font-mono pl-4 pr-14 py-3.5 bg-slate-50 hover:bg-white focus:bg-white border-2 border-slate-200 focus:border-emerald-600 rounded-xl outline-none transition-all"
-                  placeholder="199"
+                  placeholder="180"
                 />
                 <span className="absolute right-4 top-1/2 -translate-y-1/2 font-bold text-sm text-slate-600 pointer-events-none">
                   د.م
@@ -437,7 +437,7 @@ export const PlatformActivationFeeAdmin: React.FC<PlatformActivationFeeAdminProp
                     onChange={(e) => {
                       setIsAutoCalcUsd(e.target.checked);
                       if (e.target.checked) {
-                        setAmountUsd(Math.max(1, Math.round(amountMad / (exchangeRate || 9.95))));
+                        setAmountUsd(Math.max(1, Math.round(amountMad / (exchangeRate || 10))));
                       }
                     }}
                     className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
@@ -478,7 +478,7 @@ export const PlatformActivationFeeAdmin: React.FC<PlatformActivationFeeAdminProp
                       step="0.05"
                       min="1"
                       value={exchangeRate || ''}
-                      onChange={(e) => handleRateChange(parseFloat(e.target.value) || 9.95)}
+                      onChange={(e) => handleRateChange(parseFloat(e.target.value) || 10)}
                       className="w-full font-mono font-bold px-3 py-2.5 rounded-lg border border-slate-300 bg-white text-slate-900 focus:border-indigo-600 outline-none"
                     />
                   </div>

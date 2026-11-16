@@ -16,12 +16,12 @@ export const DEFAULT_ACTIVATION_NOTICE_TEXT =
   'لا يُسمح بالدخول إلى لوحة التحكم أو استخدام واجهة المنصة أو عرضها للعموم قبل تسديد مبلغ الاشتراك المطلوب والحصول على موافقة الإدارة العامة.';
 
 export const defaultPlatformPaymentSettings: PlatformPaymentSettings = {
-  activationFeeMad: 199,
-  activationFeeUsd: 20,
+  activationFeeMad: 180,
+  activationFeeUsd: 18,
   activationNoticeText: DEFAULT_ACTIVATION_NOTICE_TEXT,
   adCreationFeeMad: 199,
   adCreationFeeUsd: 20,
-  exchangeRate: 9.95,
+  exchangeRate: 10,
   bankAccount: {
     enabled: true,
     accountHolder: 'youx منصة العمل الجمعوي - الإدارة المركزية (SMART ASSOC SARL)',
@@ -52,7 +52,25 @@ export const defaultPlatformPaymentSettings: PlatformPaymentSettings = {
 };
 
 export function getPlatformPaymentSettings(): PlatformPaymentSettings {
-  const loaded = loadData<PlatformPaymentSettings>(PAYMENT_STORAGE_KEYS.SETTINGS, defaultPlatformPaymentSettings);
+  const loaded = loadData<PlatformPaymentSettings & { _feeMigratedV2?: boolean }>(
+    PAYMENT_STORAGE_KEYS.SETTINGS,
+    defaultPlatformPaymentSettings
+  );
+  // Migrate legacy uncustomized default fees (199 MAD / 20 or 19 USD) to the new official defaults (180 MAD / 18 USD)
+  if (
+    !loaded._feeMigratedV2 &&
+    (loaded.activationFeeMad === 199 || !loaded.activationFeeMad) &&
+    (loaded.activationFeeUsd === 20 || loaded.activationFeeUsd === 19 || !loaded.activationFeeUsd)
+  ) {
+    loaded.activationFeeMad = 180;
+    loaded.activationFeeUsd = 18;
+    loaded.exchangeRate = 10;
+    loaded._feeMigratedV2 = true;
+    try {
+      saveData(PAYMENT_STORAGE_KEYS.SETTINGS, loaded);
+    } catch {}
+  }
+
   const supportSettings = getPlatformSupportSettings();
   const defBank = defaultPlatformPaymentSettings.bankAccount;
   const srcBank = supportSettings.bankAccount || loaded.bankAccount || ({} as any);
@@ -60,6 +78,8 @@ export function getPlatformPaymentSettings(): PlatformPaymentSettings {
   return {
     ...defaultPlatformPaymentSettings,
     ...loaded,
+    activationFeeMad: Number(loaded.activationFeeMad) > 0 ? Number(loaded.activationFeeMad) : 180,
+    activationFeeUsd: Number(loaded.activationFeeUsd) > 0 ? Number(loaded.activationFeeUsd) : 18,
     activationNoticeText: (loaded.activationNoticeText || '').trim() || defaultPlatformPaymentSettings.activationNoticeText,
     bankAccount: {
       ...defBank,
@@ -93,10 +113,13 @@ export function getPlatformPaymentSettings(): PlatformPaymentSettings {
 }
 
 export function savePlatformPaymentSettings(settings: PlatformPaymentSettings): void {
-  const updated: PlatformPaymentSettings = {
+  const updated: PlatformPaymentSettings & { _feeMigratedV2?: boolean } = {
     ...settings,
+    activationFeeMad: Number(settings.activationFeeMad) > 0 ? Number(settings.activationFeeMad) : 180,
+    activationFeeUsd: Number(settings.activationFeeUsd) > 0 ? Number(settings.activationFeeUsd) : 18,
     activationNoticeText: (settings.activationNoticeText || '').trim() || DEFAULT_ACTIVATION_NOTICE_TEXT,
     lastUpdated: new Date().toISOString(),
+    _feeMigratedV2: true,
   };
   saveData(PAYMENT_STORAGE_KEYS.SETTINGS, updated);
 
@@ -195,17 +218,25 @@ export async function syncPlatformPaymentSettingsFromBackend(): Promise<Platform
 
   const current = getPlatformPaymentSettings();
   const defBank = defaultPlatformPaymentSettings.bankAccount;
+
+  // Determine the most recent authoritative source between backend and Firestore
+  const backendTime = backendSettings?.lastUpdated ? new Date(backendSettings.lastUpdated).getTime() : 0;
+  const firestoreTime = firestoreSettings?.lastUpdated ? new Date(firestoreSettings.lastUpdated).getTime() : 0;
+  const primaryRemote = firestoreTime >= backendTime ? (firestoreSettings || backendSettings) : (backendSettings || firestoreSettings);
+  const secondaryRemote = firestoreTime >= backendTime ? backendSettings : firestoreSettings;
+
   const mergedBank = {
     ...defBank,
     ...(current.bankAccount || {}),
-    ...(backendSettings?.bankAccount || {}),
-    ...(firestoreSettings?.bankAccount || {}),
+    ...(secondaryRemote?.bankAccount || {}),
+    ...(primaryRemote?.bankAccount || {}),
   };
 
-  const merged: PlatformPaymentSettings = {
+  const merged: PlatformPaymentSettings & { _feeMigratedV2?: boolean } = {
     ...current,
-    ...(backendSettings || {}),
-    ...(firestoreSettings || {}),
+    ...(secondaryRemote || {}),
+    ...(primaryRemote || {}),
+    _feeMigratedV2: true,
     bankAccount: {
       ...mergedBank,
       enabled: mergedBank.enabled ?? defBank.enabled,
@@ -220,20 +251,24 @@ export async function syncPlatformPaymentSettingsFromBackend(): Promise<Platform
     },
     cashPlus: {
       ...current.cashPlus,
-      ...(backendSettings?.cashPlus || {}),
-      ...(firestoreSettings?.cashPlus || {}),
+      ...(secondaryRemote?.cashPlus || {}),
+      ...(primaryRemote?.cashPlus || {}),
     },
     creditCard: {
       ...current.creditCard,
-      ...(backendSettings?.creditCard || {}),
-      ...(firestoreSettings?.creditCard || {}),
+      ...(secondaryRemote?.creditCard || {}),
+      ...(primaryRemote?.creditCard || {}),
     },
     paypal: {
       ...current.paypal,
-      ...(backendSettings?.paypal || {}),
-      ...(firestoreSettings?.paypal || {}),
+      ...(secondaryRemote?.paypal || {}),
+      ...(primaryRemote?.paypal || {}),
     },
   };
+
+  // Ensure valid positive numbers with fallback to 180 MAD and 18 USD
+  merged.activationFeeMad = Number(merged.activationFeeMad) > 0 ? Number(merged.activationFeeMad) : 180;
+  merged.activationFeeUsd = Number(merged.activationFeeUsd) > 0 ? Number(merged.activationFeeUsd) : 18;
 
   // Reconcile activation notice text with fallback to default
   if (!merged.activationNoticeText || !merged.activationNoticeText.trim()) {
@@ -291,7 +326,7 @@ export async function updatePlatformActivationFee(
 ): Promise<PlatformPaymentSettings> {
   const current = getPlatformPaymentSettings();
   const validMad = Math.max(1, Math.round(amountMad));
-  const rate = current.exchangeRate || 9.95;
+  const rate = current.exchangeRate || 10;
   const validUsd = amountUsd !== undefined && amountUsd > 0 ? Math.round(amountUsd) : Math.max(1, Math.round(validMad / rate));
 
   const updated: PlatformPaymentSettings = {
@@ -651,13 +686,16 @@ export interface CountryActivationFeeInfo {
 /**
  * Calculates dynamic activation/renewal fee and currency based on user country and admin settings.
  * Ensures:
- * - 199 MAD inside Morocco
- * - Country-specific currencies for foreign users (EUR, SAR, AED, DZD, TND, QAR, KWD, GBP, etc.)
+ * - Inside Morocco: activationFeeMad (default 180 MAD)
+ * - Outside Morocco: activationFeeUsd (default 18 USD)
  */
 export function getActivationFeeForCountry(country: string, settings?: PlatformPaymentSettings): CountryActivationFeeInfo {
   const s = settings || getPlatformPaymentSettings();
-  const currentMad = s.activationFeeMad || 199;
-  const ratio = currentMad / 199;
+  const currentMad = Number(s.activationFeeMad) > 0 ? Number(s.activationFeeMad) : 180;
+  const currentUsd =
+    Number(s.activationFeeUsd) > 0
+      ? Number(s.activationFeeUsd)
+      : Math.max(1, Math.round(currentMad / (Number(s.exchangeRate) > 0 ? Number(s.exchangeRate) : 10)));
 
   if (!country || isCountryMorocco(country)) {
     const amount = currentMad;
@@ -670,208 +708,12 @@ export function getActivationFeeForCountry(country: string, settings?: PlatformP
     };
   }
 
-  const c = country.trim().toLowerCase();
-
-  // 1. European Union countries
-  if (
-    c.includes('فرنسا') || c.includes('france') ||
-    c.includes('إسبانيا') || c.includes('اسبانيا') || c.includes('spain') || c.includes('espagne') ||
-    c.includes('ألمانيا') || c.includes('المانيا') || c.includes('germany') || c.includes('allemagne') ||
-    c.includes('إيطاليا') || c.includes('ايطاليا') || c.includes('italy') || c.includes('italie') ||
-    c.includes('بلجيكا') || c.includes('belgium') || c.includes('belgique') ||
-    c.includes('هولندا') || c.includes('netherlands') || c.includes('pays-bas') ||
-    c.includes('البرتغال') || c.includes('portugal') ||
-    c.includes('سويسرا') || c.includes('switzerland') || c.includes('suisse') ||
-    c.includes('سويد') || c.includes('sweden') || c.includes('suède') ||
-    c.includes('نرويج') || c.includes('norway') ||
-    c.includes('دانمارك') || c.includes('denmark') ||
-    c.includes('فنلندا') || c.includes('finland') ||
-    c.includes('أوروبا') || c.includes('اوروبا') || c.includes('europe')
-  ) {
-    const amount = Math.max(1, Math.round(20 * ratio));
-    return {
-      amount,
-      currency: 'EUR',
-      formatted: `${amount} يورو (EUR)`,
-      currencyNameAr: 'يورو',
-      currencySymbol: '€',
-    };
-  }
-
-  // 2. United Kingdom (UK)
-  if (c.includes('بريطانيا') || c.includes('المملكة المتحدة') || c.includes('uk') || c.includes('united kingdom') || c.includes('england') || c.includes('انجلترا') || c.includes('لندن')) {
-    const amount = Math.max(1, Math.round(16 * ratio));
-    return {
-      amount,
-      currency: 'GBP',
-      formatted: `${amount} جنيه إسترليني (GBP)`,
-      currencyNameAr: 'جنيه إسترليني',
-      currencySymbol: '£',
-    };
-  }
-
-  // 3. Saudi Arabia
-  if (c.includes('سعودي') || c.includes('saudi') || c.includes('ksa') || c.includes('🇸🇦')) {
-    const amount = Math.max(1, Math.round(75 * ratio));
-    return {
-      amount,
-      currency: 'SAR',
-      formatted: `${amount} ريال سعودي (SAR)`,
-      currencyNameAr: 'ريال سعودي',
-      currencySymbol: 'SAR',
-    };
-  }
-
-  // 4. United Arab Emirates
-  if (c.includes('إمارات') || c.includes('امارات') || c.includes('uae') || c.includes('emirates') || c.includes('دبي') || c.includes('أبوظبي') || c.includes('🇦🇪')) {
-    const amount = Math.max(1, Math.round(75 * ratio));
-    return {
-      amount,
-      currency: 'AED',
-      formatted: `${amount} درهم إماراتي (AED)`,
-      currencyNameAr: 'درهم إماراتي',
-      currencySymbol: 'AED',
-    };
-  }
-
-  // 5. Qatar
-  if (c.includes('قطر') || c.includes('qatar') || c.includes('🇶🇦')) {
-    const amount = Math.max(1, Math.round(75 * ratio));
-    return {
-      amount,
-      currency: 'QAR',
-      formatted: `${amount} ريال قطري (QAR)`,
-      currencyNameAr: 'ريال قطري',
-      currencySymbol: 'QAR',
-    };
-  }
-
-  // 6. Kuwait
-  if (c.includes('كويت') || c.includes('kuwait') || c.includes('🇰🇼')) {
-    const amount = Math.max(1, Math.round(6 * ratio));
-    return {
-      amount,
-      currency: 'KWD',
-      formatted: `${amount} دينار كويتي (KWD)`,
-      currencyNameAr: 'دينار كويتي',
-      currencySymbol: 'KWD',
-    };
-  }
-
-  // 7. Bahrain
-  if (c.includes('بحرين') || c.includes('bahrain') || c.includes('🇧🇭')) {
-    const amount = Math.max(1, Math.round(8 * ratio));
-    return {
-      amount,
-      currency: 'BHD',
-      formatted: `${amount} دينار بحريني (BHD)`,
-      currencyNameAr: 'دينار بحريني',
-      currencySymbol: 'BHD',
-    };
-  }
-
-  // 8. Oman
-  if (c.includes('عمان') || c.includes('عُمان') || c.includes('oman') || c.includes('🇴🇲')) {
-    const amount = Math.max(1, Math.round(8 * ratio));
-    return {
-      amount,
-      currency: 'OMR',
-      formatted: `${amount} ريال عماني (OMR)`,
-      currencyNameAr: 'ريال عماني',
-      currencySymbol: 'OMR',
-    };
-  }
-
-  // 9. Algeria
-  if (c.includes('جزائر') || c.includes('algeria') || c.includes('algérie') || c.includes('🇩🇿')) {
-    const amount = Math.max(100, Math.round(2700 * ratio));
-    return {
-      amount,
-      currency: 'DZD',
-      formatted: `${amount.toLocaleString()} دينار جزائري (DZD)`,
-      currencyNameAr: 'دينار جزائري',
-      currencySymbol: 'DZD',
-    };
-  }
-
-  // 10. Tunisia
-  if (c.includes('تونس') || c.includes('tunisia') || c.includes('tunisie') || c.includes('🇹🇳')) {
-    const amount = Math.max(5, Math.round(60 * ratio));
-    return {
-      amount,
-      currency: 'TND',
-      formatted: `${amount} دينار تونسي (TND)`,
-      currencyNameAr: 'دينار تونسي',
-      currencySymbol: 'TND',
-    };
-  }
-
-  // 11. Mauritania
-  if (c.includes('موريتانيا') || c.includes('mauritania') || c.includes('mauritanie') || c.includes('🇲🇷')) {
-    const amount = Math.max(50, Math.round(800 * ratio));
-    return {
-      amount,
-      currency: 'MRU',
-      formatted: `${amount.toLocaleString()} أوقية موريتانية (MRU)`,
-      currencyNameAr: 'أوقية موريتانية',
-      currencySymbol: 'MRU',
-    };
-  }
-
-  // 12. Egypt
-  if (c.includes('مصر') || c.includes('egypt') || c.includes('égypte') || c.includes('🇪🇬')) {
-    const amount = Math.max(50, Math.round(950 * ratio));
-    return {
-      amount,
-      currency: 'EGP',
-      formatted: `${amount.toLocaleString()} جنيه مصري (EGP)`,
-      currencyNameAr: 'جنيه مصري',
-      currencySymbol: 'EGP',
-    };
-  }
-
-  // 13. Jordan
-  if (c.includes('أردن') || c.includes('اردن') || c.includes('jordan') || c.includes('🇯🇴')) {
-    const amount = Math.max(1, Math.round(15 * ratio));
-    return {
-      amount,
-      currency: 'JOD',
-      formatted: `${amount} دينار أردني (JOD)`,
-      currencyNameAr: 'دينار أردني',
-      currencySymbol: 'JOD',
-    };
-  }
-
-  // 14. Canada
-  if (c.includes('كندا') || c.includes('canada') || c.includes('🇨🇦')) {
-    const amount = Math.max(1, Math.round(28 * ratio));
-    return {
-      amount,
-      currency: 'CAD',
-      formatted: `${amount} دولار كندي (CAD)`,
-      currencyNameAr: 'دولار كندي',
-      currencySymbol: 'CAD',
-    };
-  }
-
-  // 15. Turkey
-  if (c.includes('تركيا') || c.includes('turkey') || c.includes('turquie') || c.includes('🇹🇷')) {
-    const amount = Math.max(50, Math.round(700 * ratio));
-    return {
-      amount,
-      currency: 'TRY',
-      formatted: `${amount.toLocaleString()} ليرة تركية (TRY)`,
-      currencyNameAr: 'ليرة تركية',
-      currencySymbol: '₺',
-    };
-  }
-
-  // Default: US Dollar
-  const amount = s.activationFeeUsd || Math.max(1, Math.round(20 * ratio));
+  // Users outside Morocco: use the configured USD activation fee (default 18 USD)
+  const amount = currentUsd;
   return {
     amount,
     currency: 'USD',
-    formatted: `$${amount} دولار أمريكي (USD)`,
+    formatted: `${amount.toLocaleString()} دولار أمريكي (USD)`,
     currencyNameAr: 'دولار أمريكي',
     currencySymbol: '$',
   };

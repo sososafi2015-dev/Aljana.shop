@@ -126,7 +126,7 @@ export function normalizeDomainName(raw: string): string {
   clean = clean.split('/')[0].split('?')[0].split('#')[0];
   clean = clean.split(':')[0];
   clean = clean.replace(/\.+$/, '');
-  if (clean === 'al-shaif-association.ai.studio' || clean === 'syoumax.org') {
+  if (clean.endsWith('.ai.studio') && clean !== 'youx.ai.studio') {
     return 'youx.ai.studio';
   }
   return clean;
@@ -144,10 +144,7 @@ export function normalizeTargetUrl(raw: string): string {
   try {
     const parsed = new URL(withScheme);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
-    if (
-      parsed.hostname.toLowerCase() === 'al-shaif-association.ai.studio' ||
-      parsed.hostname.toLowerCase() === 'syoumax.org'
-    ) {
+    if (parsed.hostname.toLowerCase().endsWith('.ai.studio') && parsed.hostname.toLowerCase() !== 'youx.ai.studio') {
       return 'https://youx.ai.studio';
     }
     return parsed.toString().replace(/\/+$/, '');

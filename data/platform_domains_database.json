@@ -10,7 +10,7 @@
         "ns2.dns-parking.com"
       ],
       "dnsRecords": [],
-      "status": "not_linked",
+      "status": "connected",
       "sslEnabled": true,
       "lastVerification": null,
       "createdAt": "2026-11-14T22:50:32.658Z",

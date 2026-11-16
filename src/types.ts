@@ -927,12 +927,12 @@ export interface TenantPaymentRecord {
 }
 
 export interface PlatformPaymentSettings {
-  activationFeeMad: number; // default: 199
-  activationFeeUsd: number; // default: 20
+  activationFeeMad: number; // default: 180
+  activationFeeUsd: number; // default: 18
   activationNoticeText?: string; // نص تنبيه وتسديد الاشتراك في أعلى صفحة تفعيل المنصة
   adCreationFeeMad?: number; // default: 199 (مبلغ إنشاء وترويج الإعلان بالدرهم المغربي)
   adCreationFeeUsd?: number; // default: 20 (مبلغ إنشاء وترويج الإعلان بالدولار الأمريكي)
-  exchangeRate: number; // default: 9.95 or 10
+  exchangeRate: number; // default: 10
   bankAccount: {
     enabled: boolean;
     accountHolder: string;

@@ -204,7 +204,7 @@ export const MasterPlatformAdmin: React.FC<MasterPlatformAdminProps> = ({
   const [editOwnerName, setEditOwnerName] = useState('');
   const [editOwnerPhone, setEditOwnerPhone] = useState('');
   const [editTier, setEditTier] = useState<SubscriptionTier>('basic');
-  const [editFee, setEditFee] = useState<number>(199);
+  const [editFee, setEditFee] = useState<number>(180);
   const [editLogoUrl, setEditLogoUrl] = useState('');
   const [editBannerUrl, setEditBannerUrl] = useState('');
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
@@ -456,7 +456,7 @@ export const MasterPlatformAdmin: React.FC<MasterPlatformAdminProps> = ({
     setEditOwnerName(tenant.ownerName || '');
     setEditOwnerPhone(tenant.ownerPhone || '');
     setEditTier(tenant.tier || 'basic');
-    setEditFee(tenant.monthlyFee || 199);
+    setEditFee(tenant.monthlyFee || 180);
     setEditLogoUrl(tenant.logoUrl || '');
     setEditBannerUrl(tenant.bannerImageUrl || '');
     setEditSaveMessage(null);

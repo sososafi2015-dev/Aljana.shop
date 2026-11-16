@@ -456,7 +456,7 @@ export function getAllTenants(): AssociationTenant[] {
                   paymentVerified: false,
                   createdAt: new Date().toISOString(),
                   tier: 'pro',
-                  monthlyFee: 299,
+                  monthlyFee: 180,
                   isTemplate: false,
                   isVisibleOnPublicPortal: false,
                   enablePublicDonations: true,
@@ -1054,7 +1054,7 @@ export function createAssociationPlatform(input: CreateAssociationInput): { tena
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     tier: 'pro',
-    monthlyFee: 299,
+    monthlyFee: 180,
     isTemplate: false,
     isVisibleOnPublicPortal: false, // User created associations are strictly hidden from public portal
     enablePublicDonations: true, // ظاهرة افتراضياً في قسم تبرع وشارك بمجرد التفعيل ويمكن التحكم بها من لوحة الإدارة

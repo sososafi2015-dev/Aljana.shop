@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   RefreshCw,
   Calendar,
@@ -21,10 +21,11 @@ import {
   Download,
   Check
 } from 'lucide-react';
-import { AssociationTenant, TenantPaymentRecord, Language } from '../types';
+import { AssociationTenant, TenantPaymentRecord, Language, PlatformPaymentSettings } from '../types';
 import {
   getTenantSubscriptionDetails,
   getPlatformPaymentSettings,
+  syncPlatformPaymentSettingsFromBackend,
   cancelTenantPayment,
   getActivationFeeForCountry,
 } from '../paymentStorage';
@@ -48,13 +49,24 @@ export const SubscriptionRenewalSection: React.FC<SubscriptionRenewalSectionProp
   const [viewReceiptPayment, setViewReceiptPayment] = useState<TenantPaymentRecord | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
   const [localVersion, setLocalVersion] = useState(0);
+  const [settings, setSettings] = useState<PlatformPaymentSettings>(() => getPlatformPaymentSettings());
+
+  useEffect(() => {
+    syncPlatformPaymentSettingsFromBackend().then((s) => {
+      if (s) setSettings(s);
+    }).catch(() => {});
+    const handler = (e: any) => {
+      setSettings(e?.detail || getPlatformPaymentSettings());
+    };
+    window.addEventListener('platform-payment-settings-updated', handler);
+    return () => window.removeEventListener('platform-payment-settings-updated', handler);
+  }, []);
 
   // Compute detailed subscription info
   const subInfo = useMemo(() => {
     return getTenantSubscriptionDetails(tenant);
   }, [tenant, localVersion]);
 
-  const settings = getPlatformPaymentSettings();
   const feeInfo = getActivationFeeForCountry(tenant.country, settings);
 
   // Helper date formatter in Arabic
