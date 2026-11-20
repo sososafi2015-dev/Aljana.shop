@@ -15,7 +15,7 @@
   "texts": {
     "announcementBadge": "الإصدار المعتمد 2026",
     "announcementText": "المنصة السحابية الموحدة لإدارة الجمعيات بنظام استقلال البيانات التام والصلاحيات المتعددة",
-    "headerBrandName": "youx منصة العمل الجمعوي",
+    "headerBrandName": "SYOMAX منصة للعمل الجمعوي",
     "headerBrandTagline": "منظومة رقمية شاملة لإدارة وتطوير العمل الجمعوي",
     "createAssociationButtonText": "إنشاء منصة احترافية للجمعية",
     "heroBadge": "نظام مستقل لكل جمعية • Multi-Tenant & Multi-User Architecture",
@@ -49,7 +49,7 @@
     "pillar5Desc": "قسم مخصص لعرض وتوثيق كافة الأعمال والأنشطة الخيرية والتنموية بالصور والتفاصيل أمام الزوار والمنخرطين بطريقة منظمة واحترافية.",
     "pillar6Title": "إستفادة من تبرعات مالية",
     "pillar6Desc": "استفد من تبرعات مالية ومساهمات المنخرطين الجدد والمحسنين، واستقطب دعم القطاع الخاص والجالية المقيمة بالخارج، لبناء شراكات وتمويل مشاريعك الخيرية والتنموية وتحقيق أثر أكبر في المجتمع.",
-    "footerBrandName": "youx منصة العمل الجمعوي - Smart Multi-Association Platform",
+    "footerBrandName": "SYOMAX منصة للعمل الجمعوي - Smart Multi-Association Platform",
     "footerCopyrightText": "جميع الحقوق محفوظة © 2026",
     "platformLogoUrl": "/api/images/img-a0a3de2d1f25a52b.png",
     "heroBackgroundImage": "",
@@ -86,6 +86,6 @@
     "interactiveAccentColor": "#ff6b00"
   },
   "logoUrl": "/api/images/img-a0a3de2d1f25a52b.png",
-  "lastUpdated": "2026-11-16T00:00:00.000Z",
-  "updatedBy": "الإدارة العامة للمنصة"
+  "lastUpdated": "2026-11-20T10:54:43.823Z",
+  "updatedBy": "Super Admin"
 }

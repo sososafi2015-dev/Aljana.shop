@@ -426,12 +426,19 @@ export function verifyStorageUploadPermission(params: {
   // Enforce tenant isolation for association admins when session specifies a bound tenantId
   if (typeof window !== 'undefined') {
     try {
+      const isPlatformLogoCategory =
+        category === 'logos' || category === 'platform_logo' || category === 'portal_logos';
+      const hasMasterSession = Boolean(
+        localStorage.getItem('smart_platform_master_admin_session_v1') ||
+        localStorage.getItem('chayef_master_admin_session_v1')
+      );
       const adminRaw = localStorage.getItem('chayef_assoc_current_admin_session_v1');
-      if (adminRaw) {
+      if (adminRaw && !(isPlatformLogoCategory && (tenantId === 'portal' || hasMasterSession))) {
         const parsed = JSON.parse(adminRaw);
         const sessionRole = String(parsed?.role || parsed?.type || '');
         const sessionTenant = String(parsed?.tenantId || '');
         const isSuper =
+          hasMasterSession ||
           userInfo.email === BOOTSTRAP_ADMIN_EMAIL ||
           sessionRole === 'super_admin' ||
           sessionRole === 'master_super_admin';

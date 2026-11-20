@@ -166,10 +166,19 @@ export const PlatformPortalAdminSettings: React.FC<PlatformPortalAdminSettingsPr
 
     const handleSettingsUpdated = (e: any) => {
       const updated = e?.detail || getPortalSettings();
-      if (updated?.watchVideosColors) {
+      if (updated) {
         setSettings((prev) => ({
           ...prev,
-          watchVideosColors: updated.watchVideosColors,
+          ...(updated.logoUrl !== undefined ? { logoUrl: updated.logoUrl } : {}),
+          texts: {
+            ...prev.texts,
+            ...(updated.texts?.platformLogoUrl !== undefined
+              ? { platformLogoUrl: updated.texts.platformLogoUrl }
+              : updated.logoUrl !== undefined
+              ? { platformLogoUrl: updated.logoUrl }
+              : {}),
+          },
+          ...(updated.watchVideosColors ? { watchVideosColors: updated.watchVideosColors } : {}),
         }));
       }
     };
@@ -261,8 +270,10 @@ export const PlatformPortalAdminSettings: React.FC<PlatformPortalAdminSettingsPr
     setIsUploadingLogo(true);
     try {
       const permanentUrl = await uploadImageToServer(file, {
-        category: 'portal_logos',
+        tenantId: 'portal',
+        category: 'logos',
         fileName: file.name,
+        maxSizeMB: 20,
       });
 
       setSettings((prev) => ({
@@ -274,7 +285,7 @@ export const PlatformPortalAdminSettings: React.FC<PlatformPortalAdminSettingsPr
         },
       }));
       setHasUnsavedChanges(true);
-      onShowToast('تم رفع وتخزين شعار المنصة بنجاح على خادم التخزين الدائم 🖼️', 'success');
+      onShowToast('تم رفع شعار المنصة بنجاح — اضغط على «حفظ التعديلات» لتثبيته في جميع الصفحات 🖼️', 'success');
     } catch (err: any) {
       console.error('[PlatformPortalAdminSettings] Logo upload error:', err);
       onShowToast(err?.message || 'فشل في رفع شعار المنصة، يرجى المحاولة مرة أخرى', 'error');

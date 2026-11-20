@@ -24,7 +24,7 @@ export const defaultPlatformPaymentSettings: PlatformPaymentSettings = {
   exchangeRate: 10,
   bankAccount: {
     enabled: true,
-    accountHolder: 'youx منصة العمل الجمعوي - الإدارة المركزية (SMART ASSOC SARL)',
+    accountHolder: 'SYOMAX منصة العمل الجمعوي - الإدارة المركزية (SMART ASSOC SARL)',
     bankName: 'التجاري وفا بنك (Attijariwafa Bank)',
     rib: '007 780 0001234567890123 45',
     iban: 'MA64007780000123456789012345',
@@ -32,7 +32,7 @@ export const defaultPlatformPaymentSettings: PlatformPaymentSettings = {
   },
   cashPlus: {
     enabled: true,
-    beneficiaryName: 'youx منصة العمل الجمعوي (Service Activation & Renewal)',
+    beneficiaryName: 'SYOMAX منصة العمل الجمعوي (Service Activation & Renewal)',
     phone: '+212 661-234567',
     accountOrRef: 'CP-8849201',
     instructions: 'يمكنكم التوجه لأقرب وكالة كاش بليس بالمغرب وتقديم رقم الهاتف أو رقم المرجع أعلاه، ثم رفع صورة واضحة لوصل الإيداع من معرض الهاتف أو مدير الملفات وإرفاقه هنا.',
@@ -85,7 +85,10 @@ export function getPlatformPaymentSettings(): PlatformPaymentSettings {
       ...defBank,
       ...srcBank,
       enabled: srcBank.enabled ?? defBank.enabled,
-      accountHolder: ((srcBank.accountHolder && srcBank.accountHolder.trim()) || (loaded.bankAccount?.accountHolder && loaded.bankAccount.accountHolder.trim()) || defBank.accountHolder).replace(/\bsyoumax\b/gi, 'youx'),
+      accountHolder: ((srcBank.accountHolder && srcBank.accountHolder.trim()) || (loaded.bankAccount?.accountHolder && loaded.bankAccount.accountHolder.trim()) || defBank.accountHolder)
+        .replace(/\byoux\b/gi, 'SYOMAX')
+        .replace(/\bsyoumax\b/gi, 'SYOMAX')
+        .replace(/\bAljana\b/gi, 'SYOMAX'),
       bankName: (srcBank.bankName && srcBank.bankName.trim()) || (loaded.bankAccount?.bankName && loaded.bankAccount.bankName.trim()) || defBank.bankName,
       rib: (srcBank.rib && srcBank.rib.trim()) || (loaded.bankAccount?.rib && loaded.bankAccount.rib.trim()) || defBank.rib,
       iban: (srcBank.iban && srcBank.iban.trim()) || (loaded.bankAccount?.iban && loaded.bankAccount.iban.trim()) || defBank.iban,
@@ -1180,7 +1183,7 @@ export function submitPlatformSupportPayment(input: SubmitPlatformSupportInput):
   const virtualTicket: TenantPaymentRecord = {
     id: `sup_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
     tenantId: 'platform_support',
-    tenantName: 'youx منصة العمل الجمعوي (حساب دعم وتطوير المنصة)',
+    tenantName: 'SYOMAX منصة العمل الجمعوي (حساب دعم وتطوير المنصة)',
     tenantSlug: 'platform-support',
     ownerId: `supporter_${Date.now()}`,
     ownerName: (input.supporterName && input.supporterName.trim()) || 'فاعل خير / داعم للمنصة',

@@ -277,7 +277,7 @@ export const ManageOperations: React.FC<ManageOperationsProps> = ({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
-    link.setAttribute('download', `chayef-operations-${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute('download', `syomax-operations-${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

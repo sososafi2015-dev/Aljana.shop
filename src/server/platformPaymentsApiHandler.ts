@@ -93,7 +93,7 @@ const defaultServerPaymentSettings = {
   exchangeRate: 10,
   bankAccount: {
     enabled: true,
-    accountHolder: 'youx منصة العمل الجمعوي - الإدارة المركزية (SMART ASSOC SARL)',
+    accountHolder: 'SYOMAX منصة العمل الجمعوي - الإدارة المركزية (SMART ASSOC SARL)',
     bankName: 'التجاري وفا بنك (Attijariwafa Bank)',
     rib: '007 780 0001234567890123 45',
     iban: 'MA64007780000123456789012345',
@@ -102,7 +102,7 @@ const defaultServerPaymentSettings = {
   },
   cashPlus: {
     enabled: true,
-    beneficiaryName: 'youx منصة العمل الجمعوي (Service Activation & Renewal)',
+    beneficiaryName: 'SYOMAX منصة العمل الجمعوي (Service Activation & Renewal)',
     phone: '+212 661-234567',
     accountOrRef: 'CP-8849201',
     instructions:

@@ -223,7 +223,7 @@ export const AssociationLoginModal: React.FC<AssociationLoginModalProps> = ({
               <div>
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] font-bold tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/30 text-emerald-200 border border-emerald-400/30 uppercase">
-                    youx منصة العمل الجمعوي
+                    SYOMAX منصة العمل الجمعوي
                   </span>
                   <span className="flex h-2 w-2 relative">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>

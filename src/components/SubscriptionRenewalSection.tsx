@@ -568,7 +568,7 @@ export const SubscriptionRenewalSection: React.FC<SubscriptionRenewalSectionProp
               ضمان الحفاظ الكامل على البيانات والملفات
             </h4>
             <p className="text-slate-300 text-sm leading-relaxed max-w-2xl">
-              تلتزم إدارة youx منصة العمل الجمعوي بالحفاظ الأبدي والشامل على جميع بيانات الجمعية وسجلاتها وأعضائها ووثائقها المحفوظة في قاعدة البيانات دون أي حذف، حتى في حال انقضاء فترة الاشتراك السنوي.
+              تلتزم إدارة SYOMAX منصة العمل الجمعوي بالحفاظ الأبدي والشامل على جميع بيانات الجمعية وسجلاتها وأعضائها ووثائقها المحفوظة في قاعدة البيانات دون أي حذف، حتى في حال انقضاء فترة الاشتراك السنوي.
             </p>
           </div>
         </div>
@@ -644,7 +644,7 @@ export const SubscriptionRenewalSection: React.FC<SubscriptionRenewalSectionProp
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-slate-900">وصل أداء اشتراك معتمد</h3>
-                  <p className="text-xs text-slate-500">youx منصة العمل الجمعوي</p>
+                  <p className="text-xs text-slate-500">SYOMAX منصة العمل الجمعوي</p>
                 </div>
               </div>
               <button

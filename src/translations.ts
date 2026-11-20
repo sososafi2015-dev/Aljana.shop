@@ -3,7 +3,7 @@ import { Language } from './types';
 export const translations = {
   ar: {
     // Navigation & General
-    appName: 'الجمعية',
+    appName: 'SYOMAX',
     appTagline: 'منصة الشفافية، الأعمال الخيرية، وإدارة المنخرطين',
     home: 'الرئيسية',
     activities: 'الأنشطة والأعمال',
@@ -621,7 +621,7 @@ export const translations = {
   },
   fr: {
     // Navigation & General
-    appName: 'Association El Chayef',
+    appName: 'SYOMAX',
     appTagline: 'Plateforme de transparence, actions caritatives et gestion des adhérents',
     home: 'Accueil',
     activities: 'Activités & Actions',
@@ -642,7 +642,7 @@ export const translations = {
     wrongPin: 'Code PIN incorrect',
     pinPlaceholder: 'Code PIN (par défaut : 2025)',
     logoutAdmin: 'Déconnexion Admin',
-    adminWelcome: 'Bienvenue sur le panneau d\'administration de l\'Association El Chayef',
+    adminWelcome: 'Bienvenue sur le panneau d\'administration de SYOMAX',
     readOnlyNotice: 'Mode consultation transparente (lecture seule pour la sécurité des données)',
 
     // Currency & Numbers
@@ -897,7 +897,7 @@ export const translations = {
     successDeleted: 'Supprimé avec succès.',
     
     // Transparency declaration
-    transparencyPledge: 'L\'Association El Chayef s\'engage à une transparence totale envers tous ses membres et bienfaiteurs en publiant l\'ensemble des comptes et réalisations.',
+    transparencyPledge: 'La plateforme SYOMAX s\'engage à une transparence totale envers tous ses membres et bienfaiteurs en publiant l\'ensemble des comptes et réalisations.',
 
     // Voting & Polls
     managePolls: 'Gestion des votes & décisions',
@@ -1239,7 +1239,7 @@ export const translations = {
   },
   en: {
     // Navigation & General
-    appName: 'El Chayef Association',
+    appName: 'SYOMAX',
     appTagline: 'Transparency Platform, Charity Initiatives & Member Management',
     home: 'Home',
     activities: 'Activities & Projects',
@@ -1260,7 +1260,7 @@ export const translations = {
     wrongPin: 'Incorrect PIN code',
     pinPlaceholder: 'PIN code (default: 2025)',
     logoutAdmin: 'Log out Admin',
-    adminWelcome: 'Welcome to El Chayef Association Admin Console',
+    adminWelcome: 'Welcome to SYOMAX Admin Console',
     readOnlyNotice: 'Transparent read-only mode (read access to protect data integrity)',
 
     // Currency & Numbers
@@ -1515,7 +1515,7 @@ export const translations = {
     successDeleted: 'Successfully deleted.',
     
     // Transparency declaration
-    transparencyPledge: 'El Chayef Association is dedicated to absolute transparency and sharing all financial and humanitarian operations with all members and supporters.',
+    transparencyPledge: 'SYOMAX is dedicated to absolute transparency and sharing all financial and humanitarian operations with all members and supporters.',
 
     // Voting & Polls
     managePolls: 'Manage Polls & Resolutions',

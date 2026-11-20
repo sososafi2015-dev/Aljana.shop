@@ -34,8 +34,8 @@ function getAuthHeaders(session?: MasterAdminSession | null): Record<string, str
   return headers;
 }
 
-export const OFFICIAL_PLATFORM_DOMAIN = 'youx.ai.studio';
-export const OFFICIAL_PLATFORM_URL = 'https://youx.ai.studio';
+export const OFFICIAL_PLATFORM_DOMAIN = 'syomax.ai.studio';
+export const OFFICIAL_PLATFORM_URL = 'https://syomax.ai.studio';
 
 export function normalizeDomainNameClient(raw: string): string {
   if (!raw || typeof raw !== 'string') return '';

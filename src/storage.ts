@@ -163,18 +163,19 @@ export const getActiveTenantIdFromStorage = (): string => {
   if (typeof window !== 'undefined') {
     try {
       const params = new URLSearchParams(window.location.search);
-      const paramTenant = params.get('tenant');
+      const paramTenant = (params.get('tenant') || params.get('association') || '').trim();
       if (paramTenant && paramTenant !== 'portal') {
         return paramTenant;
       }
       if (params.get('portal') === 'true' || params.get('view') === 'portal') {
-        const raw = localStorage.getItem('chayef_active_tenant_id_v2');
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (parsed && parsed !== 'portal') return parsed;
-        }
         return 'portal';
       }
+      const pathMatch = window.location.pathname.match(/^\/(?:association|tenant|a)\/([^/?#]+)/i);
+      if (pathMatch && pathMatch[1]) {
+        return decodeURIComponent(pathMatch[1]).trim();
+      }
+      // On root "/" without an explicit tenant URL parameter, active context is the main SYOMAX portal
+      return 'portal';
     } catch {}
   }
   try {
@@ -184,7 +185,7 @@ export const getActiveTenantIdFromStorage = (): string => {
       if (parsed) return parsed;
     }
   } catch {}
-  return 'tenant_nour';
+  return 'portal';
 };
 
 export const getScopedKey = (baseKey: string, tenantId?: string): string => {
@@ -2717,7 +2718,7 @@ export const resetToDefaults = () => {
 export const exportBackupJSON = () => {
   const currentSettings = getStoredSettings();
   const data = {
-    app: currentSettings.name ? `${currentSettings.name} - youx` : 'youx منصة العمل الجمعوي',
+    app: currentSettings.name ? `${currentSettings.name} - SYOMAX` : 'SYOMAX منصة العمل الجمعوي',
     exportedAt: new Date().toISOString(),
     settings: currentSettings,
     memberCardSettings: getStoredMemberCardSettings(),
@@ -2741,7 +2742,7 @@ export const exportBackupJSON = () => {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `chayef_association_backup_${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = `syomax_association_backup_${new Date().toISOString().slice(0, 10)}.json`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -2766,7 +2767,7 @@ export const exportOperationsCSV = (operations: FinancialOperation[]) => {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `سجل_العمليات_المالية_youx_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = `سجل_العمليات_المالية_SYOMAX_${new Date().toISOString().slice(0, 10)}.csv`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

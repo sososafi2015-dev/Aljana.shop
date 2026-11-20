@@ -166,6 +166,7 @@ import { AssociationLoginModal } from './components/AssociationLoginModal';
 import { 
   getActiveTenantId, 
   setActiveTenantId, 
+  resolveTenantIdFromUrl,
   getTenantById, 
   getAllTenants,
   saveAllTenants,
@@ -216,32 +217,13 @@ export default function App() {
     return 'home';
   });
 
-  // Multi-Tenant Platform States
+  // Multi-Tenant Platform States:
+  // Root domain "/" ALWAYS defaults to the official SYOMAX Main Platform Portal ('portal').
+  // Individual associations (including Al-Nour) only open via their dedicated URL (?tenant=... or /association/...) or user click.
   const [activeTenantId, setActiveTenantIdState] = useState<string>(() => {
-    // 1. Direct URL parameters check (?portal=true or ?tenant=...)
-    if (typeof window !== 'undefined') {
-      try {
-        const params = new URLSearchParams(window.location.search);
-        if (params.get('portal') === 'true' || params.get('view') === 'portal') {
-          return 'portal';
-        }
-        const tenantParam = params.get('tenant');
-        if (tenantParam) {
-          return tenantParam;
-        }
-        // Check if user explicitly navigated to portal in this browser session
-        if (sessionStorage.getItem('explicit_portal_navigation') === 'true') {
-          return 'portal';
-        }
-      } catch {}
-    }
-
-    const stored = getActiveTenantId();
-    if (!stored) {
-      setActiveTenantId(MASTER_TEMPLATE_TENANT_ID);
-      return MASTER_TEMPLATE_TENANT_ID;
-    }
-    return stored;
+    const resolved = resolveTenantIdFromUrl();
+    setActiveTenantId(resolved);
+    return resolved;
   });
   const [tenantsVersion, setTenantsVersion] = useState(0);
   const [isCreateWizardOpen, setIsCreateWizardOpen] = useState(false);
@@ -250,6 +232,8 @@ export default function App() {
   const [isAssociationLoginOpen, setIsAssociationLoginOpen] = useState(false);
   const [returnToDonations, setReturnToDonations] = useState<boolean>(() => {
     try {
+      const resolved = resolveTenantIdFromUrl();
+      if (resolved === 'portal') return false;
       return sessionStorage.getItem('nav_from_donations') === 'true';
     } catch {
       return false;
@@ -257,7 +241,11 @@ export default function App() {
   });
   const [isDonationsPageOpenInPortal, setIsDonationsPageOpenInPortal] = useState<boolean>(() => {
     try {
-      return sessionStorage.getItem('nav_from_donations') === 'true';
+      if (typeof window !== 'undefined') {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('donations') === 'true') return true;
+      }
+      return false;
     } catch {
       return false;
     }
@@ -315,12 +303,18 @@ export default function App() {
     if (found) return found;
 
     try {
+      const lower = activeTenantId.toLowerCase();
       const all = getAllTenants();
-      const match = all.find((t) => t.id === activeTenantId);
+      const match = all.find(
+        (t) => t.id === activeTenantId || (t.slug && t.slug.toLowerCase() === lower)
+      );
       if (match) return match;
     } catch {}
 
-    const defMatch = defaultTenants.find((t) => t.id === activeTenantId);
+    const lowerDef = activeTenantId.toLowerCase();
+    const defMatch = defaultTenants.find(
+      (t) => t.id === activeTenantId || (t.slug && t.slug.toLowerCase() === lowerDef)
+    );
     if (defMatch) return defMatch;
 
     if (!isTenantsSynced && activeTenantId !== MASTER_TEMPLATE_TENANT_ID) {
@@ -1193,7 +1187,8 @@ export default function App() {
     newTenantId: string, 
     fromDonations?: boolean, 
     targetTenant?: AssociationTenant,
-    openAdminPanel?: boolean
+    openAdminPanel?: boolean,
+    skipHistoryPush?: boolean
   ) => {
     if (fromDonations) {
       setReturnToDonations(true);
@@ -1219,27 +1214,21 @@ export default function App() {
       saveAllTenants(updated);
     }
 
-    if (newTenantId !== 'portal') {
-      try {
-        sessionStorage.removeItem('explicit_portal_navigation');
-        if (typeof window !== 'undefined') {
-          const url = new URL(window.location.href);
-          url.searchParams.delete('portal');
-          url.searchParams.delete('view');
+    if (!skipHistoryPush && typeof window !== 'undefined') {
+      if (newTenantId !== 'portal') {
+        try {
+          sessionStorage.removeItem('explicit_portal_navigation');
+          const url = new URL(window.location.origin + '/');
           url.searchParams.set('tenant', newTenantId);
-          window.history.replaceState({}, '', url.toString());
-        }
-      } catch {}
-    } else {
-      try {
-        sessionStorage.setItem('explicit_portal_navigation', 'true');
-        if (typeof window !== 'undefined') {
-          const url = new URL(window.location.href);
-          url.searchParams.delete('tenant');
-          url.searchParams.set('portal', 'true');
-          window.history.replaceState({}, '', url.toString());
-        }
-      } catch {}
+          window.history.pushState({ tenantId: newTenantId }, '', url.toString());
+        } catch {}
+      } else {
+        try {
+          sessionStorage.setItem('explicit_portal_navigation', 'true');
+          const url = new URL(window.location.origin + '/');
+          window.history.pushState({ tenantId: 'portal' }, '', url.toString());
+        } catch {}
+      }
     }
 
     setActiveTenantId(newTenantId);
@@ -1499,10 +1488,9 @@ export default function App() {
     try {
       sessionStorage.setItem('explicit_portal_navigation', 'true');
       if (typeof window !== 'undefined') {
-        const url = new URL(window.location.href);
-        url.searchParams.delete('tenant');
-        url.searchParams.set('portal', 'true');
-        window.history.replaceState({}, '', url.toString());
+        const url = new URL(window.location.origin + '/');
+        url.searchParams.set('donations', 'true');
+        window.history.pushState({ tenantId: 'portal', donations: true }, '', url.toString());
       }
     } catch {}
     setActiveTenantId('portal');
@@ -1520,10 +1508,8 @@ export default function App() {
     try {
       sessionStorage.setItem('explicit_portal_navigation', 'true');
       if (typeof window !== 'undefined') {
-        const url = new URL(window.location.href);
-        url.searchParams.delete('tenant');
-        url.searchParams.set('portal', 'true');
-        window.history.replaceState({}, '', url.toString());
+        const url = new URL(window.location.origin + '/');
+        window.history.pushState({ tenantId: 'portal' }, '', url.toString());
       }
     } catch {}
     setActiveTenantId('portal');
@@ -1749,6 +1735,19 @@ export default function App() {
           cleanUrlAdminParams();
           setActiveTab('home');
         }
+
+        // Sync active route with browser Back / Forward navigation
+        const targetTenantFromUrl = resolveTenantIdFromUrl();
+        if (targetTenantFromUrl !== activeTenantId) {
+          if (targetTenantFromUrl === 'portal') {
+            setActiveTenantId('portal');
+            setActiveTenantIdState('portal');
+            setIsMasterAdminOpen(false);
+            setIsDonationsPageOpenInPortal(params.get('donations') === 'true');
+          } else {
+            switchTenant(targetTenantFromUrl, false, undefined, false, true);
+          }
+        }
       } catch {}
     };
 
@@ -1759,6 +1758,18 @@ export default function App() {
       window.removeEventListener('hashchange', handlePopStateOrHashChange);
     };
   }, [activeTab, role, currentAdminSession, loggedInMember, activeTenantId, subAdmins]);
+
+  // Keep browser tab title accurately synced with SYOMAX official brand and active view
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    if (activeTenantId === 'portal') {
+      document.title = 'SYOMAX • منصة العمل الجمعوي';
+    } else if (currentTenant?.name) {
+      document.title = `${currentTenant.name} | SYOMAX`;
+    } else {
+      document.title = 'SYOMAX';
+    }
+  }, [activeTenantId, currentTenant?.name]);
 
   const handleSelectTab = (tab: string) => {
     const hasValidAdminAccess =

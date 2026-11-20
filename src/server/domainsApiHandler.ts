@@ -126,8 +126,8 @@ export function normalizeDomainName(raw: string): string {
   clean = clean.split('/')[0].split('?')[0].split('#')[0];
   clean = clean.split(':')[0];
   clean = clean.replace(/\.+$/, '');
-  if (clean.endsWith('.ai.studio') && clean !== 'youx.ai.studio') {
-    return 'youx.ai.studio';
+  if (clean.endsWith('.ai.studio') && clean !== 'syomax.ai.studio') {
+    return 'syomax.ai.studio';
   }
   return clean;
 }
@@ -144,8 +144,8 @@ export function normalizeTargetUrl(raw: string): string {
   try {
     const parsed = new URL(withScheme);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
-    if (parsed.hostname.toLowerCase().endsWith('.ai.studio') && parsed.hostname.toLowerCase() !== 'youx.ai.studio') {
-      return 'https://youx.ai.studio';
+    if (parsed.hostname.toLowerCase().endsWith('.ai.studio') && parsed.hostname.toLowerCase() !== 'syomax.ai.studio') {
+      return 'https://syomax.ai.studio';
     }
     return parsed.toString().replace(/\/+$/, '');
   } catch {
@@ -523,7 +523,7 @@ async function performRealDomainVerification(domainConfig: PlatformDomainConfig)
       resolvedMxRecords: [],
       targetResolvedARecords: [],
       httpStatus: null,
-      summaryAr: 'صيغة اسم الدومين غير صالحة. يرجى إدخال اسم دومين صحيح مثل youx.ai.studio.',
+      summaryAr: 'صيغة اسم الدومين غير صالحة. يرجى إدخال اسم دومين صحيح مثل syomax.ai.studio.',
       issuesAr: ['اسم الدومين المدخل لا يتوافق مع معايير أسماء النطاقات الصحيحة.'],
     };
   }
@@ -821,7 +821,7 @@ export async function handleDomainsApi(
     if (!isValidDomainName(domainName)) {
       sendJson(res, 400, {
         success: false,
-        error: 'يرجى إدخال اسم دومين صحيح مثل youx.ai.studio بدون مسافات أو بروتوكول.',
+        error: 'يرجى إدخال اسم دومين صحيح مثل syomax.ai.studio بدون مسافات أو بروتوكول.',
       });
       return true;
     }

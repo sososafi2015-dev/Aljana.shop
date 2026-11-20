@@ -95,7 +95,7 @@ export const DEFAULT_PORTAL_SETTINGS: PlatformPortalSettings = {
   texts: {
     announcementBadge: 'SaaS Multi-Tenant',
     announcementText: 'المنصة السحابية الموحدة لإدارة الجمعيات بنظام استقلال البيانات التام والصلاحيات المتعددة',
-    headerBrandName: 'youx منصة العمل الجمعوي',
+    headerBrandName: 'SYOMAX منصة العمل الجمعوي',
     headerBrandTagline: 'منظومة رقمية شاملة لإدارة وتطوير العمل الجمعوي',
     createAssociationButtonText: 'إنشاء منصة احترافية للجمعية',
     heroBadge: 'نظام مستقل لكل جمعية • Multi-Tenant & Multi-User Architecture',
@@ -132,7 +132,7 @@ export const DEFAULT_PORTAL_SETTINGS: PlatformPortalSettings = {
     pillar5Desc: 'قسم مخصص لعرض وتوثيق كافة الأعمال والأنشطة الخيرية والتنموية بالصور والتفاصيل أمام الزوار والمنخرطين بطريقة منظمة واحترافية.',
     pillar6Title: 'إستفادة من تبرعات مالية',
     pillar6Desc: 'استفد من تبرعات مالية ومساهمات المنخرطين الجدد والمحسنين، واستقطب دعم القطاع الخاص والجالية المقيمة بالخارج، لبناء شراكات وتمويل مشاريعك الخيرية والتنموية وتحقيق أثر أكبر في المجتمع.',
-    footerBrandName: 'youx منصة العمل الجمعوي - Smart Multi-Association Platform',
+    footerBrandName: 'SYOMAX منصة العمل الجمعوي - Smart Multi-Association Platform',
     footerCopyrightText: 'جميع الحقوق محفوظة © • القالب المعتمد: جمعية النور للتنمية والتضامن',
   },
   theme: DEFAULT_PORTAL_THEME,
@@ -152,15 +152,17 @@ function normalizePortalTexts(texts: any): PlatformPortalSettings['texts'] {
   };
   if (merged.headerBrandName) {
     merged.headerBrandName = merged.headerBrandName
-      .replace(/منظومة الجنى الرقمية للعمل الجمعوي/g, 'youx منصة العمل الجمعوي')
-      .replace(/\bsyoumax\b/gi, 'youx')
-      .replace(/\bAljana\b/gi, 'youx');
+      .replace(/منظومة الجنى الرقمية للعمل الجمعوي/g, 'SYOMAX منصة العمل الجمعوي')
+      .replace(/\byoux\b/gi, 'SYOMAX')
+      .replace(/\bsyoumax\b/gi, 'SYOMAX')
+      .replace(/\bAljana\b/gi, 'SYOMAX');
   }
   if (merged.footerBrandName) {
     merged.footerBrandName = merged.footerBrandName
-      .replace(/منظومة الجنى الرقمية للعمل الجمعوي/g, 'youx منصة العمل الجمعوي')
-      .replace(/\bsyoumax\b/gi, 'youx')
-      .replace(/\bAljana\b/gi, 'youx');
+      .replace(/منظومة الجنى الرقمية للعمل الجمعوي/g, 'SYOMAX منصة العمل الجمعوي')
+      .replace(/\byoux\b/gi, 'SYOMAX')
+      .replace(/\bsyoumax\b/gi, 'SYOMAX')
+      .replace(/\bAljana\b/gi, 'SYOMAX');
   }
   return merged;
 }
@@ -202,6 +204,29 @@ export function getPortalSettings(): PlatformPortalSettings {
 
   cachedPortalSettings = { ...DEFAULT_PORTAL_SETTINGS };
   return cachedPortalSettings;
+}
+
+/**
+ * Synchronizes platform logo immediately in portal settings local cache & broadcasts PORTAL_SETTINGS_EVENT
+ * when the logo is updated from PlatformIdentityAdminSettings.
+ */
+export function syncPortalLogoLocally(logoUrl: string, updatedAt?: string): void {
+  const current = getPortalSettings();
+  const nextUpdatedAt = updatedAt || new Date().toISOString();
+  const updated: PlatformPortalSettings = {
+    ...current,
+    logoUrl,
+    texts: {
+      ...current.texts,
+      platformLogoUrl: logoUrl,
+    },
+    lastUpdated: nextUpdatedAt,
+  };
+  cachedPortalSettings = updated;
+  safeSetLocalStorage(PORTAL_SETTINGS_STORAGE_KEY, updated);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(PORTAL_SETTINGS_EVENT, { detail: updated }));
+  }
 }
 
 /**
@@ -277,7 +302,7 @@ export async function fetchPortalSettings(): Promise<PlatformPortalSettings> {
     const fsTime = new Date(firestoreSettings.lastUpdated || firestoreSettings._updatedAt || 0).getTime();
     const diskTime = backendSettings.lastUpdated ? new Date(backendSettings.lastUpdated).getTime() : 0;
 
-    if (fsTime > diskTime && firestoreSettings.watchVideosColors) {
+    if (fsTime > diskTime) {
       authoritative = reconcileSettings(backendSettings, firestoreSettings);
       // Sync back to backend disk silently so local files stay up-to-date
       fetch('/api/portal-settings', {
@@ -469,6 +494,25 @@ export async function savePortalSettings(settings: PlatformPortalSettings): Prom
     window.dispatchEvent(new CustomEvent(PORTAL_SETTINGS_EVENT, { detail: verifiedSettings }));
   }
 
+  // 7. Keep Platform Identity (Firestore + all mounted components) immediately in sync with the new logo
+  try {
+    const syncedLogo = verifiedSettings.logoUrl || verifiedSettings.texts?.platformLogoUrl || '';
+    const syncTs = verifiedSettings.lastUpdated || nowIso;
+    await setDoc(
+      doc(db, 'platform_identity', 'main'),
+      {
+        platformLogo: syncedLogo,
+        updatedAt: syncTs,
+        _updatedAt: syncTs,
+      },
+      { merge: true }
+    ).catch(() => {});
+    const identityModule = await import('./api/platformIdentityApi');
+    identityModule.syncPlatformIdentityLogoLocally(syncedLogo, syncTs);
+  } catch (idSyncErr) {
+    console.warn('[PortalSettingsStorage] Platform identity logo sync notice:', idSyncErr);
+  }
+
   return verifiedSettings;
 }
 
@@ -520,6 +564,16 @@ export async function resetPortalSettingsToDefaults(): Promise<PlatformPortalSet
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent(PORTAL_SETTINGS_EVENT, { detail: defaultClone }));
   }
+
+  try {
+    await setDoc(
+      doc(db, 'platform_identity', 'main'),
+      { platformLogo: '', updatedAt: nowIso, _updatedAt: nowIso },
+      { merge: true }
+    ).catch(() => {});
+    const identityModule = await import('./api/platformIdentityApi');
+    identityModule.syncPlatformIdentityLogoLocally('', nowIso);
+  } catch {}
 
   return defaultClone;
 }

@@ -49,7 +49,7 @@ export const DEFAULT_SERVER_ASSOCIATION_SECTIONS_CONFIG: AssociationSectionsConf
     donationsBenefit: 'اجعل منصتك ظاهرة للعموم للحصول على التبرعات المالية',
   },
   sectionBrandNames: {
-    donationsBenefit: 'youx',
+    donationsBenefit: 'SYOMAX',
   },
   hideBoardMembersPublicContact: true,
   lastUpdated: new Date().toISOString(),
@@ -86,7 +86,7 @@ export async function syncFromFirestoreIfNeeded(): Promise<void> {
               },
               sectionBrandNames: {
                 ...(firestoreData.sectionBrandNames || {}),
-                donationsBenefit: 'youx',
+                donationsBenefit: 'SYOMAX',
               },
               hideBoardMembersPublicContact: true,
               lastUpdated: firestoreData.lastUpdated || new Date().toISOString(),
@@ -153,7 +153,7 @@ export function loadAssociationSectionsDatabase(forceFresh = false): Association
           },
           sectionBrandNames: {
             ...(parsed.sectionBrandNames || {}),
-            donationsBenefit: 'youx',
+            donationsBenefit: 'SYOMAX',
           },
           hideBoardMembersPublicContact: true,
           lastUpdated: parsed.lastUpdated || new Date().toISOString(),
@@ -176,7 +176,7 @@ export function loadAssociationSectionsDatabase(forceFresh = false): Association
       donationsBenefit: 'اجعل منصتك ظاهرة للعموم للحصول على التبرعات المالية',
     },
     sectionBrandNames: {
-      donationsBenefit: 'youx',
+      donationsBenefit: 'SYOMAX',
     },
     hideBoardMembersPublicContact: true,
   };
@@ -202,7 +202,7 @@ export function saveAssociationSectionsDatabase(config: AssociationSectionsConfi
       },
       sectionBrandNames: {
         ...(config.sectionBrandNames || {}),
-        donationsBenefit: 'youx',
+        donationsBenefit: 'SYOMAX',
       },
       hideBoardMembersPublicContact: true,
       lastUpdated: config.lastUpdated || new Date().toISOString(),

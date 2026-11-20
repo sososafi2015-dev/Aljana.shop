@@ -812,7 +812,7 @@ export const MasterPlatformAdmin: React.FC<MasterPlatformAdminProps> = ({
             )}
             <h1 className="text-2xl font-black text-slate-900">الإدارة العامة للمنصة</h1>
             <p className="text-xs text-slate-500 mt-1.5 leading-relaxed font-bold">
-              {platformIdentity?.platformName || 'youx منصة العمل الجمعوي'}
+              {platformIdentity?.platformName || 'SYOMAX منصة العمل الجمعوي'}
             </p>
           </div>
 
@@ -929,7 +929,7 @@ export const MasterPlatformAdmin: React.FC<MasterPlatformAdminProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-base font-black tracking-tight text-white">
-                  {platformIdentity?.platformName || 'youx منصة العمل الجمعوي'}
+                  {platformIdentity?.platformName || 'SYOMAX منصة العمل الجمعوي'}
                 </h1>
                 {isSuperAdmin ? (
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">

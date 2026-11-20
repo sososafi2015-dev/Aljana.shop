@@ -6,7 +6,7 @@
   "exchangeRate": 10,
   "bankAccount": {
     "enabled": true,
-    "accountHolder": "youx منصة العمل الجمعوي - الإدارة المركزية (SMART ASSOC SARL)",
+    "accountHolder": "SYOMAX منصة العمل الجمعوي - الإدارة المركزية (SMART ASSOC SARL)",
     "bankName": "التجاري وفا بنك (Attijariwafa Bank)",
     "rib": "007 780 0001234567890123 45",
     "iban": "MA64007780000123456789012345",

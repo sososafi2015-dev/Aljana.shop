@@ -62,6 +62,8 @@ export const PlatformIdentityAdminSettings: React.FC<Props> = ({
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isLogoModified, setIsLogoModified] = useState(false);
   const [isSavingLogo, setIsSavingLogo] = useState(false);
+  const [logoUploadProgress, setLogoUploadProgress] = useState<number | null>(null);
+  const [logoPreviewError, setLogoPreviewError] = useState(false);
   const [logoSuccessMsg, setLogoSuccessMsg] = useState<string | null>(null);
   const [logoErrorMsg, setLogoErrorMsg] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -84,16 +86,18 @@ export const PlatformIdentityAdminSettings: React.FC<Props> = ({
   const [assocWhatsappSuccessMsg, setAssocWhatsappSuccessMsg] = useState<string | null>(null);
   const [assocWhatsappErrorMsg, setAssocWhatsappErrorMsg] = useState<string | null>(null);
 
-  // Initialize values when identity is loaded
+  // Initialize values when identity is loaded (without overwriting unsaved local logo selection)
   useEffect(() => {
     if (identity) {
-      setPlatformNameInput(identity.platformName || 'youx منصة العمل الجمعوي');
-      setPreviewLogo(identity.platformLogo || '');
+      setPlatformNameInput(identity.platformName || 'SYOMAX منصة العمل الجمعوي');
       setWhatsappInput(identity.whatsapp || '00212718861646');
       setAssocWhatsappInput(identity.associationsWhatsapp || identity.whatsapp || '00212718861646');
-      setIsLogoModified(false);
+      if (!isLogoModified) {
+        setPreviewLogo(identity.platformLogo || '');
+        setLogoPreviewError(false);
+      }
     }
-  }, [identity]);
+  }, [identity, isLogoModified]);
 
   // Security check: strict Super Admin boundary
   if (!isSuperAdmin) {
@@ -203,15 +207,18 @@ export const PlatformIdentityAdminSettings: React.FC<Props> = ({
 
     if (!isImageMime && !hasValidExt) {
       setLogoErrorMsg('يرجى اختيار ملف صورة صالح بصيغة مدعومة (PNG, JPG, JPEG, WebP, SVG)');
+      if (fileInputRef.current) fileInputRef.current.value = '';
       return;
     }
 
-    if (file.size > 10 * 1024 * 1024) {
-      setLogoErrorMsg('حجم الصورة كبير جداً، يرجى اختيار صورة أقل من 10 ميجابايت');
+    if (file.size > 20 * 1024 * 1024) {
+      setLogoErrorMsg('حجم الصورة كبير جداً، يرجى اختيار صورة أقل من 20 ميجابايت');
+      if (fileInputRef.current) fileInputRef.current.value = '';
       return;
     }
 
     setSelectedFile(file);
+    setLogoPreviewError(false);
     const reader = new FileReader();
     reader.onload = (event) => {
       const result = event.target?.result as string;
@@ -226,11 +233,17 @@ export const PlatformIdentityAdminSettings: React.FC<Props> = ({
       setLogoErrorMsg('فشل قراءة ملف الصورة من الجهاز');
     };
     reader.readAsDataURL(file);
+
+    // Reset input value so re-selecting the same filename still triggers onChange
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
   };
 
   const handleRemoveLogo = () => {
     setPreviewLogo('');
     setSelectedFile(null);
+    setLogoPreviewError(false);
     setIsLogoModified(true);
     setLogoErrorMsg(null);
     setLogoSuccessMsg(null);
@@ -243,42 +256,67 @@ export const PlatformIdentityAdminSettings: React.FC<Props> = ({
     setLogoSuccessMsg(null);
     setLogoErrorMsg(null);
     setIsSavingLogo(true);
+    setLogoUploadProgress(selectedFile ? 10 : null);
 
     try {
       let finalLogoUrl = previewLogo;
 
-      // If a new file is selected, upload to permanent image storage first
+      // If a new file is selected, upload permanently to Firebase Storage / Cloud Firestore media storage first
       if (selectedFile) {
         try {
-          finalLogoUrl = await uploadImageToServer(selectedFile);
-        } catch (uploadErr) {
-          console.warn('[PlatformIdentity] uploadImageToServer direct failed, falling back to base64 payload:', uploadErr);
-          // finalLogoUrl remains previewLogo (base64) which backend saveBase64Logo handles cleanly
+          finalLogoUrl = await uploadImageToServer(selectedFile, {
+            tenantId: 'portal',
+            category: 'logos',
+            fileName: selectedFile.name,
+            maxSizeMB: 20,
+            onProgress: (percent) => {
+              setLogoUploadProgress(Math.max(10, Math.min(95, percent)));
+            },
+          });
+        } catch (uploadErr: any) {
+          console.warn('[PlatformIdentity] Direct upload notice, attempting backend permanent save:', uploadErr);
+          if (!previewLogo || !previewLogo.startsWith('data:')) {
+            throw new Error(uploadErr?.message || 'فشل رفع صورة الشعار إلى التخزين السحابي، يرجى المحاولة مرة أخرى.');
+          }
+          // Fall back to sending base64 data URL which `/api/platform-identity/update-logo` persists to disk + Cloud Firestore
+          finalLogoUrl = previewLogo;
         }
       }
 
+      if (selectedFile && !finalLogoUrl) {
+        throw new Error('لم يتم الحصول على رابط دائم لصورة الشعار بعد الرفع.');
+      }
+
+      setLogoUploadProgress(selectedFile ? 98 : null);
       const res = await updatePlatformLogo(finalLogoUrl, currentSession);
       if (!res.success) {
-        const errorText = res.error || 'تعذر حفظ شعار المنصة، يرجى المحاولة مرة أخرى.';
+        const errorText = res.error || 'تعذر حفظ شعار المنصة في قاعدة البيانات، يرجى المحاولة مرة أخرى.';
         setLogoErrorMsg(errorText);
         onShowToast(errorText, 'error');
       } else {
-        setLogoSuccessMsg('تم حفظ التعديل بنجاح ✅');
-        onShowToast('تم حفظ وتحديث شعار المنصة بنجاح في قاعدة البيانات ✅', 'success');
+        const savedUrl = res.logo ?? '';
+        setLogoUploadProgress(100);
+        setPreviewLogo(savedUrl);
+        setLogoPreviewError(false);
         setIsLogoModified(false);
         setSelectedFile(null);
-        if (res.logo) {
-          setPreviewLogo(res.logo);
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
         }
-        await refetch();
+        const successText = savedUrl
+          ? 'تم رفع وحفظ شعار المنصة بنجاح وتحديثه فوراً في جميع صفحات المنصة ✅'
+          : 'تمت إزالة شعار المنصة والعودة للشعار الافتراضي بنجاح ✅';
+        setLogoSuccessMsg(successText);
+        onShowToast(successText, 'success');
       }
     } catch (err: any) {
       console.error('[PlatformIdentity] Error saving platform logo:', err);
-      const friendlyError = 'تعذر حفظ شعار المنصة، يرجى المحاولة مرة أخرى.';
+      const friendlyError = err?.message || 'تعذر رفع أو حفظ شعار المنصة، يرجى التحقق من الاتصال والمحاولة مرة أخرى.';
       setLogoErrorMsg(friendlyError);
       onShowToast(friendlyError, 'error');
     } finally {
       setIsSavingLogo(false);
+      setTimeout(() => setLogoUploadProgress(null), 600);
     }
   };
 
@@ -615,13 +653,14 @@ export const PlatformIdentityAdminSettings: React.FC<Props> = ({
               <div className="flex items-center justify-center gap-4 sm:gap-6 my-3">
                 {/* Light preview */}
                 <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col items-center justify-center min-w-32 sm:min-w-40 min-h-28 sm:min-h-36">
-                  {previewLogo ? (
+                  {previewLogo && !logoPreviewError ? (
                     <div className="w-20 h-20 rounded-full bg-white border-2 border-emerald-500/30 p-1 flex items-center justify-center overflow-hidden shadow-sm">
                       <img
                         src={previewLogo}
                         alt="معاينة شعار المنصة"
                         className="w-full h-full object-contain rounded-full select-none"
                         referrerPolicy="no-referrer"
+                        onError={() => setLogoPreviewError(true)}
                       />
                     </div>
                   ) : (
@@ -634,13 +673,14 @@ export const PlatformIdentityAdminSettings: React.FC<Props> = ({
 
                 {/* Dark preview */}
                 <div className="p-4 bg-slate-900 rounded-2xl border border-slate-800 shadow-sm flex flex-col items-center justify-center min-w-32 sm:min-w-40 min-h-28 sm:min-h-36">
-                  {previewLogo ? (
+                  {previewLogo && !logoPreviewError ? (
                     <div className="w-20 h-20 rounded-full bg-white border-2 border-emerald-500/30 p-1 flex items-center justify-center overflow-hidden shadow-sm">
                       <img
                         src={previewLogo}
                         alt="معاينة شعار المنصة"
                         className="w-full h-full object-contain rounded-full select-none"
                         referrerPolicy="no-referrer"
+                        onError={() => setLogoPreviewError(true)}
                       />
                     </div>
                   ) : (
@@ -656,7 +696,7 @@ export const PlatformIdentityAdminSettings: React.FC<Props> = ({
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/png, image/jpeg, image/webp, image/svg+xml"
+                accept="image/png, image/jpeg, image/webp, image/svg+xml, image/gif"
                 onChange={handleFileChange}
                 className="hidden"
               />
@@ -665,7 +705,8 @@ export const PlatformIdentityAdminSettings: React.FC<Props> = ({
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-xl border border-indigo-200 transition-all flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
+                  disabled={isSavingLogo}
+                  className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-50 text-indigo-700 text-xs font-bold rounded-xl border border-indigo-200 transition-all flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
                 >
                   <Upload className="w-3.5 h-3.5" />
                   <span>{previewLogo ? 'تعديل الشعار' : 'إضافة شعار'}</span>
@@ -675,7 +716,8 @@ export const PlatformIdentityAdminSettings: React.FC<Props> = ({
                   <button
                     type="button"
                     onClick={handleRemoveLogo}
-                    className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold rounded-xl border border-rose-200 transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
+                    disabled={isSavingLogo}
+                    className="px-3 py-2 bg-rose-50 hover:bg-rose-100 disabled:opacity-50 text-rose-700 text-xs font-bold rounded-xl border border-rose-200 transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
                     title="إزالة الشعار والعودة للرمز الافتراضي"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -687,6 +729,13 @@ export const PlatformIdentityAdminSettings: React.FC<Props> = ({
                 يدعم PNG، JPG، SVG، WebP من الهاتف أو الكمبيوتر أو التابلت
               </span>
             </div>
+
+            {isLogoModified && !isSavingLogo && (
+              <div className="p-2.5 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl text-[11px] flex items-center gap-2 font-bold mb-3">
+                <Info className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>تم اختيار شعار جديد — اضغط على زر «حفظ» أدناه لتثبيته في قاعدة البيانات وعرضه في جميع الصفحات.</span>
+              </div>
+            )}
 
             {/* Success / Error */}
             {logoSuccessMsg && (
@@ -711,7 +760,11 @@ export const PlatformIdentityAdminSettings: React.FC<Props> = ({
               {isSavingLogo ? (
                 <>
                   <RefreshCw className="w-4 h-4 animate-spin" />
-                  <span>جارٍ حفظ الشعار في قاعدة البيانات...</span>
+                  <span>
+                    {logoUploadProgress !== null
+                      ? `جارٍ رفع وحفظ الشعار (${logoUploadProgress}%)...`
+                      : 'جارٍ حفظ الشعار في قاعدة البيانات السحابية...'}
+                  </span>
                 </>
               ) : (
                 <>
@@ -762,14 +815,14 @@ export const PlatformIdentityAdminSettings: React.FC<Props> = ({
                       setNameSuccessMsg(null);
                       setNameErrorMsg(null);
                     }}
-                    placeholder="مثال: youx منصة العمل الجمعوي"
+                    placeholder="مثال: SYOMAX منصة العمل الجمعوي"
                     className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 transition-all outline-none font-bold text-slate-900"
                     required
                     minLength={2}
                   />
                 </div>
                 <span className="text-[10px] text-slate-400 mt-1 block">
-                  الاسم المسجل حالياً: <strong className="text-slate-700">{identity.platformName || 'youx منصة العمل الجمعوي'}</strong>
+                  الاسم المسجل حالياً: <strong className="text-slate-700">{identity.platformName || 'SYOMAX منصة العمل الجمعوي'}</strong>
                 </span>
               </div>
 

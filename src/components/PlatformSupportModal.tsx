@@ -483,7 +483,7 @@ export const PlatformSupportModal: React.FC<PlatformSupportModalProps> = ({ isOp
               <div>
                 <div className="flex items-center gap-2">
                   <h2 className="text-lg sm:text-xl font-black tracking-tight text-white">
-                    دعم youx منصة العمل الجمعوي
+                    دعم SYOMAX منصة العمل الجمعوي
                   </h2>
                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/20 font-bold">
                     مساهمة رسمية
@@ -524,7 +524,7 @@ export const PlatformSupportModal: React.FC<PlatformSupportModalProps> = ({ isOp
 
                 {/* The Required Specific Thank You Message */}
                 <h3 className="text-xl sm:text-2xl font-black text-slate-900 leading-snug">
-                  شكراً جزيلاً لك على دعمك لـ youx منصة العمل الجمعوي ❤️
+                  شكراً جزيلاً لك على دعمك لـ SYOMAX منصة العمل الجمعوي ❤️
                 </h3>
                 <p className="text-sm sm:text-base text-slate-600 font-medium leading-relaxed bg-orange-50/80 p-4 rounded-2xl border border-orange-200/80 text-orange-950">
                   مساهمتك تساعدنا على تطوير المنصة وتحسين خدماتها لخدمة الجمعيات والمجتمع بشكل أفضل.

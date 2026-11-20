@@ -1,9 +1,14 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import type { PlatformPortalSettings, WatchVideosSectionColorSettings } from '../types';
 import { writeJsonFileAtomicSync, readLargeJsonBody } from './storageEngine';
-import { saveDocToFirebaseServer } from './firebaseServerStorage';
+import {
+  saveDocToFirebaseServer,
+  getDocFromFirebaseServer,
+  persistFileToCloudFirestore,
+} from './firebaseServerStorage';
 
 export const DEFAULT_DONATIONS_COVER_IMAGE =
   'https://images.unsplash.com/photo-1593113598332-cd288d649433?auto=format&fit=crop&w=1600&q=80';
@@ -50,7 +55,7 @@ export const DEFAULT_PORTAL_SETTINGS: PlatformPortalSettings = {
   texts: {
     announcementBadge: 'SaaS Multi-Tenant',
     announcementText: 'المنصة السحابية الموحدة لإدارة الجمعيات بنظام استقلال البيانات التام والصلاحيات المتعددة',
-    headerBrandName: 'youx منصة العمل الجمعوي',
+    headerBrandName: 'SYOMAX منصة العمل الجمعوي',
     headerBrandTagline: 'منظومة رقمية شاملة لإدارة وتطوير العمل الجمعوي',
     createAssociationButtonText: 'إنشاء منصة احترافية للجمعية',
     heroBadge: 'نظام مستقل لكل جمعية • Multi-Tenant & Multi-User Architecture',
@@ -84,7 +89,7 @@ export const DEFAULT_PORTAL_SETTINGS: PlatformPortalSettings = {
     pillar5Desc: 'قسم مخصص لعرض وتوثيق كافة الأعمال والأنشطة الخيرية والتنموية بالصور والتفاصيل أمام الزوار والمنخرطين بطريقة منظمة واحترافية.',
     pillar6Title: 'إستفادة من تبرعات مالية',
     pillar6Desc: 'استفد من تبرعات مالية ومساهمات المنخرطين الجدد والمحسنين، واستقطب دعم القطاع الخاص والجالية المقيمة بالخارج، لبناء شراكات وتمويل مشاريعك الخيرية والتنموية وتحقيق أثر أكبر في المجتمع.',
-    footerBrandName: 'youx منصة العمل الجمعوي - Smart Multi-Association Platform',
+    footerBrandName: 'SYOMAX منصة العمل الجمعوي - Smart Multi-Association Platform',
     footerCopyrightText: 'جميع الحقوق محفوظة © • القالب المعتمد: جمعية النور للتنمية والتضامن',
   },
   watchVideosColors: { ...DEFAULT_WATCH_VIDEOS_COLORS },
@@ -133,15 +138,17 @@ export function loadPortalSettingsDatabase(forceFresh = false): PlatformPortalSe
         }
         if (loadedTexts.headerBrandName) {
           loadedTexts.headerBrandName = loadedTexts.headerBrandName
-            .replace(/منظومة الجنى الرقمية للعمل الجمعوي/g, 'youx منصة العمل الجمعوي')
-            .replace(/\bsyoumax\b/gi, 'youx')
-            .replace(/\bAljana\b/gi, 'youx');
+            .replace(/منظومة الجنى الرقمية للعمل الجمعوي/g, 'SYOMAX منصة العمل الجمعوي')
+            .replace(/\byoux\b/gi, 'SYOMAX')
+            .replace(/\bsyoumax\b/gi, 'SYOMAX')
+            .replace(/\bAljana\b/gi, 'SYOMAX');
         }
         if (loadedTexts.footerBrandName) {
           loadedTexts.footerBrandName = loadedTexts.footerBrandName
-            .replace(/منظومة الجنى الرقمية للعمل الجمعوي/g, 'youx منصة العمل الجمعوي')
-            .replace(/\bsyoumax\b/gi, 'youx')
-            .replace(/\bAljana\b/gi, 'youx');
+            .replace(/منظومة الجنى الرقمية للعمل الجمعوي/g, 'SYOMAX منصة العمل الجمعوي')
+            .replace(/\byoux\b/gi, 'SYOMAX')
+            .replace(/\bsyoumax\b/gi, 'SYOMAX')
+            .replace(/\bAljana\b/gi, 'SYOMAX');
         }
 
         const rawWatchColors = {
@@ -208,27 +215,115 @@ function sendJson(res: ServerResponse, statusCode: number, data: any) {
   res.end(JSON.stringify(data));
 }
 
-// Helper to save base64 image data URL to disk permanently
-function saveBase64Image(dataUrl: string, prefix: string, imagesDir: string): string {
+// Helper to save base64 image data URL to disk AND Cloud Firestore permanently
+async function saveBase64Image(
+  dataUrl: string,
+  prefix: string,
+  imagesDir: string,
+  category = 'logos'
+): Promise<string> {
   if (!dataUrl || !dataUrl.startsWith('data:image/')) return dataUrl;
   try {
     const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
     if (!match) return dataUrl;
-    const mimeType = match[1];
+    const mimeType = match[1].toLowerCase();
     const base64Data = match[2];
     let ext = '.jpg';
     if (mimeType.includes('png')) ext = '.png';
     else if (mimeType.includes('webp')) ext = '.webp';
     else if (mimeType.includes('svg')) ext = '.svg';
+    else if (mimeType.includes('gif')) ext = '.gif';
 
-    const filename = `${prefix}-${Date.now()}-${Math.random().toString(36).substring(2, 7)}${ext}`;
+    const buffer = Buffer.from(base64Data, 'base64');
+    if (buffer.length === 0) return dataUrl;
+
+    const hash = crypto.createHash('sha256').update(buffer).digest('hex').slice(0, 16);
+    const filename = `${prefix}-${hash}${ext}`;
     const diskPath = path.join(imagesDir, filename);
-    fs.writeFileSync(diskPath, Buffer.from(base64Data, 'base64'));
-    return `/api/images/${filename}`;
+
+    if (!fs.existsSync(diskPath)) {
+      const tmpPath = `${diskPath}.tmp.${process.pid}.${Date.now()}`;
+      fs.writeFileSync(tmpPath, buffer);
+      fs.renameSync(tmpPath, diskPath);
+    }
+
+    const imageUrl = `/api/images/${filename}`;
+    await persistFileToCloudFirestore(buffer, {
+      filename,
+      originalName: filename,
+      mimeType,
+      size: buffer.length,
+      url: imageUrl,
+      tenantId: 'portal',
+      category,
+      uploadedBy: 'Super Admin',
+      uploadedByUid: 'super_admin',
+    });
+
+    return imageUrl;
   } catch (err) {
     console.error(`[PortalSettingsDB] Error saving ${prefix} to disk:`, err);
     return dataUrl;
   }
+}
+
+let lastPortalCloudReconcileAt = 0;
+const PORTAL_CLOUD_RECONCILE_TTL_MS = 15000;
+
+async function reconcilePortalSettingsWithCloud(
+  localSettings: PlatformPortalSettings
+): Promise<PlatformPortalSettings> {
+  const now = Date.now();
+  if (now - lastPortalCloudReconcileAt < PORTAL_CLOUD_RECONCILE_TTL_MS) {
+    return localSettings;
+  }
+  lastPortalCloudReconcileAt = now;
+
+  try {
+    const cloudDoc = await getDocFromFirebaseServer<any>('portal_settings', 'main');
+    if (cloudDoc && typeof cloudDoc === 'object') {
+      const cloudTs = new Date(cloudDoc.lastUpdated || cloudDoc._updatedAt || 0).getTime();
+      const localTs = new Date(localSettings.lastUpdated || 0).getTime();
+
+      if (cloudTs > localTs) {
+        const resolvedLogo =
+          cloudDoc.logoUrl !== undefined
+            ? String(cloudDoc.logoUrl)
+            : cloudDoc.texts?.platformLogoUrl !== undefined
+            ? String(cloudDoc.texts.platformLogoUrl)
+            : localSettings.logoUrl || '';
+
+        const merged: PlatformPortalSettings = {
+          visibility: {
+            ...localSettings.visibility,
+            ...(cloudDoc.visibility || {}),
+          },
+          texts: {
+            ...localSettings.texts,
+            ...(cloudDoc.texts || {}),
+            platformLogoUrl: resolvedLogo,
+          },
+          theme: {
+            ...(localSettings.theme || {}),
+            ...(cloudDoc.theme || {}),
+          },
+          watchVideosColors: {
+            ...DEFAULT_WATCH_VIDEOS_COLORS,
+            ...(localSettings.watchVideosColors || {}),
+            ...(cloudDoc.watchVideosColors || {}),
+          },
+          logoUrl: resolvedLogo,
+          lastUpdated: cloudDoc.lastUpdated || cloudDoc._updatedAt || new Date().toISOString(),
+          updatedBy: cloudDoc.updatedBy || localSettings.updatedBy || 'Super Admin',
+        };
+        savePortalSettingsDatabase(merged);
+        return merged;
+      }
+    }
+  } catch (err) {
+    console.warn('[PortalSettingsDB] Cloud reconcile notice:', err);
+  }
+  return localSettings;
 }
 
 export async function handlePortalSettingsApi(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
@@ -247,10 +342,11 @@ export async function handlePortalSettingsApi(req: IncomingMessage, res: ServerR
 
   // 1. GET /api/portal-settings - retrieve current settings
   if (req.method === 'GET') {
+    const reconciled = await reconcilePortalSettingsWithCloud(currentSettings);
     sendJson(res, 200, {
       success: true,
-      settings: currentSettings,
-      lastUpdated: currentSettings.lastUpdated,
+      settings: reconciled,
+      lastUpdated: reconciled.lastUpdated,
     });
     return true;
   }
@@ -258,21 +354,40 @@ export async function handlePortalSettingsApi(req: IncomingMessage, res: ServerR
   // 2. POST /api/portal-settings/reset - reset to default configuration
   if (req.method === 'POST' && (url === '/api/portal-settings/reset' || url.startsWith('/api/portal-settings/reset?'))) {
     try {
+      const nowIso = new Date().toISOString();
       const resetSettings: PlatformPortalSettings = {
         visibility: { ...DEFAULT_PORTAL_SETTINGS.visibility },
-        texts: { ...DEFAULT_PORTAL_SETTINGS.texts },
+        texts: {
+          ...DEFAULT_PORTAL_SETTINGS.texts,
+          platformLogoUrl: '',
+        },
         theme: { ...DEFAULT_PORTAL_SETTINGS.theme },
         watchVideosColors: { ...DEFAULT_WATCH_VIDEOS_COLORS },
         logoUrl: '',
-        lastUpdated: new Date().toISOString(),
+        lastUpdated: nowIso,
         updatedBy: 'Super Admin (Reset to Defaults)',
       };
 
       savePortalSettingsDatabase(resetSettings);
+      lastPortalCloudReconcileAt = Date.now();
       await saveDocToFirebaseServer('portal_settings', 'main', {
         ...resetSettings,
-        _updatedAt: resetSettings.lastUpdated,
+        _updatedAt: nowIso,
       }).catch(() => {});
+
+      try {
+        const {
+          loadPlatformIdentityDatabase,
+          savePlatformIdentityDatabase,
+          syncPlatformIdentityToCloud,
+        } = await import('./platformIdentityApiHandler');
+        const idDb = loadPlatformIdentityDatabase(true);
+        idDb.platformLogo = '';
+        idDb.updatedAt = nowIso;
+        idDb.updatedBy = 'Super Admin (Reset to Defaults)';
+        savePlatformIdentityDatabase(idDb);
+        await syncPlatformIdentityToCloud(idDb);
+      } catch {}
 
       sendJson(res, 200, {
         success: true,
@@ -309,20 +424,27 @@ export async function handlePortalSettingsApi(req: IncomingMessage, res: ServerR
         fs.mkdirSync(imagesDir, { recursive: true });
       }
 
-      // Offload all media files (cover image, logo, hero background) to permanent disk storage
+      // Offload all media files (cover image, logo, hero background) to permanent disk + Cloud Firestore storage
       let coverImage = incoming.texts?.donationsSectionCoverImage ?? currentSettings.texts.donationsSectionCoverImage;
       if (typeof coverImage === 'string' && coverImage.startsWith('data:image/')) {
-        coverImage = saveBase64Image(coverImage, 'portal-cover', imagesDir);
+        coverImage = await saveBase64Image(coverImage, 'portal-cover', imagesDir, 'covers');
       }
 
-      let logoUrl = incoming.logoUrl ?? incoming.texts?.platformLogoUrl ?? currentSettings.logoUrl ?? '';
+      const logoExplicitlyProvided =
+        incoming.logoUrl !== undefined || incoming.texts?.platformLogoUrl !== undefined;
+      let logoUrl =
+        incoming.logoUrl !== undefined
+          ? String(incoming.logoUrl || '').trim()
+          : incoming.texts?.platformLogoUrl !== undefined
+          ? String(incoming.texts.platformLogoUrl || '').trim()
+          : currentSettings.logoUrl ?? '';
       if (typeof logoUrl === 'string' && logoUrl.startsWith('data:image/')) {
-        logoUrl = saveBase64Image(logoUrl, 'portal-logo', imagesDir);
+        logoUrl = await saveBase64Image(logoUrl, 'portal-logo', imagesDir, 'logos');
       }
 
       let heroBackgroundImage = incoming.texts?.heroBackgroundImage ?? currentSettings.texts?.heroBackgroundImage ?? '';
       if (typeof heroBackgroundImage === 'string' && heroBackgroundImage.startsWith('data:image/')) {
-        heroBackgroundImage = saveBase64Image(heroBackgroundImage, 'portal-hero-bg', imagesDir);
+        heroBackgroundImage = await saveBase64Image(heroBackgroundImage, 'portal-hero-bg', imagesDir, 'banners');
       }
 
       let watchVideosCoverImage =
@@ -331,11 +453,17 @@ export async function handlePortalSettingsApi(req: IncomingMessage, res: ServerR
           : currentSettings.watchVideosColors?.coverImageUrl ??
             DEFAULT_WATCH_VIDEOS_COLORS.coverImageUrl;
       if (typeof watchVideosCoverImage === 'string' && watchVideosCoverImage.startsWith('data:image/')) {
-        watchVideosCoverImage = saveBase64Image(watchVideosCoverImage, 'portal-watch-videos-cover', imagesDir);
+        watchVideosCoverImage = await saveBase64Image(
+          watchVideosCoverImage,
+          'portal-watch-videos-cover',
+          imagesDir,
+          'covers'
+        );
       }
 
       const incomingBrandName = incoming.texts?.headerBrandName?.trim();
       const resolvedHeaderBrandName = incomingBrandName || currentSettings.texts.headerBrandName;
+      const nowIso = new Date().toISOString();
 
       const updatedSettings: PlatformPortalSettings = {
         visibility: {
@@ -361,11 +489,12 @@ export async function handlePortalSettingsApi(req: IncomingMessage, res: ServerR
           coverImageUrl: watchVideosCoverImage,
         },
         logoUrl: logoUrl,
-        lastUpdated: new Date().toISOString(),
+        lastUpdated: nowIso,
         updatedBy: body.updatedBy || incoming.updatedBy || 'Super Admin',
       };
 
       savePortalSettingsDatabase(updatedSettings);
+      lastPortalCloudReconcileAt = Date.now();
       const verifiedSaved = loadPortalSettingsDatabase(true);
 
       // Mirror authoritative settings to Cloud Firestore (portal_settings/main)
@@ -374,23 +503,28 @@ export async function handlePortalSettingsApi(req: IncomingMessage, res: ServerR
         _updatedAt: verifiedSaved.lastUpdated,
       }).catch(() => {});
 
-      // Also sync brand name & logo to platform identity if appropriate
+      // Also sync brand name & logo (including removal!) to platform identity (disk + Cloud Firestore)
       try {
-        const { loadPlatformIdentityDatabase, savePlatformIdentityDatabase } = await import('./platformIdentityApiHandler');
+        const {
+          loadPlatformIdentityDatabase,
+          savePlatformIdentityDatabase,
+          syncPlatformIdentityToCloud,
+        } = await import('./platformIdentityApiHandler');
         const idDb = loadPlatformIdentityDatabase(true);
         let idChanged = false;
         if (incomingBrandName && idDb.platformName !== incomingBrandName) {
           idDb.platformName = incomingBrandName;
           idChanged = true;
         }
-        if (logoUrl && idDb.platformLogo !== logoUrl) {
+        if (logoExplicitlyProvided && idDb.platformLogo !== logoUrl) {
           idDb.platformLogo = logoUrl;
           idChanged = true;
         }
         if (idChanged) {
-          idDb.updatedAt = new Date().toISOString();
+          idDb.updatedAt = nowIso;
           idDb.updatedBy = body.updatedBy || 'Super Admin';
           savePlatformIdentityDatabase(idDb);
+          await syncPlatformIdentityToCloud(idDb);
         }
       } catch (idSyncErr) {
         console.warn('[PortalSettingsDB] Notice: Could not sync identity database:', idSyncErr);

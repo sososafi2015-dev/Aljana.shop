@@ -1,11 +1,14 @@
 import { useState, useEffect } from 'react';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { db } from '../firebase';
+import { syncPortalLogoLocally } from '../portalSettingsStorage';
 import type { PlatformIdentitySettings, MasterAdminSession } from '../types';
 
 export const PLATFORM_IDENTITY_STORAGE_KEY = 'smart_platform_identity_v1';
 export const PLATFORM_IDENTITY_EVENT = 'platform-identity-changed';
 
 export const DEFAULT_PLATFORM_IDENTITY: PlatformIdentitySettings = {
-  platformName: 'youx منصة العمل الجمعوي',
+  platformName: 'SYOMAX منصة العمل الجمعوي',
   platformLogo: '',
   whatsapp: '00212718861646',
   associationsWhatsapp: '00212718861646',
@@ -16,10 +19,16 @@ export const DEFAULT_PLATFORM_IDENTITY: PlatformIdentitySettings = {
 
 function normalizeBrandName(name?: string): string {
   if (!name) return DEFAULT_PLATFORM_IDENTITY.platformName;
-  if (name === 'منظومة الجنى الرقمية للعمل الجمعوي') {
+  if (name === 'منظومة الجنى الرقمية للعمل الجمعوي' || name.includes('جمعية الشيف')) {
     return DEFAULT_PLATFORM_IDENTITY.platformName;
   }
-  return name.replace(/\bsyoumax\b/gi, 'youx').replace(/\bAljana\b/gi, 'youx');
+  return name
+    .replace(/جمعية\s*الشيف/gi, 'SYOMAX')
+    .replace(/\b(?:Association\s+)?El\s*Chayef(?:\s+Association)?\b/gi, 'SYOMAX')
+    .replace(/\bAl-?Shaif(?:\s+Association)?\b/gi, 'SYOMAX')
+    .replace(/\byoux\b/gi, 'SYOMAX')
+    .replace(/\bsyoumax\b/gi, 'SYOMAX')
+    .replace(/\bAljana\b/gi, 'SYOMAX');
 }
 
 let inMemoryIdentity: PlatformIdentitySettings | null = null;
@@ -66,10 +75,48 @@ function updateDocumentTitle(name: string) {
   }
 }
 
+function updateDocumentFavicon(logoUrl?: string) {
+  if (typeof document === 'undefined' || !logoUrl) return;
+  try {
+    let link = document.querySelector("link[rel~='icon']") as HTMLLinkElement | null;
+    if (!link) {
+      link = document.createElement('link');
+      link.rel = 'icon';
+      document.head.appendChild(link);
+    }
+    link.href = logoUrl;
+  } catch {}
+}
+
 /**
- * Fetches fresh identity settings from backend database
+ * Synchronizes the platform logo locally across all mounted components using `usePlatformIdentity`
+ */
+export function syncPlatformIdentityLogoLocally(logoUrl: string, updatedAt?: string): void {
+  const current = getCachedPlatformIdentity();
+  const next: PlatformIdentitySettings = {
+    ...current,
+    platformLogo: logoUrl,
+    updatedAt: updatedAt || new Date().toISOString(),
+  };
+  inMemoryIdentity = next;
+  safeSetLocalStorage(next);
+  if (logoUrl) {
+    updateDocumentFavicon(logoUrl);
+  }
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(PLATFORM_IDENTITY_EVENT, { detail: next }));
+  }
+}
+
+/**
+ * Fetches fresh identity settings from backend database AND Cloud Firestore (`platform_identity/main`),
+ * reconciling by timestamp so the latest saved logo & identity always win across reloads & sessions.
  */
 export async function fetchPlatformIdentity(): Promise<PlatformIdentitySettings> {
+  let backendIdentity: PlatformIdentitySettings | null = null;
+  let firestoreIdentity: PlatformIdentitySettings | null = null;
+
+  // 1. Fetch from backend persistent API
   try {
     const res = await fetch(`/api/platform-identity?_t=${Date.now()}`, {
       method: 'GET',
@@ -82,36 +129,102 @@ export async function fetchPlatformIdentity(): Promise<PlatformIdentitySettings>
     if (res.ok) {
       const data = await res.json();
       if (data && data.success && data.identity) {
-        const fresh: PlatformIdentitySettings = {
+        backendIdentity = {
           platformName: normalizeBrandName(data.identity.platformName),
           platformLogo: data.identity.platformLogo || '',
           whatsapp: data.identity.whatsapp || DEFAULT_PLATFORM_IDENTITY.whatsapp,
-          associationsWhatsapp: data.identity.associationsWhatsapp || data.identity.whatsapp || DEFAULT_PLATFORM_IDENTITY.associationsWhatsapp,
+          associationsWhatsapp:
+            data.identity.associationsWhatsapp ||
+            data.identity.whatsapp ||
+            DEFAULT_PLATFORM_IDENTITY.associationsWhatsapp,
           hasCustomPin: Boolean(data.identity.hasCustomPin),
           updatedAt: data.identity.updatedAt,
           updatedBy: data.identity.updatedBy,
         };
-        const currentCached = getCachedPlatformIdentity();
-        const hasDifferences =
-          currentCached.platformName !== fresh.platformName ||
-          currentCached.platformLogo !== fresh.platformLogo ||
-          currentCached.whatsapp !== fresh.whatsapp ||
-          currentCached.associationsWhatsapp !== fresh.associationsWhatsapp ||
-          currentCached.hasCustomPin !== fresh.hasCustomPin;
-
-        inMemoryIdentity = fresh;
-        safeSetLocalStorage(fresh);
-        updateDocumentTitle(fresh.platformName);
-
-        if (hasDifferences && typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent(PLATFORM_IDENTITY_EVENT, { detail: fresh }));
-        }
-        return fresh;
       }
     }
   } catch (err) {
     console.warn('[PlatformIdentityApi] Failed to fetch identity from backend:', err);
   }
+
+  // 2. Fetch from Cloud Firestore (`platform_identity/main`) for cross-session durability
+  try {
+    const snap = await getDoc(doc(db, 'platform_identity', 'main'));
+    if (snap.exists()) {
+      const fsData = snap.data() as any;
+      if (fsData && typeof fsData === 'object') {
+        firestoreIdentity = {
+          platformName: normalizeBrandName(fsData.platformName),
+          platformLogo: typeof fsData.platformLogo === 'string' ? fsData.platformLogo : '',
+          whatsapp: fsData.whatsapp || DEFAULT_PLATFORM_IDENTITY.whatsapp,
+          associationsWhatsapp:
+            fsData.associationsWhatsapp ||
+            fsData.whatsapp ||
+            DEFAULT_PLATFORM_IDENTITY.associationsWhatsapp,
+          hasCustomPin: Boolean(fsData.hasCustomPin),
+          updatedAt: fsData.updatedAt || fsData._updatedAt,
+          updatedBy: fsData.updatedBy || 'Super Admin',
+        };
+      }
+    }
+  } catch (fsErr) {
+    console.warn('[PlatformIdentityApi] Firestore fetch identity notice:', fsErr);
+  }
+
+  // 3. Reconcile backend vs Cloud Firestore by timestamp
+  let fresh: PlatformIdentitySettings | null = null;
+  if (backendIdentity && firestoreIdentity) {
+    const backendTs = new Date(backendIdentity.updatedAt || 0).getTime();
+    const fsTs = new Date(firestoreIdentity.updatedAt || 0).getTime();
+    if (fsTs > backendTs) {
+      fresh = {
+        ...backendIdentity,
+        ...firestoreIdentity,
+        hasCustomPin: backendIdentity.hasCustomPin || firestoreIdentity.hasCustomPin,
+      };
+    } else {
+      fresh = backendIdentity;
+      if (backendTs > fsTs) {
+        setDoc(
+          doc(db, 'platform_identity', 'main'),
+          { ...backendIdentity, _updatedAt: backendIdentity.updatedAt || new Date().toISOString() },
+          { merge: true }
+        ).catch(() => {});
+      }
+    }
+  } else if (backendIdentity) {
+    fresh = backendIdentity;
+    setDoc(
+      doc(db, 'platform_identity', 'main'),
+      { ...backendIdentity, _updatedAt: backendIdentity.updatedAt || new Date().toISOString() },
+      { merge: true }
+    ).catch(() => {});
+  } else if (firestoreIdentity) {
+    fresh = firestoreIdentity;
+  }
+
+  if (fresh) {
+    const currentCached = getCachedPlatformIdentity();
+    const hasDifferences =
+      currentCached.platformName !== fresh.platformName ||
+      currentCached.platformLogo !== fresh.platformLogo ||
+      currentCached.whatsapp !== fresh.whatsapp ||
+      currentCached.associationsWhatsapp !== fresh.associationsWhatsapp ||
+      currentCached.hasCustomPin !== fresh.hasCustomPin;
+
+    inMemoryIdentity = fresh;
+    safeSetLocalStorage(fresh);
+    updateDocumentTitle(fresh.platformName);
+    if (fresh.platformLogo) {
+      updateDocumentFavicon(fresh.platformLogo);
+    }
+
+    if (hasDifferences && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(PLATFORM_IDENTITY_EVENT, { detail: fresh }));
+    }
+    return fresh;
+  }
+
   return getCachedPlatformIdentity();
 }
 
@@ -316,7 +429,8 @@ export async function updatePlatformSecretPin(
 }
 
 /**
- * Updates Platform Logo (Super Admin only)
+ * Updates Platform Logo permanently in Backend Database + Cloud Firestore (`platform_identity/main` & `portal_settings/main`)
+ * and broadcasts immediately to all pages of the platform (Super Admin only).
  */
 export async function updatePlatformLogo(
   logo: string,
@@ -334,17 +448,80 @@ export async function updatePlatformLogo(
     });
     const data = await res.json();
     if (!res.ok || !data.success) {
-      return { success: false, error: data.error || 'فشل حفظ وتحديث الشعار' };
+      return { success: false, error: data.error || 'فشل حفظ وتحديث الشعار في الخادم' };
     }
-    const fresh = await fetchPlatformIdentity();
+
+    const savedLogo = typeof data.logo === 'string' ? data.logo : logo;
+    const updatedAt = data.updatedAt || new Date().toISOString();
+    const updatedBy = session?.fullName || session?.username || 'Super Admin';
+    const current = getCachedPlatformIdentity();
+
+    const updatedIdentity: PlatformIdentitySettings = {
+      ...current,
+      platformLogo: savedLogo,
+      updatedAt,
+      updatedBy,
+    };
+
+    // Double-persist authoritatively from client SDK to Cloud Firestore (`platform_identity/main` & `portal_settings/main`)
+    try {
+      await Promise.all([
+        setDoc(
+          doc(db, 'platform_identity', 'main'),
+          {
+            platformName: updatedIdentity.platformName,
+            platformLogo: savedLogo,
+            whatsapp: updatedIdentity.whatsapp || DEFAULT_PLATFORM_IDENTITY.whatsapp,
+            associationsWhatsapp:
+              updatedIdentity.associationsWhatsapp ||
+              updatedIdentity.whatsapp ||
+              DEFAULT_PLATFORM_IDENTITY.associationsWhatsapp,
+            hasCustomPin: Boolean(updatedIdentity.hasCustomPin),
+            updatedAt,
+            updatedBy,
+            _updatedAt: updatedAt,
+          },
+          { merge: true }
+        ),
+        setDoc(
+          doc(db, 'portal_settings', 'main'),
+          {
+            logoUrl: savedLogo,
+            texts: {
+              platformLogoUrl: savedLogo,
+            },
+            lastUpdated: updatedAt,
+            updatedBy,
+            _updatedAt: updatedAt,
+          },
+          { merge: true }
+        ),
+      ]);
+    } catch (fsErr) {
+      console.warn('[PlatformIdentityApi] Client Firestore mirror notice (server already persisted):', fsErr);
+    }
+
+    // Update runtime memory, localStorage, favicon, and broadcast unconditionally to ALL platform pages
+    inMemoryIdentity = updatedIdentity;
+    safeSetLocalStorage(updatedIdentity);
+    if (savedLogo) {
+      updateDocumentFavicon(savedLogo);
+    }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(PLATFORM_IDENTITY_EVENT, { detail: updatedIdentity }));
+    }
+
+    // Immediately sync portal settings cache & broadcast PORTAL_SETTINGS_EVENT so MainPlatformPortal updates right away
+    syncPortalLogoLocally(savedLogo, updatedAt);
+
     return {
       success: true,
-      logo: fresh.platformLogo,
-      message: data.message || 'تم حفظ تعديل شعار المنصة بنجاح ✅',
+      logo: savedLogo,
+      message: data.message || 'تم حفظ وتحديث شعار المنصة بنجاح وتطبيقه على جميع الصفحات ✅',
     };
   } catch (err: any) {
     console.error('[PlatformIdentityApi] updatePlatformLogo error:', err);
-    return { success: false, error: err.message || 'حدث خطأ أثناء حفظ الشعار' };
+    return { success: false, error: err.message || 'حدث خطأ في الاتصال أثناء حفظ الشعار' };
   }
 }
 

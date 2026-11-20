@@ -4,6 +4,30 @@
       "adminId": "super_admin",
       "adminName": "Super Admin",
       "adminRole": "super_admin",
+      "action": "تحديث شعار المنصة",
+      "actionKey": "platform_identity_edit",
+      "targetItem": "شعار المنصة العام",
+      "result": "success",
+      "details": "تم رفع وحفظ شعار جديد للمنصة بنجاح (/api/images/img-a0a3de2d1f25a52b.png)",
+      "id": "log-1795172084172-vq46g",
+      "timestamp": "2026-11-20T10:54:44.172Z"
+    },
+    {
+      "adminId": "super_admin",
+      "adminName": "Super Admin",
+      "adminRole": "super_admin",
+      "action": "تحديث شعار المنصة",
+      "actionKey": "platform_identity_edit",
+      "targetItem": "شعار المنصة العام",
+      "result": "success",
+      "details": "تم رفع وحفظ شعار جديد للمنصة بنجاح (/api/images/img-c414cd0e204de974.png)",
+      "id": "log-1795172082561-i7nap",
+      "timestamp": "2026-11-20T10:54:42.561Z"
+    },
+    {
+      "adminId": "super_admin",
+      "adminName": "Super Admin",
+      "adminRole": "super_admin",
       "action": "إزالة شعار المنصة",
       "actionKey": "platform_identity_edit",
       "targetItem": "شعار المنصة العام",
@@ -18,9 +42,9 @@
       "adminRole": "super_admin",
       "action": "تعديل اسم المنصة",
       "actionKey": "platform_identity_edit",
-      "targetItem": "اسم المنصة: youx منصة العمل الجمعوي",
+      "targetItem": "اسم المنصة: SYOMAX منصة العمل الجمعوي",
       "result": "success",
-      "details": "قام Super Admin بتحديث اسم المنصة إلى «youx منصة العمل الجمعوي» وحفظه في قاعدة البيانات",
+      "details": "قام Super Admin بتحديث اسم المنصة إلى «SYOMAX منصة العمل الجمعوي» وحفظه في قاعدة البيانات",
       "id": "log-1792663826848-qq0lg",
       "timestamp": "2026-10-22T10:10:26.848Z"
     },
@@ -85,5 +109,5 @@
       "details": "تسجيل دخول ناجح للأدمن الرئيسي عبر PIN"
     }
   ],
-  "lastUpdated": "2026-10-22T10:10:26.849Z"
+  "lastUpdated": "2026-11-20T10:54:44.172Z"
 }

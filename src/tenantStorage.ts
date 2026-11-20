@@ -685,25 +685,65 @@ export function getTenantById(tenantId: string): AssociationTenant | undefined {
   return undefined;
 }
 
-export function getActiveTenantId(): string {
-  // Check URL parameters first for direct deep-linking
+export function resolveTenantIdFromUrl(): string {
   if (typeof window !== 'undefined') {
     try {
       const params = new URLSearchParams(window.location.search);
-      const paramTenant = params.get('tenant');
-      if (paramTenant && paramTenant !== 'portal') {
-        return paramTenant;
-      }
       if (params.get('portal') === 'true' || params.get('view') === 'portal') {
         return 'portal';
+      }
+
+      const rawParam = (params.get('tenant') || params.get('association') || '').trim();
+      let candidate = rawParam;
+
+      if (!candidate) {
+        const pathMatch = window.location.pathname.match(/^\/(?:association|tenant|a)\/([^/?#]+)/i);
+        if (pathMatch && pathMatch[1]) {
+          candidate = decodeURIComponent(pathMatch[1]).trim();
+        }
+      }
+
+      if (candidate && candidate.toLowerCase() !== 'portal') {
+        const lower = candidate.toLowerCase();
+        const all = getAllTenants();
+        const matched = all.find(
+          (t) =>
+            t.id === candidate ||
+            (t.slug && t.slug.toLowerCase() === lower)
+        );
+        if (matched) return matched.id;
+
+        const defMatch = defaultTenants.find(
+          (t) =>
+            t.id === candidate ||
+            (t.slug && t.slug.toLowerCase() === lower)
+        );
+        if (defMatch) return defMatch.id;
+
+        return candidate;
       }
     } catch {}
   }
 
-  // Load from storage, defaulting to the full application interface (MASTER_TEMPLATE_TENANT_ID / 'tenant_nour')
-  // This guarantees that regular users and visitors immediately see the rich application interface
-  const saved = loadData<string>(TENANT_STORAGE_KEYS.ACTIVE_TENANT_ID, MASTER_TEMPLATE_TENANT_ID);
-  return saved || MASTER_TEMPLATE_TENANT_ID;
+  return 'portal';
+}
+
+export function getActiveTenantId(): string {
+  // Always honor direct URL routing first; root "/" strictly defaults to the SYOMAX main platform portal
+  if (typeof window !== 'undefined') {
+    const resolvedFromUrl = resolveTenantIdFromUrl();
+    if (resolvedFromUrl !== 'portal') {
+      return resolvedFromUrl;
+    }
+    // If the user is on the root domain "/" with no tenant param/path, return 'portal'
+    const params = new URLSearchParams(window.location.search);
+    if (!params.get('tenant') && !params.get('association')) {
+      return 'portal';
+    }
+  }
+
+  const saved = loadData<string>(TENANT_STORAGE_KEYS.ACTIVE_TENANT_ID, 'portal');
+  return saved || 'portal';
 }
 
 export function setActiveTenantId(tenantId: string): void {
@@ -1531,9 +1571,9 @@ export function deleteTenant(tenantId: string): boolean {
   );
   saveData(TENANT_STORAGE_KEYS.ALL_OWNERS, filteredOwners);
 
-  // 3. If the deleted tenant was active, safely fall back to master template
+  // 3. If the deleted tenant was active, safely fall back to main SYOMAX platform portal
   if (getActiveTenantId() === tenantId) {
-    setActiveTenantId(MASTER_TEMPLATE_TENANT_ID);
+    setActiveTenantId('portal');
   }
 
   // 4. Clean all isolated localStorage keys for this tenant only
@@ -1599,7 +1639,7 @@ export async function deleteTenantFromDatabase(
   saveData(TENANT_STORAGE_KEYS.ALL_OWNERS, filteredOwners);
 
   if (getActiveTenantId() === tenantId) {
-    setActiveTenantId(MASTER_TEMPLATE_TENANT_ID);
+    setActiveTenantId('portal');
   }
 
   cleanIsolatedTenantLocalStorage(tenantId);

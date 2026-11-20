@@ -298,7 +298,7 @@
       "description": "Super Admin external domain configurations, Hostinger/custom nameservers, DNS records, and real verification status",
       "fields": {
         "id": { "type": "string", "description": "Domain record ID" },
-        "domainName": { "type": "string", "description": "Normalized domain name e.g. youx.ai.studio" },
+        "domainName": { "type": "string", "description": "Normalized domain name e.g. syomax.ai.studio" },
         "targetUrl": { "type": "string", "description": "Target platform URL" },
         "providerPreset": { "type": "string", "description": "hostinger or custom" },
         "nameservers": { "type": "list", "description": "Configured DNS nameservers" },

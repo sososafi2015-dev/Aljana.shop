@@ -11,6 +11,11 @@ import {
 } from './platformSubAdminsApiHandler';
 import { loadPortalSettingsDatabase, savePortalSettingsDatabase } from './portalSettingsApiHandler';
 import { writeJsonFileAtomicSync, readLargeJsonBody, offloadBase64ToDisk } from './storageEngine';
+import {
+  saveDocToFirebaseServer,
+  getDocFromFirebaseServer,
+  persistFileToCloudFirestore,
+} from './firebaseServerStorage';
 
 export interface PlatformIdentityDatabase {
   platformName: string;
@@ -27,7 +32,7 @@ export interface PlatformIdentityDatabase {
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'platform_identity_database.json');
 
-const DEFAULT_PLATFORM_NAME = 'youx منصة العمل الجمعوي';
+const DEFAULT_PLATFORM_NAME = 'SYOMAX منصة العمل الجمعوي';
 const DEFAULT_WHATSAPP = '00212718861646';
 const DEFAULT_SALT = 'platform_master_superadmin_salt_2025';
 
@@ -115,7 +120,10 @@ export function loadPlatformIdentityDatabase(forceFresh = false): PlatformIdenti
         const normalizedName =
           rawName === 'منظومة الجنى الرقمية للعمل الجمعوي'
             ? DEFAULT_PLATFORM_NAME
-            : rawName.replace(/\bsyoumax\b/gi, 'youx').replace(/\bAljana\b/gi, 'youx');
+            : rawName
+                .replace(/\byoux\b/gi, 'SYOMAX')
+                .replace(/\bsyoumax\b/gi, 'SYOMAX')
+                .replace(/\bAljana\b/gi, 'SYOMAX');
         inMemoryIdentityDb = {
           platformName: normalizedName,
           platformLogo: parsed.platformLogo || '',
@@ -179,7 +187,80 @@ function sendJson(res: ServerResponse, statusCode: number, data: any) {
 
 const IMAGES_DIR = path.join(DATA_DIR, 'images');
 
-function saveBase64Logo(dataUrl: string): string {
+export async function syncPlatformIdentityToCloud(db: PlatformIdentityDatabase): Promise<boolean> {
+  const nowIso = db.updatedAt || new Date().toISOString();
+  return saveDocToFirebaseServer('platform_identity', 'main', {
+    platformName: db.platformName,
+    platformLogo: db.platformLogo || '',
+    whatsapp: db.whatsapp || DEFAULT_WHATSAPP,
+    associationsWhatsapp: db.associationsWhatsapp || db.whatsapp || DEFAULT_WHATSAPP,
+    hasCustomPin: Boolean(db.isPinCustomized),
+    updatedAt: nowIso,
+    updatedBy: db.updatedBy || 'Super Admin',
+    _updatedAt: nowIso,
+  });
+}
+
+let lastCloudReconcileAt = 0;
+const CLOUD_RECONCILE_TTL_MS = 15000;
+
+async function reconcilePlatformIdentityWithCloud(
+  localDb: PlatformIdentityDatabase,
+  force = false
+): Promise<PlatformIdentityDatabase> {
+  const now = Date.now();
+  if (!force && now - lastCloudReconcileAt < CLOUD_RECONCILE_TTL_MS) {
+    return localDb;
+  }
+  lastCloudReconcileAt = now;
+
+  try {
+    const cloudDoc = await getDocFromFirebaseServer<any>('platform_identity', 'main');
+    if (cloudDoc && typeof cloudDoc === 'object') {
+      const cloudTs = new Date(cloudDoc.updatedAt || cloudDoc._updatedAt || 0).getTime();
+      const localTs = new Date(localDb.updatedAt || 0).getTime();
+
+      if (cloudTs > localTs) {
+        let changed = false;
+        if (typeof cloudDoc.platformLogo === 'string' && cloudDoc.platformLogo !== localDb.platformLogo) {
+          localDb.platformLogo = cloudDoc.platformLogo;
+          changed = true;
+        }
+        if (typeof cloudDoc.platformName === 'string' && cloudDoc.platformName.trim() && cloudDoc.platformName !== localDb.platformName) {
+          localDb.platformName = cloudDoc.platformName.trim();
+          changed = true;
+        }
+        if (typeof cloudDoc.whatsapp === 'string' && cloudDoc.whatsapp.trim() && cloudDoc.whatsapp !== localDb.whatsapp) {
+          localDb.whatsapp = cloudDoc.whatsapp.trim();
+          changed = true;
+        }
+        if (
+          typeof cloudDoc.associationsWhatsapp === 'string' &&
+          cloudDoc.associationsWhatsapp.trim() &&
+          cloudDoc.associationsWhatsapp !== localDb.associationsWhatsapp
+        ) {
+          localDb.associationsWhatsapp = cloudDoc.associationsWhatsapp.trim();
+          changed = true;
+        }
+        if (changed) {
+          localDb.updatedAt = cloudDoc.updatedAt || cloudDoc._updatedAt || new Date().toISOString();
+          localDb.updatedBy = cloudDoc.updatedBy || localDb.updatedBy || 'Super Admin';
+          savePlatformIdentityDatabase(localDb);
+        }
+      } else if (localTs > cloudTs) {
+        await syncPlatformIdentityToCloud(localDb);
+      }
+    } else {
+      // Seed Cloud Firestore `platform_identity/main` if it doesn't exist yet
+      await syncPlatformIdentityToCloud(localDb);
+    }
+  } catch (err) {
+    console.warn('[PlatformIdentityDB] Cloud reconcile notice:', err);
+  }
+  return localDb;
+}
+
+async function saveBase64Logo(dataUrl: string, uploadedBy = 'Super Admin'): Promise<string> {
   if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:')) {
     return dataUrl;
   }
@@ -198,10 +279,33 @@ function saveBase64Logo(dataUrl: string): string {
     else if (mimeType.includes('gif')) ext = '.gif';
     else if (mimeType.includes('png')) ext = '.png';
 
-    const filename = `platform-logo-${Date.now()}-${Math.random().toString(36).substring(2, 8)}${ext}`;
     const buffer = Buffer.from(match[2], 'base64');
-    fs.writeFileSync(path.join(IMAGES_DIR, filename), buffer);
-    return `/api/images/${filename}`;
+    if (buffer.length === 0) return dataUrl;
+
+    const hash = crypto.createHash('sha256').update(buffer).digest('hex').slice(0, 16);
+    const filename = `platform-logo-${hash}${ext}`;
+    const filePath = path.join(IMAGES_DIR, filename);
+
+    if (!fs.existsSync(filePath)) {
+      const tmpPath = `${filePath}.tmp.${process.pid}.${Date.now()}`;
+      fs.writeFileSync(tmpPath, buffer);
+      fs.renameSync(tmpPath, filePath);
+    }
+
+    const imageUrl = `/api/images/${filename}`;
+    await persistFileToCloudFirestore(buffer, {
+      filename,
+      originalName: filename,
+      mimeType,
+      size: buffer.length,
+      url: imageUrl,
+      tenantId: 'portal',
+      category: 'logos',
+      uploadedBy,
+      uploadedByUid: 'super_admin',
+    });
+
+    return imageUrl;
   } catch (err) {
     console.error('[PlatformIdentityDB] Error saving base64 logo:', err);
     return dataUrl;
@@ -259,14 +363,15 @@ export async function handlePlatformIdentityApi(
 
   // 1. GET /api/platform-identity: Publicly accessible basic info (Name, Logo, WhatsApp, hasCustomPin)
   if (req.method === 'GET' && (url === '/api/platform-identity' || url.startsWith('/api/platform-identity?'))) {
+    const reconciled = await reconcilePlatformIdentityWithCloud(db);
     const publicSettings: PlatformIdentitySettings = {
-      platformName: db.platformName,
-      platformLogo: db.platformLogo,
-      whatsapp: db.whatsapp || DEFAULT_WHATSAPP,
-      associationsWhatsapp: db.associationsWhatsapp || db.whatsapp || DEFAULT_WHATSAPP,
-      hasCustomPin: Boolean(db.isPinCustomized),
-      updatedAt: db.updatedAt,
-      updatedBy: db.updatedBy,
+      platformName: reconciled.platformName,
+      platformLogo: reconciled.platformLogo,
+      whatsapp: reconciled.whatsapp || DEFAULT_WHATSAPP,
+      associationsWhatsapp: reconciled.associationsWhatsapp || reconciled.whatsapp || DEFAULT_WHATSAPP,
+      hasCustomPin: Boolean(reconciled.isPinCustomized),
+      updatedAt: reconciled.updatedAt,
+      updatedBy: reconciled.updatedBy,
     };
     sendJson(res, 200, {
       success: true,
@@ -548,14 +653,44 @@ export async function handlePlatformIdentityApi(
       let logo = String(body.logo || '').trim();
 
       if (logo && (logo.startsWith('data:image/') || logo.startsWith('data:application/'))) {
-        logo = saveBase64Logo(logo);
+        logo = await saveBase64Logo(logo, auth.adminName);
+        if (logo.startsWith('data:')) {
+          sendJson(res, 400, {
+            success: false,
+            error: 'تعذر حفظ ملف صورة الشعار بشكل دائم. يرجى المحاولة بصورة أخرى (PNG أو JPG أو WebP).',
+          });
+          return true;
+        }
       }
 
+      const nowIso = new Date().toISOString();
       db.platformLogo = logo;
-      db.updatedAt = new Date().toISOString();
+      db.updatedAt = nowIso;
       db.updatedBy = auth.adminName;
 
       savePlatformIdentityDatabase(db);
+      lastCloudReconcileAt = Date.now();
+
+      // Persist authoritatively to Cloud Firestore (`platform_identity/main`)
+      const cloudIdentitySaved = await syncPlatformIdentityToCloud(db);
+
+      // CRITICAL: Synchronize logo to `portal_settings` (BOTH local disk AND Cloud Firestore `portal_settings/main`)
+      // so the Main Platform Portal header & all pages immediately show the exact same new logo!
+      let cloudPortalSaved = false;
+      try {
+        const portalSettings = loadPortalSettingsDatabase(true);
+        portalSettings.logoUrl = db.platformLogo;
+        portalSettings.texts.platformLogoUrl = db.platformLogo;
+        portalSettings.lastUpdated = nowIso;
+        portalSettings.updatedBy = auth.adminName;
+        savePortalSettingsDatabase(portalSettings);
+        cloudPortalSaved = await saveDocToFirebaseServer('portal_settings', 'main', {
+          ...portalSettings,
+          _updatedAt: nowIso,
+        });
+      } catch (syncErr) {
+        console.warn('[PlatformIdentityDB] Could not sync logo to portal settings:', syncErr);
+      }
 
       // Audit Log
       appendPlatformAuditLog({
@@ -566,13 +701,17 @@ export async function handlePlatformIdentityApi(
         actionKey: 'platform_identity_edit',
         targetItem: 'شعار المنصة العام',
         result: 'success',
-        details: logo ? 'تم رفع وحفظ شعار جديد للمنصة بنجاح' : 'تمت إزالة شعار المنصة والعودة للرمز الافتراضي',
+        details: logo ? `تم رفع وحفظ شعار جديد للمنصة بنجاح (${logo})` : 'تمت إزالة شعار المنصة والعودة للرمز الافتراضي',
       });
 
       sendJson(res, 200, {
         success: true,
         logo: db.platformLogo,
-        message: 'تم حفظ تعديل شعار المنصة بنجاح ✅',
+        updatedAt: nowIso,
+        cloudSynced: cloudIdentitySaved && cloudPortalSaved,
+        message: logo
+          ? 'تم حفظ وتحديث شعار المنصة بنجاح في قاعدة البيانات السحابية ✅'
+          : 'تمت إزالة شعار المنصة والعودة للشعار الافتراضي بنجاح ✅',
       });
       return true;
     } catch (err: any) {
@@ -593,20 +732,27 @@ export async function handlePlatformIdentityApi(
         return true;
       }
 
+      const nowIso = new Date().toISOString();
       db.platformName = newName;
-      db.updatedAt = new Date().toISOString();
+      db.updatedAt = nowIso;
       db.updatedBy = auth.adminName;
 
       savePlatformIdentityDatabase(db);
+      lastCloudReconcileAt = Date.now();
+      await syncPlatformIdentityToCloud(db);
 
-      // Also automatically synchronize with portal settings so public header & footer show the new name
+      // Also automatically synchronize with portal settings (disk + Cloud Firestore) so public header & footer show the new name
       try {
         const portalSettings = loadPortalSettingsDatabase(true);
         portalSettings.texts.headerBrandName = newName;
         portalSettings.texts.footerBrandName = `${newName} - Smart Multi-Association Platform`;
-        portalSettings.lastUpdated = new Date().toISOString();
+        portalSettings.lastUpdated = nowIso;
         portalSettings.updatedBy = auth.adminName;
         savePortalSettingsDatabase(portalSettings);
+        await saveDocToFirebaseServer('portal_settings', 'main', {
+          ...portalSettings,
+          _updatedAt: nowIso,
+        });
       } catch (syncErr) {
         console.warn('[PlatformIdentityDB] Could not sync to portal settings:', syncErr);
       }
@@ -626,6 +772,7 @@ export async function handlePlatformIdentityApi(
       sendJson(res, 200, {
         success: true,
         platformName: db.platformName,
+        updatedAt: nowIso,
         message: 'تم حفظ تعديل اسم المنصة بنجاح ✅',
       });
       return true;
@@ -666,6 +813,8 @@ export async function handlePlatformIdentityApi(
       db.updatedBy = auth.adminName;
 
       savePlatformIdentityDatabase(db);
+      lastCloudReconcileAt = Date.now();
+      await syncPlatformIdentityToCloud(db);
 
       // Audit Log
       appendPlatformAuditLog({
@@ -720,6 +869,8 @@ export async function handlePlatformIdentityApi(
       db.updatedBy = auth.adminName;
 
       savePlatformIdentityDatabase(db);
+      lastCloudReconcileAt = Date.now();
+      await syncPlatformIdentityToCloud(db);
 
       // Audit Log
       appendPlatformAuditLog({

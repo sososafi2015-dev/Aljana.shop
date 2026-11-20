@@ -75,7 +75,7 @@ export const MainPlatformPortal: React.FC<MainPlatformPortalProps> = ({
   const { identity: platformIdentity } = usePlatformIdentity();
 
   // Secret Master Admin Reveal Trigger: hidden by default for users.
-  // Only revealed after clicking the platform name «youx منصة العمل الجمعوي» 5 consecutive times.
+  // Only revealed after clicking the platform name «SYOMAX منصة العمل الجمعوي» 5 consecutive times.
   const [showMasterAdminEntry, setShowMasterAdminEntry] = useState<boolean>(false);
   const brandClickCountRef = useRef<number>(0);
   const lastBrandClickTimeRef = useRef<number>(0);
@@ -142,7 +142,7 @@ export const MainPlatformPortal: React.FC<MainPlatformPortalProps> = ({
     const rawNumber = platformIdentity?.whatsapp || '00212718861646';
     // Clean to digits only, stripping +, 00, spaces, dashes
     const cleanDigits = rawNumber.replace(/[\s\-\(\)\.]/g, '').replace(/^\+|^00/, '');
-    const message = encodeURIComponent(`السلام عليكم ورحمة الله، أتواصل معكم بخصوص ${platformIdentity?.platformName || 'youx منصة العمل الجمعوي'}`);
+    const message = encodeURIComponent(`السلام عليكم ورحمة الله، أتواصل معكم بخصوص ${platformIdentity?.platformName || 'SYOMAX منصة العمل الجمعوي'}`);
     const whatsappUrl = `https://wa.me/${cleanDigits}?text=${message}`;
     window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
   };
@@ -261,7 +261,7 @@ export const MainPlatformPortal: React.FC<MainPlatformPortalProps> = ({
       {visibility.mainHeader && (
         <header className="bg-white/95 backdrop-blur-md border-b border-slate-200 sticky top-0 z-40 shadow-sm">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex items-center justify-between gap-2">
-            {/* Logo & Platform Name «youx منصة العمل الجمعوي» (Click 5 times consecutively to reveal Admin Button) */}
+            {/* Logo & Platform Name «SYOMAX منصة العمل الجمعوي» (Click 5 times consecutively to reveal Admin Button) */}
             <div
               onClick={handleBrandSecretClick}
               className="flex items-center gap-2.5 sm:gap-3.5 cursor-pointer select-none group touch-manipulation active:scale-[0.98] transition-transform"
@@ -274,10 +274,10 @@ export const MainPlatformPortal: React.FC<MainPlatformPortalProps> = ({
               }}
               title=""
             >
-              {(portalSettings.logoUrl || texts.platformLogoUrl || platformIdentity?.platformLogo) ? (
+              {(platformIdentity?.platformLogo || portalSettings.logoUrl || texts.platformLogoUrl) ? (
                 <div className="h-12 w-12 sm:h-14 sm:w-14 md:h-16 md:w-16 rounded-full bg-white border-2 border-emerald-500/30 shadow-md shadow-emerald-900/10 flex items-center justify-center p-1 shrink-0 overflow-hidden transition-all duration-300 group-hover:scale-105 group-hover:border-emerald-600 group-hover:shadow-lg group-active:scale-95">
                   <img
-                    src={portalSettings.logoUrl || texts.platformLogoUrl || platformIdentity?.platformLogo}
+                    src={platformIdentity?.platformLogo || portalSettings.logoUrl || texts.platformLogoUrl}
                     alt={texts.headerBrandName || platformIdentity?.platformName || 'شعار المنصة'}
                     className="w-full h-full object-contain rounded-full select-none pointer-events-none"
                     referrerPolicy="no-referrer"
@@ -291,7 +291,7 @@ export const MainPlatformPortal: React.FC<MainPlatformPortalProps> = ({
               )}
               <div>
                 <div className="text-base sm:text-lg font-black text-slate-900 flex items-center gap-1.5 leading-tight group-hover:text-emerald-950 transition-colors">
-                  <span>{texts.headerBrandName || platformIdentity?.platformName || 'youx منصة العمل الجمعوي'}</span>
+                  <span>{texts.headerBrandName || platformIdentity?.platformName || 'SYOMAX منصة العمل الجمعوي'}</span>
                   <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-800 rounded text-[10px] font-black">
                     PRO
                   </span>
@@ -341,7 +341,7 @@ export const MainPlatformPortal: React.FC<MainPlatformPortalProps> = ({
                 </button>
               )}
 
-              {/* Secret Admin Button revealed only after 5 clicks on platform name «youx منصة العمل الجمعوي» */}
+              {/* Secret Admin Button revealed only after 5 clicks on platform name «SYOMAX منصة العمل الجمعوي» */}
               {showMasterAdminEntry && (
                 <button
                   id="btn-portal-header-master-admin"
@@ -1232,9 +1232,9 @@ export const MainPlatformPortal: React.FC<MainPlatformPortalProps> = ({
               }}
               title=""
             >
-              {platformIdentity?.platformLogo ? (
+              {(platformIdentity?.platformLogo || portalSettings.logoUrl || texts.platformLogoUrl) ? (
                 <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-white border border-emerald-500/40 p-0.5 flex items-center justify-center overflow-hidden shrink-0 shadow-sm group-hover:border-emerald-400 transition-colors">
-                  <img src={platformIdentity.platformLogo} alt="" className="w-full h-full object-contain rounded-full pointer-events-none" referrerPolicy="no-referrer" />
+                  <img src={platformIdentity?.platformLogo || portalSettings.logoUrl || texts.platformLogoUrl} alt="" className="w-full h-full object-contain rounded-full pointer-events-none" referrerPolicy="no-referrer" />
                 </div>
               ) : (
                 <div className="w-8 h-8 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center overflow-hidden shrink-0 group-hover:bg-emerald-500/30 transition-colors">
@@ -1242,7 +1242,7 @@ export const MainPlatformPortal: React.FC<MainPlatformPortalProps> = ({
                 </div>
               )}
               <span className="font-bold text-slate-300 group-hover:text-emerald-400 transition-colors">
-                {platformIdentity?.platformName ? `${platformIdentity.platformName} - Smart Multi-Association Platform` : (texts.footerBrandName || 'youx منصة العمل الجمعوي - Smart Multi-Association Platform')}
+                {platformIdentity?.platformName ? `${platformIdentity.platformName} - Smart Multi-Association Platform` : (texts.footerBrandName || 'SYOMAX منصة العمل الجمعوي - Smart Multi-Association Platform')}
               </span>
             </div>
 
