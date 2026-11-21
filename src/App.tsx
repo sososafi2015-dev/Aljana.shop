@@ -3297,6 +3297,10 @@ export default function App() {
     setSettings(authoritativeSettings);
 
     if (currentTenant && currentTenant !== 'portal') {
+      const cleanAdminUsername =
+        typeof authoritativeSettings.adminUsername === 'string'
+          ? authoritativeSettings.adminUsername.trim()
+          : '';
       updateTenantDetails(currentTenant, {
         name: authoritativeSettings.name,
         nameFr: authoritativeSettings.nameFr,
@@ -3309,7 +3313,22 @@ export default function App() {
         rib: authoritativeSettings.ribBank,
         bankName: authoritativeSettings.bankName,
         enablePublicDonations: authoritativeSettings.enablePublicDonations,
+        ...(cleanAdminUsername ? { ownerUsername: cleanAdminUsername } : {}),
       });
+
+      if (
+        cleanAdminUsername &&
+        currentAdminSession &&
+        currentAdminSession.type !== 'sub_admin' &&
+        currentAdminSession.role !== 'secondary_admin'
+      ) {
+        const updatedSession: CurrentAdminSession = {
+          ...currentAdminSession,
+          username: cleanAdminUsername,
+        };
+        setCurrentAdminSession(updatedSession);
+        saveCurrentAdminSession(updatedSession);
+      }
     }
 
     const updatedLogs = addAuditLog(
@@ -4857,6 +4876,7 @@ export default function App() {
         isOpen={isAdminAuthOpen}
         onClose={() => setIsAdminAuthOpen(false)}
         subAdmins={subAdmins}
+        activeTenantId={!activeTenantId || activeTenantId === 'portal' ? (currentTenant?.id || 'tenant_nour') : activeTenantId}
         onSuccess={(session) => {
           const effectiveTenantId =
             !activeTenantId || activeTenantId === 'portal'

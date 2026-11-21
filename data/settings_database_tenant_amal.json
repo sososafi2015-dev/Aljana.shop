@@ -17,6 +17,7 @@
     "licenseNumber": "W/2024/8492-MA",
     "foundingYear": "2024",
     "adminPin": "2025",
+    "adminUsername": "amal2024",
     "currency": "درهم",
     "currencyFr": "DH",
     "currencyEn": "MAD",
@@ -27,18 +28,28 @@
     "heroBadgeTextFr": "",
     "heroBadgeTextEn": "",
     "themeColors": {
-      "primaryColor": "#047857",
-      "secondaryColor": "#0f172a",
-      "buttonColor": "#059669",
-      "headingColor": "#0f172a",
-      "textColor": "#334155",
       "backgroundColor": "#f8fafc",
+      "headingColor": "#0f172a",
       "linkColor": "#047857",
+      "textColor": "#334155",
       "bannerOverlayColor": "#000000",
+      "buttonColor": "#059669",
+      "secondaryColor": "#0f172a",
       "navbarColor": "#ffffff",
+      "primaryColor": "#047857",
       "cardColor": "#ffffff"
     },
-    "enablePublicDonations": true
+    "enablePublicDonations": true,
+    "description": "جمعية تنموية واجتماعية غير ربحية تهدف إلى خدمة الصالح العام وتنمية المبادرات التضامنية بمدينة الرباط.",
+    "descriptionFr": "Association à but non lucratif œuvrant pour l'intérêt général et le développement solidaire à الرباط.",
+    "descriptionEn": "Non-profit association dedicated to public benefit and community solidarity in الرباط.",
+    "addressFr": "الرباط - المغرب",
+    "addressEn": "الرباط - المغرب",
+    "heroTitle": "معًا لخدمة وتنمية المجتمع مع جمعية الأمل لرعاية الأيتام والتنمية الاجتماعية",
+    "heroTitleFr": "Ensemble pour le développement solidaire avec Association Al Amal pour la Protection des Orphelins",
+    "heroTitleEn": "Together for community development with Al Amal Association for Orphan Care",
+    "heroSubtitle": "منصة رقمية شفافة تتيح لكل منخرط ومتبرع الاطلاع اللحظي على المداخيل، المصاريف، والأنشطة الميدانية الخاصة بـ جمعية الأمل لرعاية الأيتام والتنمية الاجتماعية.",
+    "aboutText": "تأسست جمعية الأمل لرعاية الأيتام والتنمية الاجتماعية لتكون نموذجًا للعمل الجمعوي المؤسساتي القائم على الشفافية المالية الكاملة وتوثيق الأنشطة الميدانية."
   },
-  "lastUpdated": "2026-10-22T10:10:26.822Z"
+  "lastUpdated": "2026-10-25T19:07:41.240Z"
 }

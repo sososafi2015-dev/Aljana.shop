@@ -26,6 +26,7 @@ interface AdminAuthModalProps {
   adminPin: string;
   subAdmins?: SubAdmin[];
   lang: Language;
+  activeTenantId?: string;
 }
 
 export const AdminAuthModal: React.FC<AdminAuthModalProps> = ({
@@ -35,6 +36,7 @@ export const AdminAuthModal: React.FC<AdminAuthModalProps> = ({
   adminPin,
   subAdmins = [],
   lang,
+  activeTenantId,
 }) => {
   const [authMode, setAuthMode] = useState<'password' | 'firebase'>('password');
   const [username, setUsername] = useState('');
@@ -210,7 +212,13 @@ export const AdminAuthModal: React.FC<AdminAuthModalProps> = ({
         }
       }
       const effectiveSubAdmins = Array.from(mergedMap.values());
-      const result = await authenticateUnifiedAdmin(cleanPass, adminPin, effectiveSubAdmins, username.trim());
+      const result = await authenticateUnifiedAdmin(
+        cleanPass,
+        adminPin,
+        effectiveSubAdmins,
+        username.trim(),
+        activeTenantId
+      );
       if (result.success && result.session) {
         setUsername('');
         setPassword('');

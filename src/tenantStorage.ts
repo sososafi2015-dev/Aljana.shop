@@ -1224,7 +1224,8 @@ export function createAssociationPlatform(input: CreateAssociationInput): { tena
     heroBadgeTextEn: '',
     licenseNumber: `W/${new Date().getFullYear()}/${Math.floor(1000 + Math.random() * 9000)}-MA`,
     foundingYear: new Date().getFullYear().toString(),
-    adminPin: '1234',
+    adminPin: '',
+    adminUsername: cleanUsername,
     ribBank: (input as any).ribBank?.trim() || (input as any).rib?.trim() || initialSettings.ribBank,
     bankName: (input as any).bankName?.trim() || initialSettings.bankName,
     email: `contact@${newTenant.slug}.org`,
@@ -1299,7 +1300,8 @@ export function createAssociationPlatform(input: CreateAssociationInput): { tena
   // 6. Set active tenant
   setActiveTenantId(newTenantId);
 
-  // Sync to backend including owner username and password so server database hashes and stores it permanently
+  // Sync to backend sequentially: POST /api/tenants FIRST (hashes password with scrypt and writes Cloud Firestore tenants/{id}),
+  // then POST /api/settings so settings never race against or overwrite the newly hashed credentials.
   try {
     fetch('/api/tenants', {
       method: 'POST',
@@ -1312,40 +1314,21 @@ export function createAssociationPlatform(input: CreateAssociationInput): { tena
         password: cleanPassword,
         hasCustomPassword: true,
       }),
-    }).catch(() => {});
-  } catch {}
-
-  // Also persist tenant & hashed owner credentials permanently to Cloud Firestore (strip undefined fields cleanly)
-  try {
-    if (db) {
-      const sanitizedTenantPayload = JSON.parse(
-        JSON.stringify({
-          ...newTenant,
-          ownerUsername: cleanUsername || '',
-          ownerPasswordHash: passwordHash,
-          ownerPasswordSalt: salt,
-          hasCustomPassword: true,
-          _updatedAt: new Date().toISOString(),
+    })
+      .then(() =>
+        fetch(`/api/settings?tenantId=${encodeURIComponent(newTenantId)}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-tenant-id': newTenantId,
+          },
+          body: JSON.stringify({
+            settings: freshSettings,
+            lastUpdated: new Date().toISOString(),
+          }),
         })
-      );
-      setDoc(doc(db, 'tenants', newTenantId), sanitizedTenantPayload, { merge: true }).catch((err) => {
-        console.warn('[tenantStorage] Firestore new tenant write warning:', err);
-      });
-    }
-  } catch {}
-
-  try {
-    fetch(`/api/settings?tenantId=${encodeURIComponent(newTenantId)}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-tenant-id': newTenantId,
-      },
-      body: JSON.stringify({
-        settings: freshSettings,
-        lastUpdated: new Date().toISOString(),
-      }),
-    }).catch(() => {});
+      )
+      .catch(() => {});
   } catch {}
 
   try {
@@ -1889,6 +1872,49 @@ export async function updateTenantDetailsPermanent(
   }
 }
 
+export function getOwnerUsernameForTenant(tenantId?: string | null): string {
+  const cleanId = !tenantId || tenantId === 'portal' ? MASTER_TEMPLATE_TENANT_ID : tenantId;
+  const tenant = getTenantById(cleanId) || defaultTenants.find((t) => t.id === cleanId);
+  if (tenant?.ownerUsername && tenant.ownerUsername.trim()) {
+    return tenant.ownerUsername.trim();
+  }
+  const owners = getAllOwners();
+  const owner = owners.find(
+    (o) =>
+      o &&
+      (o.tenantId === cleanId ||
+        (tenant?.ownerId && o.id === tenant.ownerId))
+  );
+  if (owner?.username && owner.username.trim()) {
+    return owner.username.trim();
+  }
+  if (cleanId === 'tenant_nour') return 'nour2024';
+  if (cleanId === 'tenant_amal') return 'amal2024';
+  return '';
+}
+
+export function updateLocalOwnerUsername(tenantId: string, newUsername: string): void {
+  const cleanUsername = String(newUsername || '').trim();
+  if (!cleanUsername || !tenantId) return;
+  try {
+    const owners = getAllOwners();
+    const tenant = getTenantById(tenantId);
+    const idx = owners.findIndex(
+      (o) =>
+        o &&
+        (o.tenantId === tenantId ||
+          (tenant?.ownerId && o.id === tenant.ownerId))
+    );
+    if (idx >= 0 && owners[idx].username !== cleanUsername) {
+      owners[idx] = {
+        ...owners[idx],
+        username: cleanUsername,
+      };
+      saveAllOwners(owners);
+    }
+  } catch {}
+}
+
 // Synchronous wrapper for backwards compatibility
 export function updateTenantDetails(tenantId: string, updates: Partial<AssociationTenant>): AssociationTenant | null {
   const tenants = getAllTenants();
@@ -1902,6 +1928,10 @@ export function updateTenantDetails(tenantId: string, updates: Partial<Associati
   };
 
   saveAllTenants(tenants);
+
+  if (typeof updates.ownerUsername === 'string' && updates.ownerUsername.trim()) {
+    updateLocalOwnerUsername(tenantId, updates.ownerUsername.trim());
+  }
 
   // Trigger permanent async save in background
   updateTenantDetailsPermanent(tenantId, updates).catch((err) => {
@@ -1968,16 +1998,25 @@ export interface PlatformAuthResult {
   owner?: AssociationOwner;
   member?: Member;
   error?: string;
-  errorCode?: 'EMPTY_FIELDS' | 'NOT_FOUND' | 'WRONG_PASSWORD' | 'INACTIVE' | 'SERVER_ERROR';
+  errorCode?:
+    | 'EMPTY_FIELDS'
+    | 'NOT_FOUND'
+    | 'USER_NOT_FOUND'
+    | 'WRONG_PASSWORD'
+    | 'INACTIVE'
+    | 'TENANT_MISMATCH'
+    | 'SERVER_ERROR';
 }
 
 /**
- * Authenticates an Association Owner, SubAdmin, or Member across the platform
- * and identifies their isolated tenant platform and exact role ('admin' vs 'member').
+ * Authenticates an Association Owner, SubAdmin, or Member strictly against the authoritative
+ * Cloud Firestore backend (/api/tenants/login) — never trusting stale localStorage credentials
+ * after the server responds.
  */
 export async function authenticatePlatformAccount(
   identifier: string,
-  password: string
+  password: string,
+  expectedTenantId?: string
 ): Promise<PlatformAuthResult> {
   const cleanId = identifier.trim();
   const cleanPass = password.trim();
@@ -1990,29 +2029,36 @@ export async function authenticatePlatformAccount(
     };
   }
 
-  let serverErrorCode: PlatformAuthResult['errorCode'] | undefined;
-  let serverErrorMessage: string | undefined;
-
-  // 1. Try server-side authentication first for production accuracy
+  // 1. Authoritative server-side authentication backed by Cloud Firestore
   try {
     const res = await fetch('/api/tenants/login', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ loginIdentifier: cleanId, password: cleanPass }),
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+      },
+      body: JSON.stringify({
+        loginIdentifier: cleanId,
+        password: cleanPass,
+        ...(expectedTenantId ? { tenantId: expectedTenantId } : {}),
+      }),
     });
+
     if (res.ok) {
       const data = await res.json();
       if (data.success && data.tenant) {
-        // Merge tenant into global list so getTenantById finds it immediately with its exact status
+        // Merge authoritative tenant into local cache so UI reflects latest ownerUsername & status immediately
         const all = getAllTenants();
         const existingIdx = all.findIndex((t) => t.id === data.tenant.id);
-        let updated: AssociationTenant[];
-        if (existingIdx >= 0) {
-          updated = all.map((t) => (t.id === data.tenant.id ? { ...t, ...data.tenant } : t));
-        } else {
-          updated = [data.tenant, ...all];
-        }
+        const updated: AssociationTenant[] = existingIdx >= 0
+          ? all.map((t) => (t.id === data.tenant.id ? { ...t, ...data.tenant } : t))
+          : [data.tenant, ...all];
         saveAllTenants(updated);
+
+        // Keep local owner cache synchronized with authoritative username (without storing password hashes locally)
+        if (data.owner && data.tenant.ownerUsername) {
+          updateLocalOwnerUsername(data.tenant.id, data.tenant.ownerUsername);
+        }
 
         // Case A: Authenticated as a Member (منخرط) -> strictly role: 'member', NO admin session!
         if (data.role === 'member' && data.member) {
@@ -2084,326 +2130,63 @@ export async function authenticatePlatformAccount(
         }
       }
     } else {
+      // Authoritative server rejection: NEVER fall back to stale localStorage!
       const errData = await res.json().catch(() => ({}));
-      if (errData.errorCode === 'INACTIVE') {
+      const code = errData.errorCode as PlatformAuthResult['errorCode'] | undefined;
+      if (code === 'INACTIVE') {
         return {
           success: false,
           errorCode: 'INACTIVE',
           error: errData.error || 'هذا الحساب غير مفعل حالياً من طرف إدارة الجمعية.',
         };
       }
-      if (errData.errorCode === 'WRONG_PASSWORD') {
-        serverErrorCode = 'WRONG_PASSWORD';
-        serverErrorMessage = errData.error;
-      }
-    }
-  } catch (netErr) {
-    console.warn('[tenantStorage] Server login unreachable, falling back to local verification:', netErr);
-  }
-
-  // 2. Client-side authentication (strictly by username and password)
-  const normUsernameQuery = normalizeOwnerUsername(cleanId);
-  const owners = getAllOwners();
-  const tenants = getAllTenants();
-
-  interface LocalCandidate {
-    owner: AssociationOwner & { plainPassword?: string; recoveredAccount?: boolean };
-    tenant: AssociationTenant & { recoveredAccount?: boolean };
-    exactUsernameMatch: boolean;
-    exactAssocMatch: boolean;
-  }
-
-  const candidates: LocalCandidate[] = [];
-  const seenTenantIds = new Set<string>();
-
-  for (const t of tenants) {
-    if (!t || !t.id) continue;
-    const linkedOwner =
-      owners.find((o) => o.id === t.ownerId || o.tenantId === t.id);
-
-    const matchesUsername =
-      Boolean(normUsernameQuery) &&
-      ((t.ownerUsername && normalizeOwnerUsername(t.ownerUsername) === normUsernameQuery) ||
-        (linkedOwner?.username && normalizeOwnerUsername(linkedOwner.username) === normUsernameQuery));
-
-    if (matchesUsername) {
-      seenTenantIds.add(t.id);
-      const effectiveOwner: AssociationOwner & { plainPassword?: string; recoveredAccount?: boolean } = linkedOwner || {
-        id: t.ownerId || `owner_${t.id}`,
-        ...(t.ownerUsername ? { username: t.ownerUsername } : {}),
-        fullName: t.ownerName || 'مدير الجمعية',
-        phone: t.ownerPhone || '',
-        passwordHash: '',
-        passwordSalt: '',
-        tenantId: t.id,
-        status: 'active',
-        createdAt: t.createdAt || new Date().toISOString(),
-        recoveredAccount: true,
-      };
-      candidates.push({
-        owner: effectiveOwner,
-        tenant: t,
-        exactUsernameMatch: true,
-        exactAssocMatch: false,
-      });
-    }
-  }
-
-  for (const o of owners) {
-    if (!o || (o.tenantId && seenTenantIds.has(o.tenantId))) continue;
-    const matchesUsername =
-      Boolean(normUsernameQuery) && Boolean(o.username) && normalizeOwnerUsername(o.username) === normUsernameQuery;
-    if (matchesUsername) {
-      const t = tenants.find((item) => item.id === o.tenantId || item.ownerId === o.id);
-      if (t) {
-        seenTenantIds.add(t.id);
-        candidates.push({
-          owner: o,
-          tenant: t,
-          exactUsernameMatch: true,
-          exactAssocMatch: false,
-        });
-      }
-    }
-  }
-
-  if (candidates.length > 0 && serverErrorCode !== 'WRONG_PASSWORD') {
-    candidates.sort((a, b) => {
-      if (a.exactUsernameMatch !== b.exactUsernameMatch) return a.exactUsernameMatch ? -1 : 1;
-      if (a.exactAssocMatch !== b.exactAssocMatch) return a.exactAssocMatch ? -1 : 1;
-      const timeA = new Date(a.tenant.createdAt || 0).getTime();
-      const timeB = new Date(b.tenant.createdAt || 0).getTime();
-      return timeB - timeA;
-    });
-
-    const checkLocalOwnerPassword = async (cand: LocalCandidate): Promise<boolean> => {
-      const o = cand.owner;
-      const matched = await verifyPasswordAnyFormat(
-        cleanPass,
-        o.passwordHash,
-        o.passwordSalt,
-        o.plainPassword
-      );
-      if (matched) return true;
-      // Only allow fallback default passwords for pre-seeded demo accounts that do NOT have a custom password or username
-      if (!o.hasCustomPassword && !o.username && !cand.tenant.ownerUsername) {
-        if (cleanPass === 'admin123' || cleanPass === '123456') return true;
-        if (o.phone && phonesMatch(o.phone, cleanPass)) return true;
-      }
-      return false;
-    };
-
-    let verified: LocalCandidate | undefined;
-    for (const c of candidates) {
-      if (await checkLocalOwnerPassword(c)) {
-        verified = c;
-        break;
-      }
-    }
-
-    if (!verified && cleanPass.length >= 4) {
-      const recoverable = candidates.find(
-        (c) =>
-          (c.owner.recoveredAccount === true || (c.tenant as any).recoveredAccount === true) &&
-          !c.owner.passwordHash &&
-          !c.owner.plainPassword &&
-          !c.owner.hasCustomPassword
-      );
-      if (recoverable) {
-        const salt = generateSalt(16);
-        recoverable.owner.passwordSalt = salt;
-        recoverable.owner.passwordHash = hashPasswordSync(cleanPass, salt);
-        recoverable.owner.recoveredAccount = false;
-        const updatedOwners = owners.some((o) => o.id === recoverable.owner.id)
-          ? owners.map((o) => (o.id === recoverable.owner.id ? recoverable.owner : o))
-          : [recoverable.owner, ...owners];
-        saveAllOwners(updatedOwners);
-        verified = recoverable;
-      }
-    }
-
-    if (verified) {
-      const { owner: matchedOwner, tenant } = verified;
-
-      const session: CurrentAdminSession = {
-        type: 'super_admin',
-        role: 'main_admin',
-        id: matchedOwner.id,
-        ...(matchedOwner.username || tenant.ownerUsername
-          ? { username: matchedOwner.username || tenant.ownerUsername }
-          : {}),
-        fullName: matchedOwner.fullName,
-        phone: matchedOwner.phone,
-        tenantId: tenant.id,
-        isMasterPlatformAdmin: false,
-      };
-
-      setMasterAdminSession(null);
-      clearLoggedInMemberId(tenant.id);
-      saveData(KEYS.ROLE, 'admin');
-      saveTenantData(TENANT_DATA_KEYS.CURRENT_ADMIN_SESSION, session, tenant.id);
-      saveCurrentAdminSession(session, tenant.id);
-      setActiveTenantId(tenant.id);
-      firestoreSyncService
-        .syncPlatformSessionWithFirebaseAuth({
-          username: session.username || cleanId,
-          password: cleanPass,
-          fullName: matchedOwner.fullName,
-          role: 'admin',
-          tenantId: tenant.id,
-        })
-        .catch(() => {});
-
-      return {
-        success: true,
-        tenant,
-        session,
-        role: 'admin',
-        owner: matchedOwner,
-      };
-    }
-  }
-
-  // 3. Search SubAdmins across tenants (by username or phone)
-  let hadLocalSubAdminMatch = false;
-  for (const t of tenants) {
-    const storedSubs = getStoredSubAdmins(t.id);
-    const tenantSubs = loadTenantData<SubAdmin[]>(TENANT_DATA_KEYS.SUB_ADMINS, [], t.id);
-    const subMap = new Map<string, SubAdmin>();
-    for (const item of [...tenantSubs, ...storedSubs]) {
-      if (item && item.id) {
-        subMap.set(item.id, { ...(subMap.get(item.id) || {}), ...item });
-      }
-    }
-    const subAdmins = Array.from(subMap.values());
-    const sub = subAdmins.find((s) => {
-      const matchUsername =
-        Boolean(s.username) &&
-        (normalizeOwnerUsername(s.username) === normUsernameQuery ||
-          String(s.username).trim().toLowerCase() === cleanId.toLowerCase());
-      const matchPhone = Boolean(s.phone) && phonesMatch(s.phone, cleanId);
-      return matchUsername || matchPhone;
-    });
-
-    if (sub) {
-      hadLocalSubAdminMatch = true;
-      let isSubValid = await verifyPasswordAnyFormat(
-        cleanPass,
-        sub.passwordHash,
-        sub.passwordSalt,
-        (sub as any).plainPassword
-      );
-      if (!isSubValid && (!sub.passwordHash || !sub.passwordSalt)) {
-        isSubValid = cleanPass === 'admin123' || cleanPass === '123456' || cleanPass === sub.phone.trim();
-      }
-
-      if (isSubValid) {
-        if (sub.status !== 'active') {
-          return {
-            success: false,
-            errorCode: 'INACTIVE',
-            error: 'تم تعطيل هذا الحساب الإداري من طرف الأدمن الرئيسي. لا يمكنك تسجيل الدخول.',
-          };
-        }
-
-        const session: CurrentAdminSession = {
-          type: 'sub_admin',
-          role: 'secondary_admin',
-          id: sub.id,
-          fullName: sub.fullName,
-          username: sub.username,
-          phone: sub.phone,
-          tenantId: t.id,
-          subAdmin: sub,
-        };
-
-        clearLoggedInMemberId(t.id);
-        saveData(KEYS.ROLE, 'admin');
-        saveTenantData(TENANT_DATA_KEYS.CURRENT_ADMIN_SESSION, session, t.id);
-        saveCurrentAdminSession(session, t.id);
-        setActiveTenantId(t.id);
-        firestoreSyncService
-          .syncPlatformSessionWithFirebaseAuth({
-            username: sub.username || cleanId,
-            password: cleanPass,
-            fullName: sub.fullName,
-            role: 'admin',
-            tenantId: t.id,
-          })
-          .catch(() => {});
-
+      if (code === 'TENANT_MISMATCH') {
         return {
-          success: true,
-          tenant: t,
-          session,
-          role: 'admin',
+          success: false,
+          errorCode: 'TENANT_MISMATCH',
+          error: errData.error || 'عذراً، هذا الحساب مرتبط بجمعية أخرى مستقلة.',
         };
       }
-    }
-  }
-
-  // 4. Search Members across all tenants (جمعية النور للتنمية والتضامن and all associations)
-  // Authenticate strictly with role: 'member' and session: undefined (no admin control panel access)
-  let hadLocalMemberIdentifierMatch = false;
-  for (const t of tenants) {
-    if (!t || !t.id) continue;
-    const tenantMembers = getStoredMembers(t.id);
-    if (!Array.isArray(tenantMembers) || tenantMembers.length === 0) continue;
-
-    const authRes = await authenticateMember(cleanId, cleanPass, tenantMembers);
-    if (authRes.success && authRes.member) {
-      clearCurrentAdminSession(t.id);
-      saveTenantData(TENANT_DATA_KEYS.CURRENT_ADMIN_SESSION, null, t.id);
-      saveData(KEYS.ROLE, 'member');
-
-      const updatedMembers = tenantMembers.map((m) => (m.id === authRes.member!.id ? authRes.member! : m));
-      saveMembers(updatedMembers, t.id);
-      saveLoggedInMemberId(authRes.member.id, t.id);
-      setActiveTenantId(t.id);
-      firestoreSyncService
-        .syncPlatformSessionWithFirebaseAuth({
-          username: authRes.member.username || cleanId,
-          password: cleanPass,
-          fullName: authRes.member.fullName,
-          role: 'member',
-          tenantId: t.id,
-        })
-        .catch(() => {});
-
-      return {
-        success: true,
-        tenant: t,
-        session: undefined,
-        role: 'member',
-        member: authRes.member,
-      };
-    }
-
-    if (authRes.errorCode === 'INACTIVE') {
+      if (code === 'WRONG_PASSWORD') {
+        return {
+          success: false,
+          errorCode: 'WRONG_PASSWORD',
+          error: errData.error || 'كلمة المرور غير صحيحة. يرجى التحقق وإعادة المحاولة.',
+        };
+      }
+      if (code === 'USER_NOT_FOUND' || code === 'NOT_FOUND' || res.status === 404) {
+        return {
+          success: false,
+          errorCode: 'USER_NOT_FOUND',
+          error: errData.error || 'اسم المستخدم غير موجود أو غير مسجل في النظام. يرجى التأكد من كتابة اسم المستخدم الصحيح.',
+        };
+      }
+      if (res.status >= 500) {
+        return {
+          success: false,
+          errorCode: 'SERVER_ERROR',
+          error: errData.error || 'حدث خطأ مؤقت في قاعدة البيانات أثناء التحقق من الحساب. يرجى المحاولة مرة أخرى.',
+        };
+      }
       return {
         success: false,
-        errorCode: 'INACTIVE',
-        error: authRes.error || 'حسابك غير مفعل حالياً من طرف إدارة الجمعية.',
+        errorCode: code || 'WRONG_PASSWORD',
+        error: errData.error || 'تعذر تسجيل الدخول. يرجى التحقق من اسم المستخدم وكلمة المرور.',
       };
     }
-
-    if (authRes.errorCode === 'WRONG_PASSWORD') {
-      hadLocalMemberIdentifierMatch = true;
-    }
-  }
-
-  if (serverErrorCode === 'WRONG_PASSWORD' || candidates.length > 0 || hadLocalSubAdminMatch || hadLocalMemberIdentifierMatch) {
+  } catch (netErr) {
+    console.warn('[tenantStorage] Server login unreachable:', netErr);
     return {
       success: false,
-      errorCode: 'WRONG_PASSWORD',
-      error: serverErrorMessage || 'كلمة المرور غير صحيحة. يرجى التحقق وإعادة المحاولة.',
+      errorCode: 'SERVER_ERROR',
+      error: 'تعذر الاتصال بخادم قاعدة البيانات السحابية. يرجى التحقق من اتصالك بالإنترنت والمحاولة مجدداً.',
     };
   }
 
   return {
     success: false,
-    errorCode: 'NOT_FOUND',
-    error: 'اسم المستخدم غير مسجل في النظام. يرجى التأكد من كتابة اسم المستخدم الصحيح (تسجيل الدخول متاح باسم المستخدم وكلمة المرور فقط).',
+    errorCode: 'SERVER_ERROR',
+    error: 'تعذر إتمام عملية تسجيل الدخول. يرجى المحاولة مجدداً.',
   };
 }
 
@@ -2514,21 +2297,22 @@ export async function resetPlatformOwnerPassword(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ identifier: cleanId, newPassword: cleanPass }),
     });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.success) {
-        // Also update local copy
-        resetOwnerPassword(cleanId, cleanPass);
-        return { success: true, message: data.message || 'تم تحديث كلمة المرور بنجاح.', tenantId: data.tenantId };
-      }
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.success) {
+      return { success: true, message: data.message || 'تم تحديث كلمة المرور بنجاح.', tenantId: data.tenantId };
     }
-  } catch {}
-
-  const ok = resetOwnerPassword(cleanId, cleanPass);
-  if (ok) {
-    return { success: true, message: 'تم تحديث كلمة المرور بنجاح في النسخة المحلية.' };
+    return {
+      success: false,
+      message: '',
+      error: data.error || 'تعذر العثور على الحساب لتحديث كلمة المرور.',
+    };
+  } catch {
+    return {
+      success: false,
+      message: '',
+      error: 'تعذر الاتصال بقاعدة البيانات لتحديث كلمة المرور. يرجى المحاولة مجدداً.',
+    };
   }
-  return { success: false, message: '', error: 'تعذر العثور على الحساب لتحديث كلمة المرور.' };
 }
 
 /**

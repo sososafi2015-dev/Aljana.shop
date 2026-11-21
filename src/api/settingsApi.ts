@@ -45,6 +45,10 @@ export async function apiFetchSettingsWithMeta(tenantId?: string): Promise<Setti
             (firestoreSettings.bankName && String(firestoreSettings.bankName).trim()) ||
             (data.settings.bankName && String(data.settings.bankName).trim()) ||
             'التجاري وفا بنك / Attijariwafa Bank';
+          merged.adminUsername =
+            (firestoreSettings.adminUsername && String(firestoreSettings.adminUsername).trim()) ||
+            (data.settings.adminUsername && String(data.settings.adminUsername).trim()) ||
+            '';
           return {
             settings: merged,
             lastUpdated: (firestoreSettings as any)._updatedAt,
@@ -61,6 +65,10 @@ export async function apiFetchSettingsWithMeta(tenantId?: string): Promise<Setti
             (data.settings.bankName && String(data.settings.bankName).trim()) ||
             (firestoreSettings?.bankName && String(firestoreSettings.bankName).trim()) ||
             'التجاري وفا بنك / Attijariwafa Bank',
+          adminUsername:
+            (data.settings.adminUsername && String(data.settings.adminUsername).trim()) ||
+            (firestoreSettings?.adminUsername && String(firestoreSettings.adminUsername).trim()) ||
+            '',
         };
         return {
           settings: safeServerSettings,
@@ -98,7 +106,6 @@ export async function apiSyncSettings(
   tenantId?: string
 ): Promise<SettingsApiResponse> {
   const activeTenant = tenantId || 'tenant_nour';
-  const firestorePromise = firestoreSyncService.saveSettingsToFirestore(activeTenant, settings).catch(() => false);
 
   try {
     const headers: Record<string, string> = {
@@ -113,16 +120,16 @@ export async function apiSyncSettings(
       }
     }
 
-    const [res] = await Promise.all([
-      fetch(`/api/settings?tenantId=${encodeURIComponent(activeTenant)}`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ settings, adminSession, tenantId: activeTenant }),
-      }),
-      firestorePromise,
-    ]);
+    const res = await fetch(`/api/settings?tenantId=${encodeURIComponent(activeTenant)}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ settings, adminSession, tenantId: activeTenant }),
+    });
 
     const data = await res.json();
+    if (res.ok && data?.success && data?.settings) {
+      await firestoreSyncService.saveSettingsToFirestore(activeTenant, data.settings).catch(() => false);
+    }
     return data;
   } catch (err: any) {
     console.error('[SettingsApi] Error syncing settings to server:', err);

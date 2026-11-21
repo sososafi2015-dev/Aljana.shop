@@ -16,8 +16,14 @@ import {
 import {
   saveDocToFirebaseServer,
   getDocFromFirebaseServer,
+  listCollectionFromFirebaseServer,
   awaitPendingOffloadBackups,
 } from './firebaseServerStorage';
+import {
+  normalizeLoginUsername,
+  validateSettingsAdminUsername,
+  hashPasswordScrypt,
+} from './authCrypto';
 
 const settingsCloudReconcileCache = new Map<string, number>();
 const SETTINGS_RECONCILE_TTL_MS = 2000;
@@ -29,6 +35,11 @@ export interface SettingsDatabase {
 }
 
 const TENANTS_DB_FILE = path.join(DATA_DIR, 'tenants_database.json');
+const OWNERS_DB_FILE = path.join(DATA_DIR, 'owners_database.json');
+
+function normalizeUsernameKey(raw?: string | null): string {
+  return normalizeLoginUsername(raw);
+}
 
 function getTenantSettingsFile(tenantId?: string | null): string {
   const clean = normalizeTenantId(tenantId);
@@ -50,9 +61,115 @@ function getTenantRecordFromDisk(tenantId: string): any | null {
   return null;
 }
 
+function getOwnerUsernameFromDisk(tenantId: string, tenantRecord?: any): string {
+  const fromTenant = String(tenantRecord?.ownerUsername || '').trim();
+  if (fromTenant) return fromTenant;
+  try {
+    if (fs.existsSync(OWNERS_DB_FILE)) {
+      const owners = readJsonFileSync<any[]>(OWNERS_DB_FILE, () => []);
+      if (Array.isArray(owners)) {
+        const matched = owners.find(
+          (o) =>
+            o &&
+            (o.tenantId === tenantId ||
+              (tenantRecord?.ownerId && o.id === tenantRecord.ownerId))
+        );
+        if (matched?.username && String(matched.username).trim()) {
+          return String(matched.username).trim();
+        }
+      }
+    }
+  } catch {}
+  if (tenantId === 'tenant_nour') return 'nour2024';
+  if (tenantId === 'tenant_amal') return 'amal2024';
+  if (tenantId === 'tenant_atlas_khenifra') return 'atlas2024';
+  if (tenantId === 'tenant_al_istithmar') return 'istithmar24';
+  return '';
+}
+
+function syncOwnerCredentialsOnDisk(
+  tenantId: string,
+  updates: {
+    username?: string;
+    passwordHash?: string;
+    passwordSalt?: string;
+    fullName?: string;
+    phone?: string;
+  },
+  nowIso: string
+): void {
+  const cleanUsername = typeof updates.username === 'string' ? updates.username.trim() : '';
+  const hasPasswordUpdate = Boolean(updates.passwordHash && updates.passwordSalt);
+  if (!cleanUsername && !hasPasswordUpdate) return;
+  try {
+    const owners = fs.existsSync(OWNERS_DB_FILE)
+      ? readJsonFileSync<any[]>(OWNERS_DB_FILE, () => [])
+      : [];
+    const safeOwners = Array.isArray(owners) ? owners : [];
+    const tenantRec = getTenantRecordFromDisk(tenantId);
+    const ownerIdx = safeOwners.findIndex(
+      (o) =>
+        o &&
+        (o.tenantId === tenantId ||
+          (tenantRec?.ownerId && o.id === tenantRec.ownerId))
+    );
+    if (ownerIdx >= 0) {
+      const updatedOwner: Record<string, any> = {
+        ...safeOwners[ownerIdx],
+        ...(cleanUsername ? { username: cleanUsername } : {}),
+        ...(hasPasswordUpdate
+          ? {
+              passwordHash: updates.passwordHash,
+              passwordSalt: updates.passwordSalt,
+              hasCustomPassword: true,
+              recoveredAccount: false,
+            }
+          : {}),
+        updatedAt: nowIso,
+      };
+      delete updatedOwner.plainPassword;
+      safeOwners[ownerIdx] = updatedOwner;
+      writeJsonFileAtomicSync(OWNERS_DB_FILE, safeOwners, 'owner');
+    } else if (tenantRec || cleanUsername || hasPasswordUpdate) {
+      const newOwner: Record<string, any> = {
+        id: tenantRec?.ownerId || `owner_${tenantId}`,
+        ...(cleanUsername ? { username: cleanUsername } : {}),
+        fullName: updates.fullName || tenantRec?.ownerName || 'مدير الجمعية',
+        phone: updates.phone || tenantRec?.ownerPhone || '',
+        passwordHash: updates.passwordHash || tenantRec?.passwordHash || '',
+        passwordSalt: updates.passwordSalt || tenantRec?.passwordSalt || '',
+        hasCustomPassword: Boolean(hasPasswordUpdate || tenantRec?.passwordHash || cleanUsername),
+        tenantId,
+        status: 'active',
+        createdAt: tenantRec?.createdAt || nowIso,
+        updatedAt: nowIso,
+      };
+      safeOwners.unshift(newOwner);
+      writeJsonFileAtomicSync(OWNERS_DB_FILE, safeOwners, 'owner');
+    }
+  } catch (err) {
+    console.warn('[SettingsDB] Could not sync owner credentials on disk:', err);
+  }
+}
+
+function sanitizePublicSettingsResponse(settings: AssociationSettings, hasHashedCredential: boolean): AssociationSettings {
+  if (!settings) return settings;
+  if (hasHashedCredential) {
+    return {
+      ...settings,
+      adminPin: '',
+    };
+  }
+  return settings;
+}
+
 function buildDefaultTenantSettings(tenantId: string, tenantRecord?: any): AssociationSettings {
+  const resolvedOwnerUsername = getOwnerUsernameFromDisk(tenantId, tenantRecord);
   if (tenantId === 'tenant_nour') {
-    return { ...initialSettings };
+    return {
+      ...initialSettings,
+      adminUsername: resolvedOwnerUsername || initialSettings.adminUsername || 'nour2024',
+    };
   }
   const assocName =
     tenantRecord?.name && tenantRecord.name !== 'جمعية الشايف'
@@ -107,6 +224,8 @@ function buildDefaultTenantSettings(tenantId: string, tenantRecord?: any): Assoc
       tenantRecord?.enablePublicDonations !== undefined
         ? tenantRecord.enablePublicDonations
         : true,
+    adminPin: tenantRecord?.passwordHash ? '' : initialSettings.adminPin,
+    adminUsername: resolvedOwnerUsername,
   } as unknown as AssociationSettings;
 }
 
@@ -149,8 +268,9 @@ export function loadSettingsDatabase(tenantId?: string | null): SettingsDatabase
   ensureStorageDirectories();
   const cleanTenant = normalizeTenantId(tenantId);
   const dbFile = getTenantSettingsFile(cleanTenant);
-  const tenantRecord = cleanTenant !== 'tenant_nour' ? getTenantRecordFromDisk(cleanTenant) : null;
+  const tenantRecord = getTenantRecordFromDisk(cleanTenant);
   const baseDefaults = buildDefaultTenantSettings(cleanTenant, tenantRecord);
+  const authoritativeDiskUsername = getOwnerUsernameFromDisk(cleanTenant, tenantRecord);
 
   if (fs.existsSync(dbFile)) {
     const parsed = readJsonFileSync<any>(dbFile, () => null);
@@ -159,6 +279,11 @@ export function loadSettingsDatabase(tenantId?: string | null): SettingsDatabase
         sanitizeSettingsMedia({
           ...baseDefaults,
           ...parsed.settings,
+          adminUsername:
+            (typeof parsed.settings.adminUsername === 'string' && parsed.settings.adminUsername.trim()) ||
+            authoritativeDiskUsername ||
+            baseDefaults.adminUsername ||
+            '',
         }),
         baseDefaults,
         tenantRecord
@@ -225,8 +350,11 @@ export function saveSettingsDatabase(
     }).catch(() => {});
   }
 
-  // Synchronize association branding, identity, bank info & whatsapp back into tenants_database.json & Firestore `tenants/{cleanTenant}`
+  // Synchronize association branding, identity, bank info, whatsapp & adminUsername back into tenants_database.json, owners_database.json & Firestore `tenants/{cleanTenant}`
   try {
+    const cleanAdminUsername = typeof sanitizedSettings.adminUsername === 'string'
+      ? sanitizedSettings.adminUsername.trim()
+      : '';
     if (fs.existsSync(TENANTS_DB_FILE)) {
       const tenants = readJsonFileSync<any[]>(TENANTS_DB_FILE, () => []);
       if (Array.isArray(tenants)) {
@@ -246,6 +374,7 @@ export function saveSettingsDatabase(
             ...(s.ribBank ? { rib: s.ribBank, ribBank: s.ribBank } : {}),
             ...(s.bankName ? { bankName: s.bankName } : {}),
             ...(s.enablePublicDonations !== undefined ? { enablePublicDonations: s.enablePublicDonations } : {}),
+            ...(cleanAdminUsername ? { ownerUsername: cleanAdminUsername } : {}),
             updatedAt: nowIso,
           };
           tenants[idx] = updatedTenantRecord;
@@ -259,6 +388,9 @@ export function saveSettingsDatabase(
           }
         }
       }
+    }
+    if (cleanAdminUsername) {
+      syncOwnerCredentialsOnDisk(cleanTenant, { username: cleanAdminUsername }, nowIso);
     }
   } catch (syncErr) {
     console.warn('[SettingsDB] Could not sync tenant record:', syncErr);
@@ -279,26 +411,59 @@ async function reconcileSettingsFromCloudFirestore(
   settingsCloudReconcileCache.set(cleanTenant, Date.now());
 
   try {
-    const cloudDoc = await getDocFromFirebaseServer<any>('settings', cleanTenant);
+    const [cloudDoc, cloudTenantDoc] = await Promise.all([
+      getDocFromFirebaseServer<any>('settings', cleanTenant),
+      getDocFromFirebaseServer<any>('tenants', cleanTenant),
+    ]);
+    const cloudTenantUsername =
+      typeof cloudTenantDoc?.ownerUsername === 'string' && cloudTenantDoc.ownerUsername.trim()
+        ? cloudTenantDoc.ownerUsername.trim()
+        : '';
+
     if (cloudDoc && typeof cloudDoc === 'object') {
       const cloudTs = new Date(cloudDoc._updatedAt || cloudDoc.lastUpdated || 0).getTime();
       const localTs = isColdLocal ? 0 : new Date(localDb.lastUpdated || 0).getTime();
-      if (isColdLocal || cloudTs > localTs) {
+      const cloudSettingsUsername =
+        typeof cloudDoc.adminUsername === 'string' && cloudDoc.adminUsername.trim()
+          ? cloudDoc.adminUsername.trim()
+          : '';
+      const resolvedUsername =
+        cloudTenantUsername ||
+        cloudSettingsUsername ||
+        (typeof localDb.settings.adminUsername === 'string' ? localDb.settings.adminUsername.trim() : '') ||
+        getOwnerUsernameFromDisk(cleanTenant, cloudTenantDoc);
+
+      if (isColdLocal || cloudTs > localTs || (resolvedUsername && localDb.settings.adminUsername !== resolvedUsername)) {
         const { _updatedAt, lastUpdated, tenantId: _tid, ...cloudSettingsFields } = cloudDoc;
+        const baseForMerge = isColdLocal || cloudTs > localTs
+          ? { ...localDb.settings, ...cloudSettingsFields }
+          : { ...localDb.settings };
         const mergedSettings = ensureBankDefaults(
           sanitizeSettingsMedia({
-            ...localDb.settings,
-            ...cloudSettingsFields,
+            ...baseForMerge,
+            ...(resolvedUsername ? { adminUsername: resolvedUsername } : {}),
+            ...(cloudTenantDoc?.passwordHash ? { adminPin: '' } : {}),
           }),
-          localDb.settings
+          localDb.settings,
+          cloudTenantDoc
         );
         const reconciledDb: SettingsDatabase = {
           settings: mergedSettings,
-          lastUpdated: cloudDoc._updatedAt || cloudDoc.lastUpdated || new Date().toISOString(),
+          lastUpdated: (isColdLocal || cloudTs > localTs)
+            ? (cloudDoc._updatedAt || cloudDoc.lastUpdated || new Date().toISOString())
+            : localDb.lastUpdated,
         };
         saveSettingsDatabase(reconciledDb, cleanTenant, false);
         return reconciledDb;
       }
+    } else if (cloudTenantUsername && localDb.settings.adminUsername !== cloudTenantUsername) {
+      localDb.settings = {
+        ...localDb.settings,
+        adminUsername: cloudTenantUsername,
+        ...(cloudTenantDoc?.passwordHash ? { adminPin: '' } : {}),
+      };
+      saveSettingsDatabase(localDb, cleanTenant, false);
+      return localDb;
     }
   } catch {}
   return localDb;
@@ -357,11 +522,27 @@ export async function handleSettingsApi(
 
   // 1. GET /api/settings
   if (req.method === 'GET' && cleanPath === '/api/settings') {
-    const db = await reconcileSettingsFromCloudFirestore(tenantId, forceCloud);
+    const [db, cloudTenant] = await Promise.all([
+      reconcileSettingsFromCloudFirestore(tenantId, forceCloud),
+      getDocFromFirebaseServer<any>('tenants', tenantId).catch(() => null),
+    ]);
+    const localTenant = getTenantRecordFromDisk(tenantId);
+    const hasHash = Boolean(cloudTenant?.passwordHash || localTenant?.passwordHash);
+    const authoritativeUsername =
+      (typeof cloudTenant?.ownerUsername === 'string' && cloudTenant.ownerUsername.trim()) ||
+      (typeof db.settings.adminUsername === 'string' && db.settings.adminUsername.trim()) ||
+      getOwnerUsernameFromDisk(tenantId, localTenant);
+    const publicSettings = sanitizePublicSettingsResponse(
+      {
+        ...db.settings,
+        ...(authoritativeUsername ? { adminUsername: authoritativeUsername } : {}),
+      },
+      hasHash
+    );
     sendJson(res, 200, {
       success: true,
       tenantId,
-      settings: db.settings,
+      settings: publicSettings,
       lastUpdated: db.lastUpdated,
     });
     return true;
@@ -397,7 +578,11 @@ export async function handleSettingsApi(
         } catch {}
       }
 
-      const targetDb = await reconcileSettingsFromCloudFirestore(targetTenant, true);
+      const [targetDb, cloudTenantCurrent, allCloudTenants] = await Promise.all([
+        reconcileSettingsFromCloudFirestore(targetTenant, true),
+        getDocFromFirebaseServer<any>('tenants', targetTenant).catch(() => null),
+        listCollectionFromFirebaseServer<any>('tenants').catch(() => []),
+      ]);
 
       const incomingSettings = body.settings || body;
       if (!incomingSettings || typeof incomingSettings !== 'object') {
@@ -405,42 +590,208 @@ export async function handleSettingsApi(
         return true;
       }
 
+      const diskTenantCurrent = getTenantRecordFromDisk(targetTenant);
+      const currentTenantRecord: Record<string, any> = {
+        ...(diskTenantCurrent || {}),
+        ...(cloudTenantCurrent || {}),
+        id: targetTenant,
+      };
+      // Preserve local passwordHash if Cloud doc did not yet have one
+      if (!currentTenantRecord.passwordHash && diskTenantCurrent?.passwordHash) {
+        currentTenantRecord.passwordHash = diskTenantCurrent.passwordHash;
+        currentTenantRecord.passwordSalt = diskTenantCurrent.passwordSalt || '';
+      }
+
+      const currentAuthUsername =
+        (typeof currentTenantRecord.ownerUsername === 'string' && currentTenantRecord.ownerUsername.trim()) ||
+        (typeof targetDb.settings.adminUsername === 'string' && targetDb.settings.adminUsername.trim()) ||
+        getOwnerUsernameFromDisk(targetTenant, currentTenantRecord);
+
+      // 1. Validate & check Cloud-wide uniqueness for adminUsername when provided
+      let finalAdminUsername = currentAuthUsername;
+      let usernameChanged = false;
+      if (typeof incomingSettings.adminUsername === 'string') {
+        const rawIncomingUsername = incomingSettings.adminUsername.trim();
+        if (rawIncomingUsername && normalizeUsernameKey(rawIncomingUsername) !== normalizeUsernameKey(currentAuthUsername)) {
+          const formatCheck = validateSettingsAdminUsername(rawIncomingUsername);
+          if (!formatCheck.valid) {
+            sendJson(res, 400, {
+              success: false,
+              error: formatCheck.error || 'صيغة اسم المستخدم غير صالحة.',
+            });
+            return true;
+          }
+
+          const normIncoming = normalizeUsernameKey(formatCheck.clean);
+          const localTenantsList = fs.existsSync(TENANTS_DB_FILE)
+            ? readJsonFileSync<any[]>(TENANTS_DB_FILE, () => [])
+            : [];
+          const combinedTenants = [...(Array.isArray(allCloudTenants) ? allCloudTenants : []), ...(Array.isArray(localTenantsList) ? localTenantsList : [])];
+
+          const conflictingTenant = combinedTenants.find(
+            (t) =>
+              t &&
+              t.id &&
+              t.id !== targetTenant &&
+              t.ownerUsername &&
+              normalizeUsernameKey(t.ownerUsername) === normIncoming
+          );
+          if (conflictingTenant) {
+            sendJson(res, 409, {
+              success: false,
+              error: 'اسم المستخدم هذا مستخدم بالفعل لدى جمعية أخرى. يرجى اختيار اسم مستخدم مختلف.',
+            });
+            return true;
+          }
+
+          finalAdminUsername = formatCheck.clean;
+          usernameChanged = true;
+        } else if (rawIncomingUsername) {
+          finalAdminUsername = rawIncomingUsername;
+        }
+      }
+
+      // 2. Detect explicit password/PIN update and hash strongly with scrypt
+      const prevStoredPin = String(targetDb.settings.adminPin || '').trim();
+      const rawIncomingPin =
+        typeof incomingSettings.newAdminPassword === 'string' && incomingSettings.newAdminPassword.trim()
+          ? incomingSettings.newAdminPassword.trim()
+          : typeof incomingSettings.adminPin === 'string'
+          ? incomingSettings.adminPin.trim()
+          : '';
+      const isMaskedPlaceholder = /^[•*]+$/.test(rawIncomingPin);
+      const isPasswordChanged = Boolean(
+        rawIncomingPin &&
+        !isMaskedPlaceholder &&
+        rawIncomingPin !== prevStoredPin
+      );
+
+      let nextPasswordHash = String(currentTenantRecord.passwordHash || '').trim();
+      let nextPasswordSalt = String(currentTenantRecord.passwordSalt || '').trim();
+
+      if (isPasswordChanged) {
+        if (rawIncomingPin.length < 4) {
+          sendJson(res, 400, {
+            success: false,
+            error: 'يجب أن تتكون كلمة المرور أو الرمز السري الجديد من 4 أحرف أو أرقام على الأقل.',
+          });
+          return true;
+        }
+        const hashed = hashPasswordScrypt(rawIncomingPin);
+        nextPasswordHash = hashed.hash;
+        nextPasswordSalt = hashed.salt;
+      }
+
+      const nowIso = new Date().toISOString();
+      const hasAnyHashedPassword = Boolean(nextPasswordHash);
+
       const sanitizedIncoming = ensureBankDefaults(
         sanitizeSettingsMedia({
           ...targetDb.settings,
           ...incomingSettings,
+          // Never store plaintext password in public settings when hashed credential exists
+          adminPin: hasAnyHashedPassword ? '' : prevStoredPin,
+          ...(finalAdminUsername ? { adminUsername: finalAdminUsername } : {}),
         }),
         targetDb.settings
       );
+      delete (sanitizedIncoming as any).newAdminPassword;
 
-      const nowIso = new Date().toISOString();
       targetDb.settings = sanitizedIncoming;
       targetDb.lastUpdated = nowIso;
 
-      saveSettingsDatabase(targetDb, targetTenant, false);
+      // Save settings locally (without triggering an un-awaited duplicate tenant write)
+      writeJsonFileAtomicSync(getTenantSettingsFile(targetTenant), targetDb, 'branding');
+      settingsCloudReconcileCache.set(targetTenant, Date.now());
 
-      // Await primary Firestore persistence + tenant doc + offloaded logo/banner media BEFORE responding
-      const tenantRec = getTenantRecordFromDisk(targetTenant);
-      await Promise.all([
+      // Build authoritative updated tenant record preserving/updating credentials atomically
+      const s = sanitizedIncoming;
+      const updatedTenantRecord: Record<string, any> = {
+        ...currentTenantRecord,
+        id: targetTenant,
+        ...(s.name && (targetTenant === 'tenant_nour' || s.name !== 'جمعية الشايف') ? { name: s.name } : {}),
+        ...(s.nameFr ? { nameFr: s.nameFr } : {}),
+        ...(s.nameEn ? { nameEn: s.nameEn } : {}),
+        ...(s.logoUrl ? { logoUrl: s.logoUrl } : {}),
+        ...(s.bannerImageUrl ? { bannerImageUrl: s.bannerImageUrl } : {}),
+        ...(s.tagline ? { tagline: s.tagline } : {}),
+        ...(s.whatsapp ? { whatsapp: s.whatsapp } : {}),
+        ...(s.phone ? { phone: s.phone } : {}),
+        ...(s.ribBank ? { rib: s.ribBank, ribBank: s.ribBank } : {}),
+        ...(s.bankName ? { bankName: s.bankName } : {}),
+        ...(s.enablePublicDonations !== undefined ? { enablePublicDonations: s.enablePublicDonations } : {}),
+        ...(finalAdminUsername ? { ownerUsername: finalAdminUsername } : {}),
+        ...(nextPasswordHash
+          ? {
+              passwordHash: nextPasswordHash,
+              passwordSalt: nextPasswordSalt,
+              hasCustomPassword: true,
+            }
+          : {}),
+        ...(usernameChanged || isPasswordChanged ? { credentialsUpdatedAt: nowIso } : {}),
+        updatedAt: nowIso,
+        _updatedAt: nowIso,
+      };
+      delete updatedTenantRecord.plainPassword;
+      delete updatedTenantRecord.password;
+      delete updatedTenantRecord.ownerPasswordHash;
+      delete updatedTenantRecord.ownerPasswordSalt;
+
+      // Update local tenants_database.json immediately
+      try {
+        const allTenantsDisk = fs.existsSync(TENANTS_DB_FILE)
+          ? readJsonFileSync<any[]>(TENANTS_DB_FILE, () => [])
+          : [];
+        const safeTenants = Array.isArray(allTenantsDisk) ? allTenantsDisk : [];
+        const idx = safeTenants.findIndex((t) => t && t.id === targetTenant);
+        if (idx >= 0) {
+          safeTenants[idx] = { ...safeTenants[idx], ...updatedTenantRecord };
+          writeJsonFileAtomicSync(TENANTS_DB_FILE, safeTenants, 'tenant');
+        }
+      } catch (diskTenantErr) {
+        console.warn('[SettingsDB] Could not update local tenants_database.json:', diskTenantErr);
+      }
+
+      // Synchronize local owners_database.json immediately so old username & old password are revoked on disk too
+      if (finalAdminUsername || isPasswordChanged) {
+        syncOwnerCredentialsOnDisk(
+          targetTenant,
+          {
+            ...(finalAdminUsername ? { username: finalAdminUsername } : {}),
+            ...(isPasswordChanged ? { passwordHash: nextPasswordHash, passwordSalt: nextPasswordSalt } : {}),
+          },
+          nowIso
+        );
+      }
+
+      // Await primary Cloud Firestore persistence for settings + authoritative tenant credentials + offloaded media BEFORE responding
+      const [, settingsSavedOk, tenantSavedOk] = await Promise.all([
         awaitPendingOffloadBackups(),
         saveDocToFirebaseServer('settings', targetTenant, {
           ...targetDb.settings,
           tenantId: targetTenant,
           lastUpdated: nowIso,
           _updatedAt: nowIso,
-        }).catch(() => {}),
-        tenantRec
-          ? saveDocToFirebaseServer('tenants', targetTenant, {
-              ...tenantRec,
-              _updatedAt: nowIso,
-            }).catch(() => {})
-          : Promise.resolve(),
+        }).catch(() => false),
+        saveDocToFirebaseServer('tenants', targetTenant, updatedTenantRecord).catch(() => false),
       ]);
+
+      if ((usernameChanged || isPasswordChanged) && !tenantSavedOk) {
+        sendJson(res, 503, {
+          success: false,
+          error: 'تعذر حفظ بيانات الدخول الجديدة في قاعدة البيانات السحابية. يرجى المحاولة مرة أخرى.',
+        });
+        return true;
+      }
 
       sendJson(res, 200, {
         success: true,
         tenantId: targetTenant,
-        settings: targetDb.settings,
+        settings: sanitizePublicSettingsResponse(targetDb.settings, hasAnyHashedPassword),
+        credentialsUpdated: usernameChanged || isPasswordChanged,
+        usernameUpdated: usernameChanged,
+        passwordUpdated: isPasswordChanged,
+        cloudSynced: Boolean(settingsSavedOk && tenantSavedOk),
         lastUpdated: targetDb.lastUpdated,
       });
       return true;

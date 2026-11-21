@@ -49,6 +49,7 @@ export const initialSettings: AssociationSettings = {
   licenseNumber: 'W/2024/8492-MA',
   foundingYear: '2024',
   adminPin: '2025',
+  adminUsername: 'nour2024',
   currency: 'درهم',
   currencyFr: 'DH',
   currencyEn: 'MAD',

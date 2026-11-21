@@ -81,7 +81,7 @@ import { PlatformTutorialsSection } from './PlatformTutorialsSection';
 import { PlatformSetupServiceSection } from './PlatformSetupServiceSection';
 import { CreateAdSection } from './CreateAdSection';
 import { ContactPlatformAdminButton } from './ContactPlatformAdminButton';
-import { getTenantById, defaultTenants, getMasterAdminSession } from '../tenantStorage';
+import { getTenantById, defaultTenants, getMasterAdminSession, getOwnerUsernameForTenant } from '../tenantStorage';
 import { getTenantSubscriptionDetails } from '../paymentStorage';
 import { useAssociationSectionsConfig } from '../associationSectionsStorage';
 import { WhatsAppIcon, validateWhatsAppPhone, buildWhatsAppChatUrl } from '../utils/whatsappUtils';
@@ -526,30 +526,45 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   };
 
+  const resolveAccountUsername = (sourceSettings: AssociationSettings): string => {
+    if (typeof sourceSettings.adminUsername === 'string' && sourceSettings.adminUsername.trim()) {
+      return sourceSettings.adminUsername.trim();
+    }
+    const tid = activeTenantId && activeTenantId !== 'portal' ? activeTenantId : 'tenant_nour';
+    return getOwnerUsernameForTenant(tid);
+  };
+
   const initialResolvedBank = resolveEffectiveBankSettings(settings);
   const [formData, setFormData] = useState<AssociationSettings>({
     ...settings,
+    adminUsername: resolveAccountUsername(settings),
     ribBank: initialResolvedBank.ribBank,
     bankName: initialResolvedBank.bankName,
   });
   const [savedSuccess, setSavedSuccess] = useState(false);
 
-  // Keep formData in sync whenever external settings change (e.g. from Branding or Access Control updates)
+  // Keep formData in sync whenever external settings or active tenant change
   useEffect(() => {
     const resolvedBank = resolveEffectiveBankSettings(settings);
     setFormData({
       ...settings,
+      adminUsername: resolveAccountUsername(settings),
       ribBank: resolvedBank.ribBank,
       bankName: resolvedBank.bankName,
     });
-  }, [settings]);
+  }, [settings, activeTenantId]);
 
   const handleSettingsSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const resolvedBank = resolveEffectiveBankSettings(formData, settings);
+    const trimmedUsername =
+      typeof formData.adminUsername === 'string'
+        ? formData.adminUsername.trim()
+        : resolveAccountUsername(settings);
     const mergedSettings: AssociationSettings = {
       ...settings,
       ...formData,
+      adminUsername: trimmedUsername,
       ribBank: resolvedBank.ribBank,
       bankName: resolvedBank.bankName,
       // Preserve critical branding and access control settings so they are never erased
@@ -2067,11 +2082,27 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <label className="block text-xs font-bold text-slate-700 mb-1">الرمز السري للإدارة (PIN)</label>
                 <input
                   type="text"
-                  value={formData.adminPin}
+                  value={formData.adminPin || ''}
                   onChange={(e) => setFormData({ ...formData, adminPin: e.target.value })}
+                  placeholder="أدخل كلمة مرور جديدة لتغييرها (أو اتركه فارغاً)"
                   className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs sm:text-sm font-mono font-bold focus:border-emerald-600 focus:bg-white outline-hidden"
                 />
               </div>
+            </div>
+
+            <div>
+              <label htmlFor="admin-settings-username-input" className="block text-xs font-bold text-slate-700 mb-1">
+                اسم المستخدم
+              </label>
+              <input
+                type="text"
+                id="admin-settings-username-input"
+                value={formData.adminUsername || ''}
+                onChange={(e) => setFormData({ ...formData, adminUsername: e.target.value })}
+                placeholder="اسم المستخدم الخاص بحساب الجمعية"
+                dir="ltr"
+                className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs sm:text-sm font-mono font-bold text-right focus:border-emerald-600 focus:bg-white outline-hidden"
+              />
             </div>
 
             <div>

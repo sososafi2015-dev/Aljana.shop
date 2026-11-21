@@ -15,6 +15,16 @@ import {
   listCollectionFromFirebaseServer,
   deleteDocFromFirebaseServer,
 } from './firebaseServerStorage';
+import {
+  normalizeLoginUsername,
+  generateAuthSalt,
+  hashPasswordScrypt,
+  hashPasswordLegacySha256,
+  legacyClientDjb2Hash,
+  verifyPasswordHashServer,
+  sanitizePublicTenant,
+  sanitizePublicOwner,
+} from './authCrypto';
 
 let tenantsCloudReconcileLastTs = 0;
 const TENANTS_RECONCILE_TTL_MS = 8000;
@@ -369,9 +379,37 @@ async function reconcileTenantsFromCloudFirestore(force = false): Promise<any[]>
           changed = true;
         } else {
           const cloudTs = new Date(ct._updatedAt || ct.updatedAt || ct.createdAt || 0).getTime();
-          const localTs = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
-          if (cloudTs > localTs) {
-            mergedMap.set(ct.id, sanitizeTenantMedia({ ...existing, ...ct }));
+          const localTs = new Date(existing._updatedAt || existing.updatedAt || existing.createdAt || 0).getTime();
+          const cloudCredTs = new Date(ct.credentialsUpdatedAt || ct._updatedAt || ct.updatedAt || 0).getTime();
+          const localCredTs = new Date(existing.credentialsUpdatedAt || existing.updatedAt || 0).getTime();
+
+          const cloudHasNewerCreds =
+            (Boolean(ct.passwordHash) && !existing.passwordHash) ||
+            (Boolean(ct.passwordHash) && cloudCredTs >= localCredTs && (ct.passwordHash !== existing.passwordHash || ct.passwordSalt !== existing.passwordSalt)) ||
+            (Boolean(ct.ownerUsername) && cloudCredTs >= localCredTs && ct.ownerUsername !== existing.ownerUsername);
+
+          if (cloudTs > localTs || cloudHasNewerCreds) {
+            const baseMerged = cloudTs > localTs ? { ...existing, ...ct } : { ...existing };
+            // Always prefer authoritative cloud credentials when newer or missing locally
+            if (cloudHasNewerCreds) {
+              if (ct.ownerUsername) baseMerged.ownerUsername = ct.ownerUsername;
+              if (ct.passwordHash) {
+                baseMerged.passwordHash = ct.passwordHash;
+                baseMerged.passwordSalt = ct.passwordSalt || baseMerged.passwordSalt || '';
+                baseMerged.hasCustomPassword = true;
+                delete baseMerged.plainPassword;
+                delete baseMerged.password;
+              }
+              if (ct.credentialsUpdatedAt) {
+                baseMerged.credentialsUpdatedAt = ct.credentialsUpdatedAt;
+              }
+            }
+            // Never let a cloud doc lacking passwordHash erase a valid local passwordHash
+            if (!baseMerged.passwordHash && existing.passwordHash) {
+              baseMerged.passwordHash = existing.passwordHash;
+              baseMerged.passwordSalt = existing.passwordSalt || '';
+            }
+            mergedMap.set(ct.id, sanitizeTenantMedia(baseMerged));
             changed = true;
           }
         }
@@ -380,82 +418,84 @@ async function reconcileTenantsFromCloudFirestore(force = false): Promise<any[]>
       if (changed) {
         const mergedList = Array.from(mergedMap.values());
         writeTenantsToDisk(mergedList, false);
+        // Immediately synchronize owners_database.json so revoked usernames/passwords are purged from disk
+        syncOwnersWithTenantsList(mergedList);
         return mergedList;
       }
     }
-  } catch {}
+  } catch (err) {
+    console.warn('[tenantsApiHandler] Cloud Firestore reconciliation warning:', err);
+  }
 
   return localTenants;
 }
 
 function hashPasswordSha256(password: string, salt: string): string {
-  return crypto.createHash('sha256').update(`${password}:${salt}:chayef_assoc_salt_secret`).digest('hex');
-}
-
-function legacyClientDjb2Hash(password: string, salt: string): string {
-  let hash = 0;
-  const str = `${password}:${salt}:chayef_assoc_salt_secret`;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
-    hash |= 0;
-  }
-  return Math.abs(hash).toString(16).padStart(32, '0');
+  return hashPasswordLegacySha256(password, salt);
 }
 
 function generateSalt(length = 16): string {
-  return crypto.randomBytes(Math.ceil(length / 2)).toString('hex').slice(0, length);
+  return generateAuthSalt(Math.ceil(length / 2)).slice(0, length);
 }
 
 /**
- * Verifies a password against any format stored in owners_database.json:
- * - plainPassword
- * - SHA-256 salted hash (`${password}:${salt}:chayef_assoc_salt_secret`)
- * - Plain SHA-256 hex (`crypto.createHash('sha256').update(password).digest('hex')`)
- * - Legacy client DJB2 32-char hash
+ * Verifies an association admin / sub-admin password strictly against the single authoritative
+ * credential hash (preferring Cloud Firestore tenant.passwordHash over local owner.passwordHash
+ * so revoked passwords can NEVER remain valid).
  */
-function verifyOwnerPasswordServer(password: string, owner: any, tenant?: any): boolean {
-  if (!password || !owner) return false;
-  const cleanPass = password.trim();
+function verifyOwnerPasswordServer(
+  password: string,
+  owner: any,
+  tenant?: any
+): { valid: boolean; needsUpgrade: boolean } {
+  if (!password || (!owner && !tenant)) return { valid: false, needsUpgrade: false };
+  const cleanPass = String(password).trim();
 
-  if (owner.plainPassword && cleanPass === String(owner.plainPassword).trim()) {
-    return true;
+  // Select ONE authoritative hash/salt pair (tenant from Cloud Firestore wins when present)
+  let effectiveHash = '';
+  let effectiveSalt = '';
+
+  if (tenant?.passwordHash && String(tenant.passwordHash).trim()) {
+    effectiveHash = String(tenant.passwordHash).trim();
+    effectiveSalt = String(tenant.passwordSalt || owner?.passwordSalt || '').trim();
+  } else if (tenant?.ownerPasswordHash && String(tenant.ownerPasswordHash).trim()) {
+    effectiveHash = String(tenant.ownerPasswordHash).trim();
+    effectiveSalt = String(tenant.ownerPasswordSalt || owner?.passwordSalt || '').trim();
+  } else if (owner?.passwordHash && String(owner.passwordHash).trim()) {
+    effectiveHash = String(owner.passwordHash).trim();
+    effectiveSalt = String(owner.passwordSalt || '').trim();
+  }
+
+  if (effectiveHash) {
+    return verifyPasswordHashServer(cleanPass, effectiveHash, effectiveSalt);
+  }
+
+  // Fallback ONLY for legacy unhashed records that still have plainPassword or pre-seeded demo accounts
+  if (owner?.plainPassword && cleanPass === String(owner.plainPassword).trim()) {
+    return { valid: true, needsUpgrade: true };
   }
   if (tenant?.plainPassword && cleanPass === String(tenant.plainPassword).trim()) {
-    return true;
+    return { valid: true, needsUpgrade: true };
   }
 
-  const salt = owner.passwordSalt || tenant?.passwordSalt || '';
-  const storedHash = owner.passwordHash || tenant?.passwordHash || '';
-
-  if (storedHash) {
-    if (hashPasswordSha256(cleanPass, salt) === storedHash) return true;
-    if (legacyClientDjb2Hash(cleanPass, salt) === storedHash) return true;
-    const rawSha = crypto.createHash('sha256').update(cleanPass).digest('hex');
-    if (rawSha === storedHash) return true;
-    const aljanaSha = crypto.createHash('sha256').update(cleanPass + 'aljana_salt_2025').digest('hex');
-    if (aljanaSha === storedHash) return true;
-  }
-
-  // Fallback ONLY for pre-seeded demo accounts that do not have a stored passwordHash or plainPassword yet,
-  // OR for the pre-seeded initial sub-admin (subadmin-1) with placeholder hash
+  // Fallback ONLY for pre-seeded initial sub-admin placeholder or uninitialized demo account without any hash
   const isSeededSubAdminPlaceholder =
-    owner.id === 'subadmin-1' &&
-    storedHash === 'c3ab8ff13720e8ad9047dd39466b3c8974e592c2fa383d4a3960714caef0c4f2';
+    owner?.id === 'subadmin-1' &&
+    effectiveHash === 'c3ab8ff13720e8ad9047dd39466b3c8974e592c2fa383d4a3960714caef0c4f2';
   if (
     isSeededSubAdminPlaceholder ||
-    (!storedHash && !owner.hasCustomPassword && !owner.plainPassword && !tenant?.plainPassword)
+    (!effectiveHash && !owner?.hasCustomPassword && !tenant?.hasCustomPassword && !owner?.plainPassword && !tenant?.plainPassword)
   ) {
     if (
       cleanPass === 'admin123' ||
       cleanPass === '123456' ||
-      (owner.phone && cleanPass === owner.phone.trim())
+      (owner?.phone && cleanPass === String(owner.phone).trim())
     ) {
-      return true;
+      return { valid: true, needsUpgrade: true };
     }
   }
 
-  return false;
+  return { valid: false, needsUpgrade: false };
 }
 
 /**
@@ -537,10 +577,37 @@ export function readOwnersFromDisk(): any[] {
     }
   }
 
-  // Reconcile any tenants existing in tenants_database.json that might not have an owner record yet
-  // IMPORTANT: Check by (o.id === existingOwnerId || o.tenantId === t.id) so multiple associations with the same phone each have their own owner record!
+  // Reconcile any tenants existing in tenants_database.json with owners_database.json
+  // CRITICAL: Always synchronize authoritative ownerUsername & passwordHash/passwordSalt from tenants so disk never retains revoked credentials!
   const tenants = readTenantsFromDisk();
-  let needsWrite = parsedOwners.length === 0;
+  return syncOwnersMapWithTenants(ownersMap, tenants, parsedOwners.length === 0);
+}
+
+function syncOwnersWithTenantsList(tenants: any[]): any[] {
+  ensureDataDir();
+  let parsedOwners: any[] = [];
+  if (fs.existsSync(OWNERS_FILE)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(OWNERS_FILE, 'utf-8'));
+      if (Array.isArray(parsed)) parsedOwners = parsed;
+    } catch {}
+  }
+  const deletedIds = loadDeletedTenantIdsFromDisk();
+  const ownersMap = new Map<string, any>();
+  for (const item of parsedOwners) {
+    if (item && item.id && !deletedIds.has(item.tenantId)) {
+      ownersMap.set(item.id, item);
+    }
+  }
+  return syncOwnersMapWithTenants(ownersMap, tenants, false);
+}
+
+function syncOwnersMapWithTenants(
+  ownersMap: Map<string, any>,
+  tenants: any[],
+  forceWrite: boolean
+): any[] {
+  let needsWrite = forceWrite;
 
   for (const t of tenants) {
     if (!t || !t.id) continue;
@@ -550,29 +617,56 @@ export function readOwnersFromDisk(): any[] {
       (o) => o.id === existingOwnerId || o.tenantId === t.id
     );
 
-    if (existingOwner && !existingOwner.username) {
-      existingOwner.username = t.ownerUsername || (t.id === 'tenant_nour' ? 'nour2024' : `admin${String(t.id).replace(/\D/g, '').slice(-4) || '2024'}`);
-      ownersMap.set(existingOwner.id, existingOwner);
-      needsWrite = true;
-    }
+    if (existingOwner) {
+      let ownerChanged = false;
+      const authTenantUser = typeof t.ownerUsername === 'string' ? t.ownerUsername.trim() : '';
+      if (authTenantUser && existingOwner.username !== authTenantUser) {
+        existingOwner.username = authTenantUser;
+        ownerChanged = true;
+      } else if (!existingOwner.username) {
+        existingOwner.username =
+          authTenantUser ||
+          (t.id === 'tenant_nour'
+            ? 'nour2024'
+            : `admin${String(t.id).replace(/\D/g, '').slice(-4) || '2024'}`);
+        ownerChanged = true;
+      }
 
-    if (!existingOwner && (t.ownerPhone || t.ownerName || t.ownerUsername)) {
-      const salt = t.passwordSalt || generateSalt(16);
-      const plainPass = t.plainPassword || t.password || undefined;
+      const cloudHash = String(t.passwordHash || t.ownerPasswordHash || '').trim();
+      const cloudSalt = String(t.passwordSalt || t.ownerPasswordSalt || '').trim();
+      if (cloudHash && (existingOwner.passwordHash !== cloudHash || (cloudSalt && existingOwner.passwordSalt !== cloudSalt))) {
+        existingOwner.passwordHash = cloudHash;
+        if (cloudSalt) existingOwner.passwordSalt = cloudSalt;
+        existingOwner.hasCustomPassword = true;
+        delete existingOwner.plainPassword;
+        existingOwner.recoveredAccount = false;
+        ownerChanged = true;
+      }
+
+      if (ownerChanged) {
+        ownersMap.set(existingOwner.id, existingOwner);
+        needsWrite = true;
+      }
+    } else if (t.ownerPhone || t.ownerName || t.ownerUsername) {
+      const cloudHash = String(t.passwordHash || t.ownerPasswordHash || '').trim();
+      const cloudSalt = String(t.passwordSalt || t.ownerPasswordSalt || '').trim();
+      const plainPass = typeof (t.plainPassword || t.password) === 'string'
+        ? String(t.plainPassword || t.password).trim()
+        : '';
+      const computed = plainPass ? hashPasswordScrypt(plainPass) : null;
+
       ownersMap.set(existingOwnerId, {
         id: existingOwnerId,
-        ...(t.ownerUsername ? { username: t.ownerUsername } : {}),
+        ...(t.ownerUsername ? { username: String(t.ownerUsername).trim() } : {}),
         fullName: t.ownerName || 'مدير الجمعية',
         phone: t.ownerPhone || '',
-        passwordHash: plainPass
-          ? hashPasswordSha256(plainPass, salt)
-          : t.passwordHash || hashPasswordSha256('admin123', salt),
-        passwordSalt: salt,
-        ...(plainPass || t.hasCustomPassword || t.ownerUsername ? { hasCustomPassword: true } : {}),
+        passwordHash: computed ? computed.hash : cloudHash,
+        passwordSalt: computed ? computed.salt : cloudSalt,
+        hasCustomPassword: Boolean(computed || cloudHash || t.hasCustomPassword || t.ownerUsername),
         tenantId: t.id,
         status: 'active',
         createdAt: t.createdAt || new Date().toISOString(),
-        recoveredAccount: t.recoveredAccount || (!plainPass && !t.passwordHash),
+        recoveredAccount: !computed && !cloudHash,
       });
       needsWrite = true;
     }
@@ -672,15 +766,7 @@ function namesMatch(candidateName?: string, queryText?: string): boolean {
 }
 
 function normalizeOwnerUsername(username?: string): string {
-  if (!username) return '';
-  return String(username)
-    .trim()
-    .toLowerCase()
-    .replace(/[أإآ]/g, 'ا')
-    .replace(/ة/g, 'ه')
-    .replace(/ى/g, 'ي')
-    .replace(/[\u064B-\u065F]/g, '')
-    .replace(/\s+/g, ' ');
+  return normalizeLoginUsername(username);
 }
 
 function validateOwnerUsernameFormatServer(username?: string): { valid: boolean; error?: string } {
@@ -792,8 +878,8 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
         });
       }
 
+      const tenants = await reconcileTenantsFromCloudFirestore(true);
       const owners = readOwnersFromDisk();
-      const tenants = readTenantsFromDisk();
       const taken = isOwnerUsernameTakenServer(username, owners, tenants, excludeTenantId);
 
       if (taken) {
@@ -871,13 +957,15 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
       });
     }
 
-    // 0. POST /api/tenants/login -> Dedicated login endpoint for multi-tenant platform
+    // 0. POST /api/tenants/login -> Authoritative Cloud-backed login endpoint for multi-tenant platform
     if (method === 'POST' && pathname === '/api/tenants/login') {
       const body = await readBody(req);
-      const identifier = (body.loginIdentifier || body.identifier || '').trim();
-      const password = (body.password || '').trim();
+      const identifier = String(body.loginIdentifier || body.identifier || body.username || '').trim();
+      const password = String(body.password || '').trim();
+      const expectedTenantId = String(body.tenantId || '').trim();
+      const isPinOnly = Boolean(body.pinOnly) && !identifier && Boolean(expectedTenantId);
 
-      if (!identifier || !password) {
+      if ((!identifier && !isPinOnly) || !password) {
         return sendJson(res, 400, {
           success: false,
           errorCode: 'EMPTY_FIELDS',
@@ -885,132 +973,260 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
         });
       }
 
+      // Always reconcile live credentials from Cloud Firestore before authenticating
+      const tenants = await reconcileTenantsFromCloudFirestore(true);
       const owners = readOwnersFromDisk();
-      const tenants = readTenantsFromDisk();
+
+      // Helper to transparently upgrade legacy hashes or missing cloud hashes to scrypt on valid login
+      const persistUpgradedScryptCredentials = async (
+        tenantObj: any,
+        ownerObj: any,
+        plainPass: string
+      ) => {
+        try {
+          const { hash, salt } = hashPasswordScrypt(plainPass);
+          const nowIso = new Date().toISOString();
+          tenantObj.passwordHash = hash;
+          tenantObj.passwordSalt = salt;
+          tenantObj.hasCustomPassword = true;
+          tenantObj.credentialsUpdatedAt = nowIso;
+          tenantObj.updatedAt = nowIso;
+          delete tenantObj.plainPassword;
+          delete tenantObj.ownerPasswordHash;
+          delete tenantObj.ownerPasswordSalt;
+
+          ownerObj.passwordHash = hash;
+          ownerObj.passwordSalt = salt;
+          ownerObj.hasCustomPassword = true;
+          ownerObj.recoveredAccount = false;
+          ownerObj.updatedAt = nowIso;
+          delete ownerObj.plainPassword;
+
+          const tIdx = tenants.findIndex((item) => item.id === tenantObj.id);
+          if (tIdx >= 0) tenants[tIdx] = { ...tenants[tIdx], ...tenantObj };
+          writeTenantsToDisk(tenants, false);
+
+          const oIdx = owners.findIndex((o) => o.id === ownerObj.id || o.tenantId === tenantObj.id);
+          if (oIdx >= 0) owners[oIdx] = { ...owners[oIdx], ...ownerObj };
+          else owners.unshift(ownerObj);
+          writeOwnersToDisk(owners);
+
+          await saveDocToFirebaseServer('tenants', tenantObj.id, {
+            ...tenantObj,
+            _updatedAt: nowIso,
+          }).catch(() => {});
+        } catch (upgErr) {
+          console.warn('[tenantsApiHandler] Credential upgrade notice:', upgErr);
+        }
+      };
+
+      // Mode A: Password/PIN-only login scoped strictly to an active association (AdminAuthModal without username)
+      if (isPinOnly && expectedTenantId) {
+        const targetTenant = tenants.find((t) => t && t.id === expectedTenantId);
+        if (!targetTenant) {
+          return sendJson(res, 404, {
+            success: false,
+            errorCode: 'USER_NOT_FOUND',
+            error: 'لم يتم العثور على الجمعية المطلوبة في قاعدة البيانات.',
+          });
+        }
+        const linkedOwner = owners.find(
+          (o) => o && (o.id === targetTenant.ownerId || o.tenantId === targetTenant.id)
+        ) || {
+          id: targetTenant.ownerId || `owner_${targetTenant.id}`,
+          username: targetTenant.ownerUsername || '',
+          fullName: targetTenant.ownerName || 'مدير الجمعية',
+          phone: targetTenant.ownerPhone || '',
+          tenantId: targetTenant.id,
+          status: 'active',
+        };
+
+        let pinCheck = verifyOwnerPasswordServer(password, linkedOwner, targetTenant);
+
+        // If tenant has no stored hash yet, check legacy Cloud Firestore settings.adminPin once
+        if (!pinCheck.valid && !targetTenant.passwordHash && !linkedOwner.passwordHash) {
+          try {
+            const cloudSettings = await getDocFromFirebaseServer<any>('settings', targetTenant.id);
+            const cloudPin = String(cloudSettings?.adminPin || '').trim();
+            if (cloudPin && password === cloudPin) {
+              pinCheck = { valid: true, needsUpgrade: true };
+            }
+          } catch {}
+        }
+
+        if (!pinCheck.valid) {
+          return sendJson(res, 401, {
+            success: false,
+            errorCode: 'WRONG_PASSWORD',
+            error: 'كلمة المرور أو الرمز السري غير صحيح. يرجى التحقق وإعادة المحاولة.',
+          });
+        }
+
+        if (linkedOwner.status === 'inactive') {
+          return sendJson(res, 403, {
+            success: false,
+            errorCode: 'INACTIVE',
+            error: 'هذا الحساب الإداري معطل حالياً.',
+          });
+        }
+
+        if (pinCheck.needsUpgrade || !targetTenant.passwordHash) {
+          await persistUpgradedScryptCredentials(targetTenant, linkedOwner, password);
+        }
+
+        const safeTenant = sanitizePublicTenant(targetTenant);
+        const safeOwner = sanitizePublicOwner(linkedOwner);
+        const session = {
+          type: 'super_admin',
+          role: 'main_admin',
+          id: safeOwner.id,
+          ...(safeTenant.ownerUsername || safeOwner.username
+            ? { username: safeTenant.ownerUsername || safeOwner.username }
+            : {}),
+          fullName: safeOwner.fullName,
+          phone: safeOwner.phone,
+          tenantId: safeTenant.id,
+          isMasterPlatformAdmin: false,
+          token: `token_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+        };
+        return sendJson(res, 200, {
+          success: true,
+          role: 'admin',
+          owner: safeOwner,
+          tenant: safeTenant,
+          session,
+        });
+      }
+
       const isPhoneQuery = /\d{5,}/.test(identifier.replace(/[\s\-\(\)\.]/g, ''));
       const normUsernameQuery = normalizeOwnerUsername(identifier);
 
-      // Build candidate (owner, tenant) pairs matching by username, phone, ownerName, or association name
+      // 1. Search Association Owners strictly against their authoritative username
+      // CRITICAL: If tenant.ownerUsername exists, it is the single source of truth — stale owner.username is NEVER matched!
       interface CandidatePair {
         owner: any;
         tenant: any;
         exactUsernameMatch: boolean;
-        exactAssocMatch: boolean;
       }
       const candidates: CandidatePair[] = [];
       const seenTenantIds = new Set<string>();
 
       for (const t of tenants) {
         if (!t || !t.id) continue;
-        const linkedOwner =
-          owners.find((o) => o.id === t.ownerId || o.tenantId === t.id);
+        const linkedOwner = owners.find(
+          (o) => o && (o.id === t.ownerId || o.tenantId === t.id)
+        );
+        const authoritativeUsername =
+          (typeof t.ownerUsername === 'string' && t.ownerUsername.trim()) ||
+          (typeof linkedOwner?.username === 'string' && linkedOwner.username.trim()) ||
+          '';
 
-        const matchesUsername =
-          Boolean(normUsernameQuery) &&
-          ((t.ownerUsername && normalizeOwnerUsername(t.ownerUsername) === normUsernameQuery) ||
-            (linkedOwner?.username && normalizeOwnerUsername(linkedOwner.username) === normUsernameQuery));
-
-        if (matchesUsername) {
+        if (normUsernameQuery && authoritativeUsername && normalizeOwnerUsername(authoritativeUsername) === normUsernameQuery) {
           seenTenantIds.add(t.id);
-          const effectiveOwner = linkedOwner || {
-            id: t.ownerId || `owner_${t.id}`,
-            ...(t.ownerUsername ? { username: t.ownerUsername } : {}),
-            fullName: t.ownerName || 'مدير الجمعية',
-            phone: t.ownerPhone || '',
-            passwordHash: t.passwordHash || '',
-            passwordSalt: t.passwordSalt || '',
-            plainPassword: t.plainPassword || undefined,
-            hasCustomPassword: Boolean(t.hasCustomPassword || t.ownerUsername),
-            tenantId: t.id,
-            status: 'active',
-            createdAt: t.createdAt || new Date().toISOString(),
-            recoveredAccount: true,
-          };
+          const effectiveOwner = linkedOwner
+            ? { ...linkedOwner, username: authoritativeUsername }
+            : {
+                id: t.ownerId || `owner_${t.id}`,
+                username: authoritativeUsername,
+                fullName: t.ownerName || 'مدير الجمعية',
+                phone: t.ownerPhone || '',
+                passwordHash: t.passwordHash || t.ownerPasswordHash || '',
+                passwordSalt: t.passwordSalt || t.ownerPasswordSalt || '',
+                hasCustomPassword: Boolean(t.hasCustomPassword || t.passwordHash || authoritativeUsername),
+                tenantId: t.id,
+                status: 'active',
+                createdAt: t.createdAt || new Date().toISOString(),
+              };
           candidates.push({
             owner: effectiveOwner,
             tenant: t,
             exactUsernameMatch: true,
-            exactAssocMatch: false,
           });
         }
       }
 
-      // Also check owners whose tenant might not have been matched above
-      for (const o of owners) {
-        if (!o || (o.tenantId && seenTenantIds.has(o.tenantId))) continue;
-        const matchesUsername =
-          Boolean(normUsernameQuery) && Boolean(o.username) && normalizeOwnerUsername(o.username) === normUsernameQuery;
-        if (matchesUsername) {
-          const t = tenants.find((item) => item.id === o.tenantId || item.ownerId === o.id);
-          if (t) {
-            seenTenantIds.add(t.id);
-            candidates.push({
-              owner: o,
-              tenant: t,
-              exactUsernameMatch: true,
-              exactAssocMatch: false,
-            });
-          }
-        }
-      }
-
       if (candidates.length > 0) {
-        // Sort candidates: exact username match first, then exact association name match, then newest createdAt first
+        // Prioritize active/expected tenant first, then newest updatedAt
         candidates.sort((a, b) => {
-          if (a.exactUsernameMatch !== b.exactUsernameMatch) return a.exactUsernameMatch ? -1 : 1;
-          if (a.exactAssocMatch !== b.exactAssocMatch) return a.exactAssocMatch ? -1 : 1;
-          const timeA = new Date(a.tenant.createdAt || 0).getTime();
-          const timeB = new Date(b.tenant.createdAt || 0).getTime();
+          if (expectedTenantId) {
+            const aMatch = a.tenant.id === expectedTenantId;
+            const bMatch = b.tenant.id === expectedTenantId;
+            if (aMatch !== bMatch) return aMatch ? -1 : 1;
+          }
+          const timeA = new Date(a.tenant.updatedAt || a.tenant.createdAt || 0).getTime();
+          const timeB = new Date(b.tenant.updatedAt || b.tenant.createdAt || 0).getTime();
           return timeB - timeA;
         });
 
-        // 1st pass: check for strict password match among owner candidates
-        let verifiedCandidate = candidates.find((c) => verifyOwnerPasswordServer(password, c.owner, c.tenant));
+        let verifiedCandidate: CandidatePair | undefined;
+        let verifiedNeedsUpgrade = false;
 
-        // 2nd pass: if none matched strictly, check if candidate is an uninitialized recovered account without any stored password hash
-        if (!verifiedCandidate && password.length >= 4) {
-          const recoverableCandidate = candidates.find(
-            (c) =>
-              (c.owner.recoveredAccount === true || c.tenant.recoveredAccount === true) &&
-              !c.owner.passwordHash &&
-              !c.tenant.passwordHash &&
-              !c.owner.plainPassword &&
-              !c.tenant.plainPassword &&
-              !c.owner.hasCustomPassword
-          );
-          if (recoverableCandidate) {
-            // Bind the owner's password permanently on first login recovery
-            const salt = recoverableCandidate.owner.passwordSalt || generateSalt(16);
-            const newHash = hashPasswordSha256(password, salt);
-            recoverableCandidate.owner.passwordSalt = salt;
-            recoverableCandidate.owner.passwordHash = newHash;
-            recoverableCandidate.owner.recoveredAccount = false;
-            recoverableCandidate.tenant.recoveredAccount = false;
+        for (const c of candidates) {
+          const check = verifyOwnerPasswordServer(password, c.owner, c.tenant);
+          if (check.valid) {
+            verifiedCandidate = c;
+            verifiedNeedsUpgrade = check.needsUpgrade || !c.tenant.passwordHash;
+            break;
+          }
+        }
 
-            const oIdx = owners.findIndex((o) => o.id === recoverableCandidate.owner.id || o.tenantId === recoverableCandidate.tenant.id);
-            if (oIdx >= 0) {
-              owners[oIdx] = { ...owners[oIdx], ...recoverableCandidate.owner };
-            } else {
-              owners.push(recoverableCandidate.owner);
+        // Legacy one-time migration ONLY if candidate has NO hash in Cloud Firestore or disk yet
+        if (!verifiedCandidate) {
+          for (const c of candidates) {
+            const hasAnyHash = Boolean(
+              c.tenant.passwordHash || c.tenant.ownerPasswordHash || c.owner.passwordHash
+            );
+            if (!hasAnyHash) {
+              try {
+                const cloudSettings = await getDocFromFirebaseServer<any>('settings', c.tenant.id);
+                const cloudPin = String(cloudSettings?.adminPin || '').trim();
+                if (cloudPin && password === cloudPin) {
+                  verifiedCandidate = c;
+                  verifiedNeedsUpgrade = true;
+                  break;
+                }
+              } catch {}
             }
-            writeOwnersToDisk(owners);
-            verifiedCandidate = recoverableCandidate;
           }
         }
 
         if (verifiedCandidate) {
           const { owner: matchedOwner, tenant } = verifiedCandidate;
 
+          // Strict tenant isolation when logging in from inside a specific association's page
+          if (expectedTenantId && tenant.id !== expectedTenantId) {
+            return sendJson(res, 403, {
+              success: false,
+              errorCode: 'TENANT_MISMATCH',
+              error: `عذراً، هذا الحساب مرتبط بـ «${tenant.name}» ولا يُسمح له بالدخول إلى لوحة تحكم جمعية أخرى.`,
+            });
+          }
+
+          if (matchedOwner.status === 'inactive') {
+            return sendJson(res, 403, {
+              success: false,
+              errorCode: 'INACTIVE',
+              error: 'هذا الحساب الإداري معطل حالياً. يرجى التواصل مع إدارة المنصة.',
+            });
+          }
+
+          if (verifiedNeedsUpgrade) {
+            await persistUpgradedScryptCredentials(tenant, matchedOwner, password);
+          }
+
+          const safeTenant = sanitizePublicTenant(tenant);
+          const safeOwner = sanitizePublicOwner(matchedOwner);
+
           const session = {
             type: 'super_admin',
             role: 'main_admin',
-            id: matchedOwner.id,
-            ...(matchedOwner.username || tenant.ownerUsername
-              ? { username: matchedOwner.username || tenant.ownerUsername }
+            id: safeOwner.id,
+            ...(safeTenant.ownerUsername || safeOwner.username
+              ? { username: safeTenant.ownerUsername || safeOwner.username }
               : {}),
-            fullName: matchedOwner.fullName,
-            phone: matchedOwner.phone,
-            tenantId: tenant.id,
+            fullName: safeOwner.fullName,
+            phone: safeOwner.phone,
+            tenantId: safeTenant.id,
             isMasterPlatformAdmin: false,
             token: `token_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
           };
@@ -1018,10 +1234,10 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
           return sendJson(res, 200, {
             success: true,
             role: 'admin',
-            owner: matchedOwner,
-            tenant,
+            owner: safeOwner,
+            tenant: safeTenant,
             session,
-            message: `مرحباً بك مجدداً يا ${matchedOwner.fullName}! جاري توجيهك إلى منصة «${tenant.name}»...`,
+            message: `مرحباً بك مجدداً يا ${safeOwner.fullName}! جاري توجيهك إلى منصة «${safeTenant.name}»...`,
           });
         }
       }
@@ -1067,7 +1283,6 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
       };
 
       let allSubAdminsToSearch = collectAllSubAdmins();
-      // If no sub-admin matches on local disk yet, hydrate from Cloud Firestore sub_admins immediately
       if (!allSubAdminsToSearch.some(({ sub }) => doesSubAdminMatchIdentifier(sub))) {
         await hydrateSubAdminsFromFirestore().catch(() => {});
         allSubAdminsToSearch = collectAllSubAdmins();
@@ -1076,8 +1291,15 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
       for (const { sub: matchedSubAdmin, tenantId: subTenantId } of allSubAdminsToSearch) {
         if (doesSubAdminMatchIdentifier(matchedSubAdmin)) {
           hadSubAdminIdentifierMatch = true;
-          const isSubValid = verifyOwnerPasswordServer(password, matchedSubAdmin);
-          if (isSubValid) {
+          const subCheck = verifyOwnerPasswordServer(password, matchedSubAdmin);
+          if (subCheck.valid) {
+            if (expectedTenantId && subTenantId && subTenantId !== expectedTenantId) {
+              return sendJson(res, 403, {
+                success: false,
+                errorCode: 'TENANT_MISMATCH',
+                error: 'عذراً، هذا الحساب الإداري مرتبط بجمعية أخرى مستقلة.',
+              });
+            }
             if (matchedSubAdmin.status !== 'active') {
               return sendJson(res, 403, {
                 success: false,
@@ -1090,7 +1312,7 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
               success: true,
               role: 'admin',
               subAdmin: matchedSubAdmin,
-              tenant,
+              tenant: sanitizePublicTenant(tenant),
               session: {
                 type: 'sub_admin',
                 role: 'secondary_admin',
@@ -1106,97 +1328,97 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
         }
       }
 
-      // 3. Search Association Members across all tenants (جمعية النور للتنمية والتضامن and all registered associations)
-      // Members are authenticated strictly with role: 'member' and session: null (strictly by username)
-      interface MemberCandidate {
-        member: any;
-        tenant: any;
-      }
-      const memberCandidates: MemberCandidate[] = [];
-      const cleanIdLower = identifier.toLowerCase();
+      // 3. Search Association Members across all tenants (strictly when not an admin-only modal login)
+      if (!body.adminOnly) {
+        interface MemberCandidate {
+          member: any;
+          tenant: any;
+        }
+        const memberCandidates: MemberCandidate[] = [];
+        const cleanIdLower = identifier.toLowerCase();
 
-      for (const t of tenants) {
-        if (!t || !t.id) continue;
-        try {
-          const rec = readTenantRecordsFromDisk(t.id);
-          const membersList = Array.isArray(rec.members) ? rec.members : [];
-          for (const m of membersList) {
-            if (!m) continue;
-            const matchByUsername =
-              Boolean(m.username) &&
-              (String(m.username).trim().toLowerCase() === cleanIdLower ||
-                (Boolean(normUsernameQuery) && normalizeOwnerUsername(m.username) === normUsernameQuery));
+        for (const t of tenants) {
+          if (!t || !t.id) continue;
+          if (expectedTenantId && t.id !== expectedTenantId) continue;
+          try {
+            const rec = readTenantRecordsFromDisk(t.id);
+            const membersList = Array.isArray(rec.members) ? rec.members : [];
+            for (const m of membersList) {
+              if (!m) continue;
+              const matchByUsername =
+                Boolean(m.username) &&
+                (String(m.username).trim().toLowerCase() === cleanIdLower ||
+                  (Boolean(normUsernameQuery) && normalizeOwnerUsername(m.username) === normUsernameQuery));
 
-            if (matchByUsername) {
-              memberCandidates.push({ member: m, tenant: t });
+              if (matchByUsername) {
+                memberCandidates.push({ member: m, tenant: t });
+              }
             }
-          }
-        } catch {}
-      }
+          } catch {}
+        }
 
-      if (memberCandidates.length > 0) {
-        const verifiedMemberCand = memberCandidates.find((mc) => verifyMemberPasswordServer(password, mc.member));
+        if (memberCandidates.length > 0) {
+          const verifiedMemberCand = memberCandidates.find((mc) => verifyMemberPasswordServer(password, mc.member));
 
-        if (verifiedMemberCand) {
-          const { member: matchedMember, tenant: memberTenant } = verifiedMemberCand;
+          if (verifiedMemberCand) {
+            const { member: matchedMember, tenant: memberTenant } = verifiedMemberCand;
 
-          if (matchedMember.status !== 'active') {
-            return sendJson(res, 403, {
-              success: false,
-              errorCode: 'INACTIVE',
-              error: 'حسابك غير مفعل حالياً من طرف إدارة الجمعية (حساب معطل أو قيد المراجعة). يرجى مراجعة إدارة الجمعية لتفعيل العضوية.',
+            if (matchedMember.status !== 'active') {
+              return sendJson(res, 403, {
+                success: false,
+                errorCode: 'INACTIVE',
+                error: 'حسابك غير مفعل حالياً من طرف إدارة الجمعية (حساب معطل أو قيد المراجعة). يرجى مراجعة إدارة الجمعية لتفعيل العضوية.',
+              });
+            }
+
+            const finalMember = {
+              ...matchedMember,
+              lastLoginDate: new Date().toISOString(),
+            };
+            if (!finalMember.passwordHash || !finalMember.passwordSalt) {
+              const salt = generateSalt(16);
+              finalMember.passwordSalt = salt;
+              finalMember.passwordHash = hashPasswordSha256(password, salt);
+            }
+            delete finalMember.password;
+            delete finalMember.confirmPassword;
+
+            try {
+              const rec = readTenantRecordsFromDisk(memberTenant.id);
+              rec.members = (rec.members || []).map((m: any) => (m.id === finalMember.id ? finalMember : m));
+              writeTenantRecordsToDisk(rec, memberTenant.id);
+            } catch {}
+
+            return sendJson(res, 200, {
+              success: true,
+              role: 'member',
+              member: finalMember,
+              tenant: sanitizePublicTenant(memberTenant),
+              session: null,
+              message: `مرحباً بك يا ${finalMember.fullName}! جاري توجيهك إلى واجهة «${memberTenant.name}»...`,
             });
           }
 
-          // Provision salt & hash if member logged in with initial default password and update lastLoginDate
-          let finalMember = {
-            ...matchedMember,
-            lastLoginDate: new Date().toISOString(),
-          };
-          if (!finalMember.passwordHash || !finalMember.passwordSalt) {
-            const salt = generateSalt(16);
-            finalMember.passwordSalt = salt;
-            finalMember.passwordHash = hashPasswordSha256(password, salt);
-          }
-          delete finalMember.password;
-          delete finalMember.confirmPassword;
-
-          try {
-            const rec = readTenantRecordsFromDisk(memberTenant.id);
-            rec.members = (rec.members || []).map((m: any) => (m.id === finalMember.id ? finalMember : m));
-            writeTenantRecordsToDisk(rec, memberTenant.id);
-          } catch {}
-
-          return sendJson(res, 200, {
-            success: true,
-            role: 'member',
-            member: finalMember,
-            tenant: memberTenant,
-            session: null,
-            message: `مرحباً بك يا ${finalMember.fullName}! جاري توجيهك إلى واجهة «${memberTenant.name}»...`,
+          return sendJson(res, 401, {
+            success: false,
+            errorCode: 'WRONG_PASSWORD',
+            error: 'كلمة المرور غير صحيحة. يرجى التحقق وإعادة المحاولة.',
           });
         }
-
-        // Member identifier matched, or earlier owner/subAdmin identifier matched, but password was wrong
-        return sendJson(res, 401, {
-          success: false,
-          errorCode: 'WRONG_PASSWORD',
-          error: 'كلمة المرور غير صحيحة. يرجى التحقق وإعادة المحاولة.',
-        });
       }
 
       if (candidates.length > 0 || hadSubAdminIdentifierMatch) {
         return sendJson(res, 401, {
           success: false,
           errorCode: 'WRONG_PASSWORD',
-          error: 'كلمة المرور غير صحيحة. يرجى التحقق وإعادة المحاولة.',
+          error: 'كلمة المرور غير صحيحة. يرجى التأكد من كلمة المرور وإعادة المحاولة.',
         });
       }
 
       return sendJson(res, 404, {
         success: false,
-        errorCode: 'NOT_FOUND',
-        error: 'اسم المستخدم غير مسجل في النظام. يرجى التأكد من كتابة اسم المستخدم الصحيح (تسجيل الدخول متاح باسم المستخدم وكلمة المرور فقط).',
+        errorCode: 'USER_NOT_FOUND',
+        error: 'اسم المستخدم غير موجود أو غير مسجل في النظام. يرجى التأكد من كتابة اسم المستخدم الصحيح.',
       });
     }
 
@@ -1208,8 +1430,8 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
         return sendJson(res, 400, { success: false, error: 'يرجى إدخال رقم الهاتف أو الاسم للبحث.' });
       }
 
+      const tenants = await reconcileTenantsFromCloudFirestore(true);
       const owners = readOwnersFromDisk();
-      const tenants = readTenantsFromDisk();
       const isPhoneQuery = /\d{5,}/.test(identifier.replace(/[\s\-\(\)\.]/g, ''));
       const normUser = normalizeOwnerUsername(identifier);
 
@@ -1258,7 +1480,7 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
       });
     }
 
-    // POST /api/tenants/reset-password -> Reset owner password safely
+    // POST /api/tenants/reset-password -> Reset owner password safely & persist to Cloud Firestore
     if (method === 'POST' && pathname === '/api/tenants/reset-password') {
       const body = await readBody(req);
       const identifier = (body.identifier || body.phone || '').trim();
@@ -1273,10 +1495,11 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
         });
       }
 
+      const tenants = await reconcileTenantsFromCloudFirestore(true);
       const owners = readOwnersFromDisk();
-      const tenants = readTenantsFromDisk();
       const isPhoneQuery = /\d{5,}/.test(identifier.replace(/[\s\-\(\)\.]/g, ''));
       const normUser = normalizeOwnerUsername(identifier);
+      const nowIso = new Date().toISOString();
 
       let index = owners.findIndex((o) => {
         if (ownerId && o.id === ownerId) return true;
@@ -1287,92 +1510,113 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
         return false;
       });
 
-      if (index === -1 && identifier && !isPhoneQuery) {
-        const byAssocName = tenants.find(
-          (t) =>
-            (normUser && t.ownerUsername && normalizeOwnerUsername(t.ownerUsername) === normUser) ||
-            namesMatch(t.name, identifier) ||
-            namesMatch(t.nameFr, identifier)
+      let targetTenantIdx = -1;
+      if (index >= 0) {
+        targetTenantIdx = tenants.findIndex(
+          (t) => t.id === owners[index].tenantId || t.ownerId === owners[index].id
         );
-        if (byAssocName) {
-          index = owners.findIndex((o) => o.tenantId === byAssocName.id || o.id === byAssocName.ownerId);
-        }
       }
 
       if (index === -1 && (tenantId || ownerId || identifier)) {
-        const foundTenant = tenants.find(
+        targetTenantIdx = tenants.findIndex(
           (t) =>
             (tenantId && t.id === tenantId) ||
             (ownerId && t.ownerId === ownerId) ||
             (normUser && t.ownerUsername && normalizeOwnerUsername(t.ownerUsername) === normUser) ||
             (isPhoneQuery && phonesMatch(t.ownerPhone, identifier)) ||
-            (!isPhoneQuery && identifier && (namesMatch(t.ownerName, identifier) || namesMatch(t.name, identifier)))
+            (!isPhoneQuery && identifier && (namesMatch(t.ownerName, identifier) || namesMatch(t.name, identifier) || namesMatch(t.nameFr, identifier)))
         );
-        if (foundTenant) {
-          const salt = generateSalt(16);
-          const newOwner = {
-            id: foundTenant.ownerId || ownerId || `owner_${foundTenant.id}`,
-            ...(foundTenant.ownerUsername ? { username: foundTenant.ownerUsername } : {}),
-            fullName: foundTenant.ownerName || 'مدير الجمعية',
-            phone: foundTenant.ownerPhone || identifier,
-            passwordHash: hashPasswordSha256(newPassword, salt),
-            passwordSalt: salt,
-            hasCustomPassword: true,
-            tenantId: foundTenant.id,
-            status: 'active',
-            createdAt: foundTenant.createdAt || new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          };
-          owners.push(newOwner);
-          writeOwnersToDisk(owners);
-          return sendJson(res, 200, {
-            success: true,
-            message: 'تم تحديث كلمة المرور بنجاح وحفظها في قاعدة البيانات الرئيسية.',
-            tenantId: newOwner.tenantId,
-            ownerId: newOwner.id,
-          });
+        if (targetTenantIdx >= 0) {
+          index = owners.findIndex(
+            (o) => o.tenantId === tenants[targetTenantIdx].id || o.id === tenants[targetTenantIdx].ownerId
+          );
         }
       }
 
-      if (index === -1) {
+      if (index === -1 && targetTenantIdx === -1) {
         return sendJson(res, 404, { success: false, error: 'لم يتم العثور على الحساب لتحديث كلمة المرور.' });
       }
 
-      const salt = generateSalt(16);
-      const hash = hashPasswordSha256(newPassword, salt);
+      const { hash, salt } = hashPasswordScrypt(newPassword);
 
-      owners[index].passwordSalt = salt;
-      owners[index].passwordHash = hash;
-      owners[index].hasCustomPassword = true;
-      delete owners[index].plainPassword;
-      owners[index].recoveredAccount = false;
-      owners[index].updatedAt = new Date().toISOString();
+      let resolvedTenantId = tenantId;
+      let resolvedOwnerId = ownerId;
+
+      if (index >= 0) {
+        owners[index].passwordSalt = salt;
+        owners[index].passwordHash = hash;
+        owners[index].hasCustomPassword = true;
+        delete owners[index].plainPassword;
+        owners[index].recoveredAccount = false;
+        owners[index].updatedAt = nowIso;
+        resolvedTenantId = owners[index].tenantId;
+        resolvedOwnerId = owners[index].id;
+      } else if (targetTenantIdx >= 0) {
+        const foundTenant = tenants[targetTenantIdx];
+        const newOwner = {
+          id: foundTenant.ownerId || ownerId || `owner_${foundTenant.id}`,
+          ...(foundTenant.ownerUsername ? { username: foundTenant.ownerUsername } : {}),
+          fullName: foundTenant.ownerName || 'مدير الجمعية',
+          phone: foundTenant.ownerPhone || identifier,
+          passwordHash: hash,
+          passwordSalt: salt,
+          hasCustomPassword: true,
+          tenantId: foundTenant.id,
+          status: 'active',
+          createdAt: foundTenant.createdAt || nowIso,
+          updatedAt: nowIso,
+        };
+        owners.push(newOwner);
+        resolvedTenantId = newOwner.tenantId;
+        resolvedOwnerId = newOwner.id;
+      }
 
       writeOwnersToDisk(owners);
 
+      if (targetTenantIdx >= 0) {
+        const updatedTenant = {
+          ...tenants[targetTenantIdx],
+          passwordHash: hash,
+          passwordSalt: salt,
+          hasCustomPassword: true,
+          credentialsUpdatedAt: nowIso,
+          updatedAt: nowIso,
+        };
+        delete updatedTenant.plainPassword;
+        delete updatedTenant.ownerPasswordHash;
+        delete updatedTenant.ownerPasswordSalt;
+        tenants[targetTenantIdx] = updatedTenant;
+        writeTenantsToDisk(tenants, false);
+        await saveDocToFirebaseServer('tenants', updatedTenant.id, {
+          ...updatedTenant,
+          _updatedAt: nowIso,
+        }).catch(() => {});
+      }
+
       return sendJson(res, 200, {
         success: true,
-        message: 'تم تحديث كلمة المرور بنجاح. يمكنك الآن تسجيل الدخول بكلمة المرور الجديدة.',
-        tenantId: owners[index].tenantId,
-        ownerId: owners[index].id,
+        message: 'تم تحديث كلمة المرور بنجاح وحفظها في قاعدة البيانات السحابية. يمكنك الآن تسجيل الدخول بكلمة المرور الجديدة.',
+        tenantId: resolvedTenantId,
+        ownerId: resolvedOwnerId,
       });
     }
 
-    // GET /api/tenants/owners -> Get all owners
+    // GET /api/tenants/owners -> Get all owners (credentials stripped)
     if (method === 'GET' && pathname === '/api/tenants/owners') {
-      const owners = readOwnersFromDisk();
+      const owners = readOwnersFromDisk().map((o) => sanitizePublicOwner(o));
       return sendJson(res, 200, { success: true, owners });
     }
 
-    // 1. GET /api/tenants -> List all tenants (support publicOnly & force sync)
+    // 1. GET /api/tenants -> List all tenants (support publicOnly & force sync, credentials stripped)
     if (method === 'GET' && pathname === '/api/tenants') {
       const isPublicOnly = fullUrl.includes('public=true') || fullUrl.includes('publicOnly=true');
       const forceSync = fullUrl.includes('force=true') || fullUrl.includes('refresh=true');
       const allTenants = await reconcileTenantsFromCloudFirestore(forceSync);
       const deletedIds = loadDeletedTenantIdsFromDisk();
-      const tenants = isPublicOnly
+      const filteredTenants = isPublicOnly
         ? allTenants.filter((t) => (t.isTemplate || t.id === 'tenant_nour') && t.isVisibleOnPublicPortal !== false)
         : allTenants;
+      const tenants = filteredTenants.map((t) => sanitizePublicTenant(t));
       return sendJson(res, 200, {
         success: true,
         tenants,
@@ -1391,7 +1635,7 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
         });
       }
 
-      const existing = readTenantsFromDisk();
+      const existing = await reconcileTenantsFromCloudFirestore(true);
       const owners = readOwnersFromDisk();
       const isMaster = !!body.isTemplate || body.id === 'tenant_nour';
       const newTenantId = body.id || `tenant_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
@@ -1416,7 +1660,21 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
 
       removeDeletedTenantIdOnServer(newTenantId);
 
-      const rawTenant = {
+      // Compute strong scrypt password hash BEFORE persisting tenant so Cloud Firestore holds authoritative credentials
+      const plainPassword = String(body.plainPassword || body.password || '').trim();
+      let computedHash = '';
+      let computedSalt = '';
+      if (plainPassword) {
+        const hashed = hashPasswordScrypt(plainPassword);
+        computedHash = hashed.hash;
+        computedSalt = hashed.salt;
+      } else if (body.passwordHash && String(body.passwordHash).trim()) {
+        computedHash = String(body.passwordHash).trim();
+        computedSalt = String(body.passwordSalt || '').trim();
+      }
+
+      const nowIso = new Date().toISOString();
+      const rawTenant: Record<string, any> = {
         id: newTenantId,
         name: body.name.trim(),
         nameFr: body.nameFr?.trim() || `Association ${body.name.trim()}`,
@@ -1429,6 +1687,14 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
         legalDocument: body.legalDocument || undefined,
         ownerId: newOwnerId,
         ...(cleanOwnerUsername ? { ownerUsername: cleanOwnerUsername } : {}),
+        ...(computedHash
+          ? {
+              passwordHash: computedHash,
+              passwordSalt: computedSalt,
+              hasCustomPassword: true,
+              credentialsUpdatedAt: nowIso,
+            }
+          : {}),
         ownerName: body.ownerName.trim(),
         ownerPhone: body.ownerPhone.trim(),
         status: body.status || (isMaster ? 'active' : 'pending_subscription'),
@@ -1437,13 +1703,13 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
           {
             status: body.status || (isMaster ? 'active' : 'pending_subscription'),
             label: (body.status || (isMaster ? 'active' : 'pending_subscription')) === 'active' ? 'مفعّلة' : 'في انتظار الدفع',
-            timestamp: new Date().toISOString(),
+            timestamp: nowIso,
             actor: body.ownerName.trim(),
             note: 'تم إنشاء المنصة بحالة «في انتظار الدفع» وبانتظار تسديد مبلغ الاشتراك المطلوب وتأكيد التفعيل من الإدارة العامة.',
           },
         ],
-        createdAt: body.createdAt || new Date().toISOString(),
-        updatedAt: body.updatedAt || new Date().toISOString(),
+        createdAt: body.createdAt || nowIso,
+        updatedAt: body.updatedAt || nowIso,
         tier: body.tier || 'pro',
         monthlyFee: Number(body.monthlyFee) || 299,
         isTemplate: isMaster,
@@ -1469,7 +1735,7 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
       writeTenantsToDisk(existing, false);
       await saveDocToFirebaseServer('tenants', newTenant.id, {
         ...newTenant,
-        _updatedAt: newTenant.updatedAt || new Date().toISOString(),
+        _updatedAt: newTenant.updatedAt || nowIso,
       }).catch(() => {});
 
       // Initialize campaigns database and clone active contribution types from master template
@@ -1493,19 +1759,12 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
         console.warn(`[TenantsAPI] Could not initialize polls for ${newTenantId}:`, pollsErr);
       }
 
-      // Initialize settings database with the authentic association name provided by the user
+      // Initialize settings database with the authentic association name & ownerUsername (never storing plaintext password)
       try {
         initializeTenantSettings(newTenant);
       } catch (settingsErr) {
         console.warn(`[TenantsAPI] Could not initialize settings for ${newTenantId}:`, settingsErr);
       }
-
-      // Persist owner to owners_database.json with encrypted salted SHA-256 hash (no cleartext password persisted)
-      const plainPassword = (body.plainPassword || body.password || '').trim();
-      const salt = body.passwordSalt || generateSalt(16);
-      const computedHash = plainPassword
-        ? hashPasswordSha256(plainPassword, salt)
-        : body.passwordHash || hashPasswordSha256('admin123', salt);
 
       const ownerRecord = {
         id: newOwnerId,
@@ -1513,11 +1772,12 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
         fullName: body.ownerName.trim(),
         phone: body.ownerPhone.trim(),
         passwordHash: computedHash,
-        passwordSalt: salt,
-        hasCustomPassword: Boolean(plainPassword || body.hasCustomPassword || cleanOwnerUsername),
+        passwordSalt: computedSalt,
+        hasCustomPassword: Boolean(computedHash || body.hasCustomPassword || cleanOwnerUsername),
         tenantId: newTenantId,
         status: 'active',
         createdAt: newTenant.createdAt,
+        updatedAt: nowIso,
       };
 
       const existingOwnerIdx = owners.findIndex(
@@ -1537,8 +1797,8 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
 
       return sendJson(res, 201, {
         success: true,
-        tenant: newTenant,
-        owner: ownerRecord,
+        tenant: sanitizePublicTenant(newTenant),
+        owner: sanitizePublicOwner(ownerRecord),
         message: 'تم إنشاء منصة الجمعية وحفظها في قاعدة البيانات السحابية بنجاح.',
       });
     }
@@ -1596,7 +1856,10 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
             const preferIncoming = incomingTime > existingTime;
             mergedTenantsMap.set(ct.id, {
               ...existing,
-              ...(preferIncoming ? ct : {}),
+              ...(preferIncoming ? sanitizePublicTenant(ct) : {}),
+              // Never allow client sync payload to erase or overwrite authoritative server password hashes
+              ...(existing.passwordHash ? { passwordHash: existing.passwordHash, passwordSalt: existing.passwordSalt } : {}),
+              ...(existing.credentialsUpdatedAt ? { credentialsUpdatedAt: existing.credentialsUpdatedAt } : {}),
               status: preferIncoming ? (ct.status || existing.status) : (existing.status || ct.status),
               logoUrl: preferIncoming ? (ct.logoUrl || existing.logoUrl) : (existing.logoUrl || ct.logoUrl),
               bannerImageUrl: preferIncoming ? (ct.bannerImageUrl || existing.bannerImageUrl) : (existing.bannerImageUrl || ct.bannerImageUrl),
@@ -1608,7 +1871,7 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
         const finalTenants = Array.from(mergedTenantsMap.values());
         writeTenantsToDisk(finalTenants);
 
-        // Also merge owners if provided in body.owners
+        // Also merge owners if provided in body.owners (preserving server credentials when already set)
         if (Array.isArray(body.owners)) {
           const mergedOwnersMap = new Map<string, any>();
           for (const doItem of diskOwners) {
@@ -1619,33 +1882,27 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
           for (const co of body.owners) {
             if (!co || !co.id || explicitlyDeletedTenantIds.has(co.tenantId)) continue;
             const existingO = mergedOwnersMap.get(co.id);
+            const linkedT = mergedTenantsMap.get(co.tenantId);
             if (!existingO) {
-              const salt = co.passwordSalt || generateSalt(16);
-              const plainPass = co.plainPassword || co.password;
+              const plainPass = String(co.plainPassword || co.password || '').trim();
+              const hashed = plainPass ? hashPasswordScrypt(plainPass) : null;
               const newItem: any = {
                 ...co,
-                ...(co.username ? { username: co.username } : {}),
-                hasCustomPassword: Boolean(co.hasCustomPassword || plainPass || co.username),
-                passwordSalt: salt,
-                passwordHash: plainPass ? hashPasswordSha256(plainPass, salt) : co.passwordHash,
+                ...(linkedT?.ownerUsername ? { username: linkedT.ownerUsername } : co.username ? { username: co.username } : {}),
+                hasCustomPassword: Boolean(co.hasCustomPassword || hashed || co.username),
+                passwordSalt: hashed ? hashed.salt : linkedT?.passwordSalt || co.passwordSalt || '',
+                passwordHash: hashed ? hashed.hash : linkedT?.passwordHash || co.passwordHash || '',
               };
               delete newItem.plainPassword;
               delete newItem.password;
               mergedOwnersMap.set(co.id, newItem);
             } else {
-              const plainPass = co.plainPassword || co.password;
-              const salt = co.passwordSalt || existingO.passwordSalt || generateSalt(16);
               const mergedItem: any = {
                 ...existingO,
-                ...co,
-                username: co.username || existingO.username,
-                hasCustomPassword: Boolean(
-                  co.hasCustomPassword ?? existingO.hasCustomPassword ?? (plainPass || co.username || existingO.username)
-                ),
-                passwordSalt: salt,
-                passwordHash: plainPass
-                  ? hashPasswordSha256(plainPass, salt)
-                  : existingO.passwordHash || co.passwordHash,
+                ...sanitizePublicOwner(co),
+                username: linkedT?.ownerUsername || existingO.username || co.username,
+                passwordSalt: linkedT?.passwordSalt || existingO.passwordSalt || '',
+                passwordHash: linkedT?.passwordHash || existingO.passwordHash || '',
               };
               delete mergedItem.plainPassword;
               delete mergedItem.password;
@@ -1654,13 +1911,12 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
           }
           writeOwnersToDisk(Array.from(mergedOwnersMap.values()));
         } else {
-          // Ensure owners are reconciled with any newly synced tenants
           readOwnersFromDisk();
         }
 
         return sendJson(res, 200, {
           success: true,
-          tenants: finalTenants,
+          tenants: finalTenants.map((t) => sanitizePublicTenant(t)),
           deletedTenantIds: Array.from(explicitlyDeletedTenantIds),
           count: finalTenants.length,
           message: 'تمت مزامنة جميع الجمعيات مع الخادم بنجاح.',
@@ -1668,27 +1924,74 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
       }
     }
 
-    // 3. PUT /api/tenants/:id -> Update tenant (and synchronize owners_database.json & settings_database)
+    // 3. PUT /api/tenants/:id -> Update tenant (reconciled from Cloud Firestore, never exposing or wiping hashes)
     if (method === 'PUT' && pathname.startsWith('/api/tenants/') && pathname !== '/api/tenants/sync') {
       const id = decodeURIComponent(pathname.replace('/api/tenants/', '').split('?')[0]);
       const body = await readBody(req);
-      const tenants = readTenantsFromDisk();
+      const tenants = await reconcileTenantsFromCloudFirestore(true);
       const index = tenants.findIndex((t) => t.id === id);
 
       if (index === -1) {
         return sendJson(res, 404, { success: false, error: 'الجمعية المطلوبة غير موجودة.' });
       }
 
-      const updatedTenant = sanitizeTenantMedia({
-        ...tenants[index],
-        ...body,
-        updatedAt: new Date().toISOString(),
-      });
-      tenants[index] = updatedTenant;
-      writeTenantsToDisk(tenants);
+      const existingTenant = tenants[index];
+      const nowIso = new Date().toISOString();
 
-      // Synchronize owner details in owners_database.json if ownerName or ownerPhone changed
-      if (body.ownerName !== undefined || body.ownerPhone !== undefined || body.plainPassword !== undefined) {
+      // Strip any raw credential fields from body so accidental overwrite is impossible
+      const safeBody = sanitizePublicTenant(body);
+      const newPlainPassword = String(body.plainPassword || body.password || '').trim();
+      const cleanIncomingUsername =
+        typeof body.ownerUsername === 'string' && body.ownerUsername.trim()
+          ? body.ownerUsername.trim()
+          : undefined;
+
+      if (cleanIncomingUsername) {
+        const ownersForCheck = readOwnersFromDisk();
+        if (isOwnerUsernameTakenServer(cleanIncomingUsername, ownersForCheck, tenants, id)) {
+          return sendJson(res, 409, {
+            success: false,
+            error: 'اسم المستخدم هذا مستخدم بالفعل لدى جمعية أخرى. يرجى اختيار اسم مستخدم مختلف.',
+          });
+        }
+      }
+
+      let nextPasswordHash = existingTenant.passwordHash;
+      let nextPasswordSalt = existingTenant.passwordSalt;
+      let credentialsChanged = false;
+
+      if (newPlainPassword) {
+        const hashed = hashPasswordScrypt(newPlainPassword);
+        nextPasswordHash = hashed.hash;
+        nextPasswordSalt = hashed.salt;
+        credentialsChanged = true;
+      }
+
+      const updatedTenant: Record<string, any> = sanitizeTenantMedia({
+        ...existingTenant,
+        ...safeBody,
+        ...(cleanIncomingUsername ? { ownerUsername: cleanIncomingUsername } : {}),
+        ...(nextPasswordHash ? { passwordHash: nextPasswordHash, passwordSalt: nextPasswordSalt, hasCustomPassword: true } : {}),
+        ...(credentialsChanged || cleanIncomingUsername ? { credentialsUpdatedAt: nowIso } : {}),
+        updatedAt: nowIso,
+      });
+      delete updatedTenant.plainPassword;
+      delete updatedTenant.password;
+
+      tenants[index] = updatedTenant;
+      writeTenantsToDisk(tenants, false);
+      await saveDocToFirebaseServer('tenants', id, {
+        ...updatedTenant,
+        _updatedAt: nowIso,
+      }).catch(() => {});
+
+      // Synchronize owner details in owners_database.json
+      if (
+        body.ownerName !== undefined ||
+        body.ownerPhone !== undefined ||
+        cleanIncomingUsername !== undefined ||
+        credentialsChanged
+      ) {
         try {
           const owners = readOwnersFromDisk();
           const ownerIdx = owners.findIndex(
@@ -1697,13 +2000,14 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
           if (ownerIdx !== -1) {
             if (body.ownerName) owners[ownerIdx].fullName = body.ownerName.trim();
             if (body.ownerPhone) owners[ownerIdx].phone = body.ownerPhone.trim();
-            if (body.plainPassword) {
-              const salt = owners[ownerIdx].passwordSalt || generateSalt(16);
-              owners[ownerIdx].passwordSalt = salt;
-              owners[ownerIdx].passwordHash = hashPasswordSha256(body.plainPassword.trim(), salt);
-              owners[ownerIdx].plainPassword = body.plainPassword.trim();
+            if (cleanIncomingUsername) owners[ownerIdx].username = cleanIncomingUsername;
+            if (credentialsChanged && nextPasswordHash) {
+              owners[ownerIdx].passwordSalt = nextPasswordSalt;
+              owners[ownerIdx].passwordHash = nextPasswordHash;
+              owners[ownerIdx].hasCustomPassword = true;
+              delete owners[ownerIdx].plainPassword;
             }
-            owners[ownerIdx].updatedAt = new Date().toISOString();
+            owners[ownerIdx].updatedAt = nowIso;
             writeOwnersToDisk(owners);
           }
         } catch (ownerSyncErr) {
@@ -1711,7 +2015,7 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
         }
       }
 
-      // Synchronize tenant settings database so changes from Super Admin reflect immediately on the association store
+      // Synchronize tenant settings database so changes reflect immediately on the association store
       try {
         const settingsDb = loadSettingsDatabase(id);
         const nextSettings = {
@@ -1736,11 +2040,12 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
           ...(body.bankName !== undefined && String(body.bankName).trim() ? { bankName: String(body.bankName).trim() } : {}),
           ...(body.licenseNumber !== undefined ? { licenseNumber: body.licenseNumber } : {}),
           ...(body.enablePublicDonations !== undefined ? { enablePublicDonations: body.enablePublicDonations } : {}),
+          ...(cleanIncomingUsername ? { adminUsername: cleanIncomingUsername } : {}),
         };
         saveSettingsDatabase(
           {
             settings: nextSettings,
-            lastUpdated: new Date().toISOString(),
+            lastUpdated: nowIso,
           },
           id
         );
@@ -1750,7 +2055,7 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
 
       return sendJson(res, 200, {
         success: true,
-        tenant: updatedTenant,
+        tenant: sanitizePublicTenant(updatedTenant),
         message: 'تم تحديث بيانات الجمعية وحفظها بشكل دائم في قاعدة البيانات الرئيسية.',
       });
     }
@@ -1810,7 +2115,7 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
 
       return sendJson(res, 200, {
         success: true,
-        tenant: tenants[index],
+        tenant: sanitizePublicTenant(tenants[index]),
         newStatus: tenants[index].status,
         message: tenants[index].status === 'active' ? 'تم تفعيل منصة الجمعية بنجاح.' : 'تم تعطيل منصة الجمعية بنجاح.',
       });

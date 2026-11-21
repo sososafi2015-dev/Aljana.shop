@@ -568,6 +568,7 @@ export interface AssociationSettings {
   licenseNumber: string;
   foundingYear: string;
   adminPin: string; // default e.g. "2025" or "1234"
+  adminUsername?: string; // اسم المستخدم الخاص بحساب الجمعية (ownerUsername)
   currency: string; // "د.م" or "DH"
   currencyFr: string;
   currencyEn: string;

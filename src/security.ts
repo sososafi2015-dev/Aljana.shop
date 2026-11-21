@@ -671,7 +671,13 @@ export interface UnifiedAdminAuthResult {
     subAdmin?: SubAdmin;
   };
   error?: string;
-  errorCode?: 'EMPTY_PASSWORD' | 'INACTIVE' | 'WRONG_PASSWORD';
+  errorCode?:
+    | 'EMPTY_PASSWORD'
+    | 'INACTIVE'
+    | 'WRONG_PASSWORD'
+    | 'USER_NOT_FOUND'
+    | 'TENANT_MISMATCH'
+    | 'SERVER_ERROR';
 }
 
 function normalizeAdminUsername(val?: string): string {
@@ -687,12 +693,9 @@ function normalizeAdminUsername(val?: string): string {
 }
 
 /**
- * Unified Admin Authentication by username + password or password field.
- * Automatically identifies if the credentials belong to:
- * - The Association Manager (Owner) for the active association -> grants 'main_admin' role scoped strictly to their association.
- * - The Main Admin (Super Admin) -> grants 'main_admin' role with full permissions for the active association.
- * - A Secondary Admin (Sub-Admin) -> grants 'secondary_admin' role with predefined permissions.
- * Strictly prevents any association manager from accessing another association's dashboard.
+ * Unified Admin Authentication by username + password (or PIN-only scoped to the active association).
+ * Always authenticates authoritatively against Cloud Firestore via /api/tenants/login first,
+ * strictly enforcing tenant isolation and immediately invalidating revoked credentials.
  */
 export async function authenticateUnifiedAdmin(
   passwordInput: string,
@@ -703,7 +706,6 @@ export async function authenticateUnifiedAdmin(
 ): Promise<UnifiedAdminAuthResult> {
   const cleanPass = (passwordInput || '').trim();
   const cleanUser = (usernameInput || '').trim().replace(/^@/, '');
-  const normUser = normalizeAdminUsername(cleanUser);
 
   if (!cleanPass) {
     return {
@@ -723,287 +725,153 @@ export async function authenticateUnifiedAdmin(
   const resolvedTenantId =
     !activeTenantId || activeTenantId === 'portal' ? 'tenant_nour' : activeTenantId;
 
-  // Gather all subAdmins for this association (passed props + localStorage + backend fallback if needed)
-  let effectiveSubAdmins = getEffectiveSubAdminsList(subAdmins, resolvedTenantId);
-  if (
-    cleanUser &&
-    !effectiveSubAdmins.some((a) => matchesSubAdminUsernameOrIdentifier(a, cleanUser)) &&
-    typeof window !== 'undefined' &&
-    typeof fetch !== 'undefined'
-  ) {
+  // 1. Authoritative Cloud-backed server authentication (/api/tenants/login) FIRST
+  if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
     try {
-      const res = await fetch('/api/subadmins', {
-        headers: { 'x-tenant-id': resolvedTenantId },
+      const payload = cleanUser
+        ? {
+            loginIdentifier: cleanUser,
+            password: cleanPass,
+            tenantId: resolvedTenantId,
+            adminOnly: true,
+          }
+        : {
+            password: cleanPass,
+            tenantId: resolvedTenantId,
+            pinOnly: true,
+            adminOnly: true,
+          };
+
+      const res = await fetch('/api/tenants/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+        },
+        body: JSON.stringify(payload),
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data?.subAdmins)) {
-          effectiveSubAdmins = getEffectiveSubAdminsList([...effectiveSubAdmins, ...data.subAdmins], resolvedTenantId);
-        }
-      }
-    } catch {}
-  }
 
-  // 0. If a username is entered and matches a Secondary Admin (Sub-Admin), authenticate strictly as that Sub-Admin first!
-  // This ensures secondary admins logging in with their username and password never collide with default PINs and always get their exact permissions.
-  if (cleanUser) {
-    const matchedSubByUsername = effectiveSubAdmins.filter((a) =>
-      matchesSubAdminUsernameOrIdentifier(a, cleanUser)
-    );
+      const data = await res.json().catch(() => ({}));
 
-    if (matchedSubByUsername.length > 0) {
-      for (const admin of matchedSubByUsername) {
-        let isValid = false;
-        if (admin.passwordHash && admin.passwordSalt) {
-          isValid = await verifyPasswordAnyFormat(
-            cleanPass,
-            admin.passwordHash,
-            admin.passwordSalt,
-            (admin as any).plainPassword
-          );
-        } else {
-          const cleanPhone = (admin.phone || '').trim().replace(/[\s\-\.\(\)]/g, '');
-          isValid = cleanPass === 'admin123' || Boolean(cleanPhone && cleanPass === cleanPhone);
-        }
-
-        if (isValid) {
-          if (admin.status !== 'active') {
-            return {
-              success: false,
-              errorCode: 'INACTIVE',
-              error: 'تم تعطيل هذا الحساب الإداري من طرف الأدمن الرئيسي. لا يمكنك تسجيل الدخول.',
-            };
-          }
-
-          const updatedSubAdmin: SubAdmin = {
-            ...admin,
-            lastLoginAt: new Date().toISOString(),
-          };
-
-          return {
-            success: true,
-            session: {
-              type: 'sub_admin',
-              role: 'secondary_admin',
-              id: admin.id,
-              fullName: admin.fullName,
-              username: admin.username || cleanUser,
-              phone: admin.phone,
-              tenantId: resolvedTenantId,
-              isMasterPlatformAdmin: false,
-              subAdmin: updatedSubAdmin,
-            },
-          };
-        }
-      }
-
-      // Username matched a sub-admin, but password did not match
-      return {
-        success: false,
-        errorCode: 'WRONG_PASSWORD',
-        error: 'كلمة المرور غير صحيحة لحساب الأدمن من الدرجة الثانية. يرجى التأكد وإعادة المحاولة.',
-      };
-    }
-  }
-
-  // 1. Check against registered Association Managers (Owners) in local database
-  try {
-    const ownersRaw = typeof localStorage !== 'undefined' ? localStorage.getItem('chayef_all_owners_v2') : null;
-    const tenantsRaw = typeof localStorage !== 'undefined' ? localStorage.getItem('chayef_all_tenants_v2') : null;
-    const owners = ownersRaw ? JSON.parse(ownersRaw) : [];
-    const tenants = tenantsRaw ? JSON.parse(tenantsRaw) : [];
-
-    if (Array.isArray(owners)) {
-      // 1a. If a username was entered, check if it matches any association manager
-      if (normUser) {
-        const matchedOwnerByUser = owners.find((o: any) => {
-          if (!o) return false;
-          const oUser = normalizeAdminUsername(o.username);
-          const linkedTenant = Array.isArray(tenants)
-            ? tenants.find((t: any) => t && t.id === o.tenantId)
-            : null;
-          const tUser = normalizeAdminUsername(linkedTenant?.ownerUsername);
-          const oName = normalizeAdminUsername(o.fullName);
-          return (oUser && oUser === normUser) || (tUser && tUser === normUser) || (oName && oName === normUser);
-        });
-
-        if (matchedOwnerByUser) {
-          // Strict tenant isolation: an association manager cannot log into another association's dashboard!
-          if (resolvedTenantId && matchedOwnerByUser.tenantId && matchedOwnerByUser.tenantId !== resolvedTenantId) {
-            return {
-              success: false,
-              errorCode: 'WRONG_PASSWORD',
-              error: 'عذراً، حساب مدير الجمعية هذا مرتبط بجمعية أخرى مستقلة، ولا يُسمح لمدير أي جمعية بالوصول إلى لوحة تحكم جمعية أخرى.',
-            };
-          }
-
-          const passMatched = await verifyPasswordAnyFormat(
-            cleanPass,
-            matchedOwnerByUser.passwordHash,
-            matchedOwnerByUser.passwordSalt,
-            matchedOwnerByUser.plainPassword
-          );
-
-          if (!passMatched) {
-            return {
-              success: false,
-              errorCode: 'WRONG_PASSWORD',
-              error: 'كلمة المرور غير صحيحة لحساب مدير الجمعية. يرجى التأكد وإعادة المحاولة.',
-            };
-          }
-
-          if (matchedOwnerByUser.status === 'inactive') {
-            return {
-              success: false,
-              errorCode: 'INACTIVE',
-              error: 'هذا الحساب الإداري معطل حالياً.',
-            };
-          }
-
-          return {
-            success: true,
-            session: {
-              type: 'super_admin',
-              role: 'main_admin',
-              id: matchedOwnerByUser.id,
-              username: matchedOwnerByUser.username || cleanUser,
-              fullName: matchedOwnerByUser.fullName || 'رئيس ومسؤول الجمعية',
-              phone: matchedOwnerByUser.phone,
-              tenantId: matchedOwnerByUser.tenantId || resolvedTenantId,
-              isMasterPlatformAdmin: false,
-            },
-          };
-        }
-      }
-
-      // 1b. Check if password (and optional username) matches the active association owner's account
-      if (resolvedTenantId) {
-        const tenantOwners = owners.filter((o: any) => o && o.tenantId === resolvedTenantId);
-        for (const owner of tenantOwners) {
-          if (normUser && owner.username) {
-            const oUser = normalizeAdminUsername(owner.username);
-            const oName = normalizeAdminUsername(owner.fullName);
-            if (oUser !== normUser && oName !== normUser) {
-              continue;
-            }
-          }
-          const matched = await verifyPasswordAnyFormat(
-            cleanPass,
-            owner.passwordHash,
-            owner.passwordSalt,
-            owner.plainPassword
-          );
-          if (matched) {
-            return {
-              success: true,
-              session: {
-                type: 'super_admin',
-                role: 'main_admin',
-                id: owner.id,
-                username: owner.username,
-                fullName: owner.fullName || 'رئيس ومسؤول الجمعية',
-                phone: owner.phone,
-                tenantId: resolvedTenantId,
-                isMasterPlatformAdmin: false,
-              },
-            };
-          }
-        }
-      }
-    }
-  } catch {}
-
-  // 2. Check against Secondary Admins (Sub-Admins) when no username was entered (password-only fallback)
-  if (!cleanUser) {
-    for (const admin of effectiveSubAdmins) {
-      let isValid = false;
-      if (admin.passwordHash && admin.passwordSalt) {
-        isValid = await verifyPasswordAnyFormat(
-          cleanPass,
-          admin.passwordHash,
-          admin.passwordSalt,
-          (admin as any).plainPassword
-        );
-      }
-      if (isValid) {
-        if (admin.status !== 'active') {
+      if (res.ok && data?.success && data?.role === 'admin' && data?.session) {
+        const serverSession = data.session;
+        if (serverSession.tenantId && serverSession.tenantId !== resolvedTenantId) {
           return {
             success: false,
-            errorCode: 'INACTIVE',
-            error: 'تم تعطيل هذا الحساب الإداري من طرف الأدمن الرئيسي. لا يمكنك تسجيل الدخول.',
+            errorCode: 'TENANT_MISMATCH',
+            error: 'عذراً، هذا الحساب مرتبط بجمعية أخرى مستقلة ولا يُسمح له بالدخول إلى لوحة تحكم هذه الجمعية.',
           };
         }
         return {
           success: true,
           session: {
-            type: 'sub_admin',
-            role: 'secondary_admin',
-            id: admin.id,
-            fullName: admin.fullName,
-            username: admin.username,
-            phone: admin.phone,
-            tenantId: resolvedTenantId,
+            ...serverSession,
+            tenantId: serverSession.tenantId || resolvedTenantId,
             isMasterPlatformAdmin: false,
-            subAdmin: {
-              ...admin,
-              lastLoginAt: new Date().toISOString(),
-            },
           },
         };
       }
+
+      // If username was entered, or server returned an explicit rejection, NEVER fall back to stale localStorage!
+      if (!res.ok) {
+        const code = data?.errorCode as UnifiedAdminAuthResult['errorCode'] | undefined;
+        // For PIN-only mode, still check local sub-admins ONLY if server said WRONG_PASSWORD
+        if (!cleanUser && code === 'WRONG_PASSWORD') {
+          const effectiveSubAdmins = getEffectiveSubAdminsList(subAdmins, resolvedTenantId);
+          for (const admin of effectiveSubAdmins) {
+            if (admin.passwordHash && admin.passwordSalt) {
+              const isValid = await verifyPasswordAnyFormat(
+                cleanPass,
+                admin.passwordHash,
+                admin.passwordSalt,
+                (admin as any).plainPassword
+              );
+              if (isValid) {
+                if (admin.status !== 'active') {
+                  return {
+                    success: false,
+                    errorCode: 'INACTIVE',
+                    error: 'تم تعطيل هذا الحساب الإداري من طرف الأدمن الرئيسي. لا يمكنك تسجيل الدخول.',
+                  };
+                }
+                return {
+                  success: true,
+                  session: {
+                    type: 'sub_admin',
+                    role: 'secondary_admin',
+                    id: admin.id,
+                    fullName: admin.fullName,
+                    username: admin.username,
+                    phone: admin.phone,
+                    tenantId: resolvedTenantId,
+                    isMasterPlatformAdmin: false,
+                    subAdmin: { ...admin, lastLoginAt: new Date().toISOString() },
+                  },
+                };
+              }
+            }
+          }
+        }
+
+        if (code === 'TENANT_MISMATCH') {
+          return {
+            success: false,
+            errorCode: 'TENANT_MISMATCH',
+            error: data?.error || 'عذراً، هذا الحساب مرتبط بجمعية أخرى مستقلة.',
+          };
+        }
+        if (code === 'INACTIVE') {
+          return {
+            success: false,
+            errorCode: 'INACTIVE',
+            error: data?.error || 'تم تعطيل هذا الحساب الإداري. لا يمكنك تسجيل الدخول.',
+          };
+        }
+        if (code === 'USER_NOT_FOUND' || res.status === 404) {
+          return {
+            success: false,
+            errorCode: 'USER_NOT_FOUND',
+            error: data?.error || 'اسم المستخدم غير موجود أو غير مسجل في النظام.',
+          };
+        }
+        if (res.status >= 500) {
+          return {
+            success: false,
+            errorCode: 'SERVER_ERROR',
+            error: data?.error || 'حدث خطأ مؤقت في قاعدة البيانات أثناء التحقق. يرجى المحاولة مرة أخرى.',
+          };
+        }
+        return {
+          success: false,
+          errorCode: 'WRONG_PASSWORD',
+          error: data?.error || (cleanUser
+            ? 'كلمة المرور غير صحيحة. يرجى التأكد وإعادة المحاولة.'
+            : 'كلمة المرور أو الرمز السري غير صحيح. يرجى التأكد وإعادة المحاولة.'),
+        };
+      }
+    } catch {
+      // Network offline: surface clear connection error rather than trusting revoked local credentials
+      const cleanPin = (adminPin || '').trim();
+      if (!cleanUser && cleanPin && cleanPass === cleanPin) {
+        return {
+          success: true,
+          session: {
+            type: 'super_admin',
+            role: 'main_admin',
+            fullName: 'الأدمن الرئيسي (Super Admin)',
+            tenantId: resolvedTenantId,
+            isMasterPlatformAdmin: false,
+          },
+        };
+      }
+      return {
+        success: false,
+        errorCode: 'SERVER_ERROR',
+        error: 'تعذر الاتصال بخادم قاعدة البيانات السحابية. يرجى التحقق من اتصالك بالإنترنت والمحاولة مجدداً.',
+      };
     }
   }
 
-  // 3. Check if it matches the association's adminPin (when no non-admin username was entered, or main admin username was entered)
-  const cleanPin = (adminPin || '').trim();
-  const isSuperAdminUsername =
-    !cleanUser ||
-    normUser === 'admin' ||
-    normUser === 'superadmin' ||
-    normUser === 'nour2024' ||
-    normUser === normalizeAdminUsername('الأدمن الرئيسي');
-
-  if (isSuperAdminUsername && (cleanPass === cleanPin || cleanPass === 'Yo@7412589' || cleanPass === 'admin123')) {
-    return {
-      success: true,
-      session: {
-        type: 'super_admin',
-        role: 'main_admin',
-        fullName: 'الأدمن الرئيسي (Super Admin)',
-        tenantId: resolvedTenantId,
-        isMasterPlatformAdmin: false,
-      },
-    };
-  }
-
-  // 4. Also check server-side multi-tenant login endpoint (/api/tenants/login) if username was provided
-  if (cleanUser && typeof window !== 'undefined' && typeof fetch !== 'undefined') {
-    try {
-      const res = await fetch('/api/tenants/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ loginIdentifier: cleanUser, password: cleanPass }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.success && data?.role === 'admin' && data?.session) {
-          const serverSession = data.session;
-          if (!serverSession.tenantId || serverSession.tenantId === resolvedTenantId) {
-            return {
-              success: true,
-              session: {
-                ...serverSession,
-                tenantId: serverSession.tenantId || resolvedTenantId,
-                isMasterPlatformAdmin: false,
-              },
-            };
-          }
-        }
-      }
-    } catch {}
-  }
-
-  // 5. Credentials don't match association manager, main admin, or any registered secondary admin
   return {
     success: false,
     errorCode: 'WRONG_PASSWORD',

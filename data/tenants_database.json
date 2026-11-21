@@ -22,9 +22,9 @@
     "enablePublicDonations": false,
     "tagline": "الشفافية والتكافل والتنمية المجتمعية المستدامة",
     "stats": {
-      "membersCount": 14,
       "activitiesCount": 8,
       "totalBalance": 46250,
+      "membersCount": 14,
       "campaignsCount": 3
     },
     "subscriptionStartedAt": "2026-01-01T00:00:00.000Z",
@@ -40,7 +40,12 @@
     "phone": "0661000001",
     "rib": "011 780 0000 123456789012 45",
     "ribBank": "011 780 0000 123456789012 45",
-    "bankName": "التجاري وفا بنك / Attijariwafa Bank"
+    "bankName": "التجاري وفا بنك / Attijariwafa Bank",
+    "passwordSalt": "nour_salt_123",
+    "credentialsUpdatedAt": "2026-11-21T21:55:42.576Z",
+    "_updatedAt": "2026-11-21T21:55:42.576Z",
+    "hasCustomPassword": true,
+    "passwordHash": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918"
   },
   {
     "id": "tenant_amal",
@@ -65,13 +70,23 @@
     "enablePublicDonations": true,
     "tagline": "الشفافية والتكافل والتنمية المجتمعية المستدامة وحملات تمويل المشاريع الخيرية",
     "stats": {
-      "membersCount": 8,
+      "campaignsCount": 2,
       "activitiesCount": 4,
-      "totalBalance": 24300,
-      "campaignsCount": 2
+      "membersCount": 8,
+      "totalBalance": 24300
     },
-    "updatedAt": "2026-10-22T10:10:26.823Z",
-    "ownerUsername": "amal2024"
+    "updatedAt": "2026-10-25T19:07:41.240Z",
+    "ownerUsername": "amal2024",
+    "whatsapp": "0662000002",
+    "phone": "0662000002",
+    "rib": "011 780 0000 123456789012 45",
+    "ribBank": "011 780 0000 123456789012 45",
+    "bankName": "التجاري وفا بنك / Attijariwafa Bank",
+    "passwordHash": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918",
+    "_updatedAt": "2026-11-21T21:55:42.576Z",
+    "hasCustomPassword": true,
+    "credentialsUpdatedAt": "2026-11-21T21:55:42.576Z",
+    "passwordSalt": "amal_salt_123"
   },
   {
     "id": "tenant_al_istithmar",
@@ -96,10 +111,10 @@
     "enablePublicDonations": true,
     "tagline": "دعم المبادرات التنموية والاستثمار الاجتماعي المستدام",
     "stats": {
-      "membersCount": 1,
-      "activitiesCount": 8,
       "totalBalance": 0,
-      "campaignsCount": 3
+      "activitiesCount": 8,
+      "campaignsCount": 3,
+      "membersCount": 1
     },
     "recoveredAccount": true,
     "updatedAt": "2026-11-13T18:26:33.359Z",
@@ -108,7 +123,12 @@
     "phone": "0661000202",
     "rib": "011 780 0000 123456789012 45",
     "ribBank": "011 780 0000 123456789012 45",
-    "bankName": "التجاري وفا بنك / Attijariwafa Bank"
+    "bankName": "التجاري وفا بنك / Attijariwafa Bank",
+    "passwordSalt": "b65ec0a42e35cda3",
+    "credentialsUpdatedAt": "2026-11-21T21:55:42.576Z",
+    "_updatedAt": "2026-11-21T21:55:42.576Z",
+    "hasCustomPassword": true,
+    "passwordHash": "39684056f205d016292b3c4dd43ad53749cceb4ea9cbd9513a9131db655d2521"
   },
   {
     "id": "tenant_1789045972557_t35i",
@@ -131,10 +151,10 @@
     "isVisibleOnPublicPortal": false,
     "tagline": "تأهيل دور الأيتام، فك العزلة عن القرى الجبلية، والمبادرات الصحية والتعليمية",
     "stats": {
-      "membersCount": 12,
+      "campaignsCount": 3,
       "activitiesCount": 6,
       "totalBalance": 32000,
-      "campaignsCount": 3
+      "membersCount": 12
     },
     "updatedAt": "2026-11-13T18:26:51.893Z",
     "ownerUsername": "atlas2024",
@@ -143,7 +163,12 @@
     "rib": "011 780 0000 123456789012 45",
     "ribBank": "011 780 0000 123456789012 45",
     "bankName": "التجاري وفا بنك / Attijariwafa Bank",
-    "enablePublicDonations": true
+    "enablePublicDonations": true,
+    "passwordSalt": "ae58a5949bad49a7",
+    "_updatedAt": "2026-11-21T21:55:42.576Z",
+    "credentialsUpdatedAt": "2026-11-21T21:55:42.576Z",
+    "passwordHash": "acf36f6683237b90b6e124d7b39308f79056baaec70dcacca5670ee80521e24a",
+    "hasCustomPassword": true
   },
   {
     "id": "tenant_1789212385161_k79d",
@@ -167,9 +192,9 @@
     "tagline": "قوافل الإغاثة الشتوية، إفطار الصائم، ومشاريع كفالة الأيتام والأسر المعوزة",
     "stats": {
       "membersCount": 15,
+      "campaignsCount": 2,
       "activitiesCount": 5,
-      "totalBalance": 51200,
-      "campaignsCount": 2
+      "totalBalance": 51200
     },
     "ownerUsername": "albir2024",
     "whatsapp": "+212 6 89 56 23 56",
@@ -178,7 +203,12 @@
     "ribBank": "011 780 0000 123456789012 45",
     "bankName": "التجاري وفا بنك / Attijariwafa Bank",
     "enablePublicDonations": true,
-    "updatedAt": "2026-11-13T18:26:51.898Z"
+    "updatedAt": "2026-11-13T18:26:51.898Z",
+    "passwordHash": "a7cba0a3330cbed804f991a6120f3d3a223c666e9233761fea052e412c630138",
+    "_updatedAt": "2026-11-21T21:55:42.576Z",
+    "hasCustomPassword": true,
+    "passwordSalt": "2321c09799519b2c",
+    "credentialsUpdatedAt": "2026-11-21T21:55:42.576Z"
   },
   {
     "id": "tenant_ihsan_sa",
@@ -201,10 +231,10 @@
     "isVisibleOnPublicPortal": false,
     "tagline": "مشاريع التمكين المجتمعي، سلال العطاء، ودعم الأسر المتعففة والطلاب",
     "stats": {
-      "membersCount": 24,
+      "campaignsCount": 2,
       "activitiesCount": 7,
-      "totalBalance": 98500,
-      "campaignsCount": 2
+      "membersCount": 24,
+      "totalBalance": 98500
     },
     "ownerUsername": "ihsan2024",
     "whatsapp": "+966501234567",
@@ -213,7 +243,12 @@
     "ribBank": "011 780 0000 123456789012 45",
     "bankName": "التجاري وفا بنك / Attijariwafa Bank",
     "enablePublicDonations": true,
-    "updatedAt": "2026-11-13T18:26:51.905Z"
+    "updatedAt": "2026-11-13T18:26:51.905Z",
+    "passwordHash": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918",
+    "credentialsUpdatedAt": "2026-11-21T21:55:42.576Z",
+    "_updatedAt": "2026-11-21T21:55:42.576Z",
+    "hasCustomPassword": true,
+    "passwordSalt": "ihsan_salt_123"
   },
   {
     "id": "tenant_takafol_eg",
@@ -236,10 +271,10 @@
     "isVisibleOnPublicPortal": false,
     "tagline": "تنمية القرى الأكثر احتياجاً، تيسير الزواج، والقوافل الطبية المجانية",
     "stats": {
-      "membersCount": 18,
       "activitiesCount": 6,
       "totalBalance": 65000,
-      "campaignsCount": 2
+      "campaignsCount": 2,
+      "membersCount": 18
     },
     "ownerUsername": "takafol2024",
     "whatsapp": "+201012345678",
@@ -248,7 +283,12 @@
     "ribBank": "011 780 0000 123456789012 45",
     "bankName": "التجاري وفا بنك / Attijariwafa Bank",
     "enablePublicDonations": true,
-    "updatedAt": "2026-11-13T18:26:51.912Z"
+    "updatedAt": "2026-11-13T18:26:51.912Z",
+    "passwordSalt": "takafol_salt_123",
+    "credentialsUpdatedAt": "2026-11-21T21:55:42.576Z",
+    "_updatedAt": "2026-11-21T21:55:42.576Z",
+    "hasCustomPassword": true,
+    "passwordHash": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918"
   },
   {
     "id": "tenant_1792430222354_klrf",
@@ -273,10 +313,10 @@
     "enablePublicDonations": true,
     "tagline": "الشفافية والتكافل والتنمية المجتمعية المستدامة",
     "stats": {
-      "membersCount": 1,
-      "activitiesCount": 8,
       "totalBalance": 0,
-      "campaignsCount": 3
+      "activitiesCount": 8,
+      "campaignsCount": 3,
+      "membersCount": 1
     },
     "ownerUsername": "basma2024",
     "whatsapp": "0611223344",
@@ -284,7 +324,12 @@
     "rib": "011 780 0000 123456789012 45",
     "ribBank": "011 780 0000 123456789012 45",
     "bankName": "التجاري وفا بنك / Attijariwafa Bank",
-    "updatedAt": "2026-11-13T18:26:51.918Z"
+    "updatedAt": "2026-11-13T18:26:51.918Z",
+    "passwordSalt": "0c499952df135b01",
+    "_updatedAt": "2026-11-21T21:55:42.576Z",
+    "passwordHash": "d2cef9c324e5826a01da74944fccae2ed3718287b44d3745eeed43cef732a703",
+    "hasCustomPassword": true,
+    "credentialsUpdatedAt": "2026-11-21T21:55:42.576Z"
   },
   {
     "id": "tenant_1792661526529_a545",
@@ -297,12 +342,12 @@
     "logoUrl": "https://images.unsplash.com/photo-1582213782179-e0d53f98f2ca?auto=format&fit=crop&w=300&q=80",
     "bannerImageUrl": "https://images.unsplash.com/photo-1593113598332-cd288d649433?auto=format&fit=crop&w=1600&q=80",
     "legalDocument": {
-      "fileUrl": "/api/images/img-1792665089539-asxbta9.jpg",
       "fileName": "18124.jpg",
       "fileType": "image/jpeg",
+      "uploadedAt": "2026-10-22T09:31:10.596Z",
       "fileSize": 153011,
       "fileSizeFormatted": "149 كيلوبايت",
-      "uploadedAt": "2026-10-22T09:31:10.596Z",
+      "fileUrl": "/api/images/img-1792665089539-asxbta9.jpg",
       "status": "pending"
     },
     "ownerId": "owner_1792661526529_7gak",
@@ -312,11 +357,11 @@
     "paymentVerified": true,
     "subscriptionStatusHistory": [
       {
+        "note": "تم إنشاء وتفعيل منصة الجمعية بنجاح في قاعدة البيانات.",
         "status": "active",
-        "label": "تفعيل وإنشاء المنصة",
         "timestamp": "2026-10-22T09:32:06.533Z",
-        "actor": "عبدالله",
-        "note": "تم إنشاء وتفعيل منصة الجمعية بنجاح في قاعدة البيانات."
+        "label": "تفعيل وإنشاء المنصة",
+        "actor": "عبدالله"
       }
     ],
     "createdAt": "2026-10-22T09:32:06.533Z",
@@ -338,7 +383,12 @@
     "phone": "+212 6 89 56 23 56",
     "rib": "011 780 0000 123456789012 45",
     "ribBank": "011 780 0000 123456789012 45",
-    "bankName": "التجاري وفا بنك / Attijariwafa Bank"
+    "bankName": "التجاري وفا بنك / Attijariwafa Bank",
+    "_updatedAt": "2026-11-21T21:55:42.576Z",
+    "passwordHash": "scrypt$d443fdfe462d9e126d2ac7725ad6a673efe775e89581c4865e4e785b505b162b3b61d94011438d9079182489c17165072bb24321387e43b457ed7b5723c3a0ec",
+    "passwordSalt": "8225860951675fcf8bedcefafdc3d5c2",
+    "credentialsUpdatedAt": "2026-11-21T21:55:42.576Z",
+    "hasCustomPassword": true
   },
   {
     "id": "tenant_1792874152357_46fk",
@@ -351,13 +401,13 @@
     "logoUrl": "https://images.unsplash.com/photo-1582213782179-e0d53f98f2ca?auto=format&fit=crop&w=300&q=80",
     "bannerImageUrl": "https://images.unsplash.com/photo-1593113598332-cd288d649433?auto=format&fit=crop&w=1600&q=80",
     "legalDocument": {
-      "fileUrl": "/api/images/img-a678e6f9f759acd3.jpg",
-      "fileName": "14796.jpg",
-      "fileType": "image/jpeg",
-      "fileSize": 1742798,
-      "fileSizeFormatted": "1.7 ميجابايت",
       "uploadedAt": "2026-10-24T20:35:44.495Z",
-      "status": "pending"
+      "fileUrl": "/api/images/img-a678e6f9f759acd3.jpg",
+      "fileSizeFormatted": "1.7 ميجابايت",
+      "status": "pending",
+      "fileSize": 1742798,
+      "fileType": "image/jpeg",
+      "fileName": "14796.jpg"
     },
     "ownerId": "owner_1792874152357_qtvk",
     "ownerName": "عبدالله",
@@ -368,37 +418,37 @@
       {
         "status": "pending_subscription",
         "label": "في انتظار الدفع",
-        "timestamp": "2026-10-24T20:35:52.358Z",
         "actor": "عبدالله",
+        "timestamp": "2026-10-24T20:35:52.358Z",
         "note": "تم إنشاء المنصة بحالة «في انتظار الدفع» وبانتظار تسديد مبلغ الاشتراك المطلوب وتأكيد التفعيل من الإدارة العامة."
       },
       {
-        "status": "pending_activation",
-        "label": "قيد مراجعة الدفع",
         "timestamp": "2026-10-25T12:30:07.481Z",
+        "status": "pending_activation",
+        "note": "تم تسديد الاشتراك وإرسال وصل الدفع (199 MAD - Cash Plus - مرجع: DEP-407477). حالة الطلب الآن «قيد مراجعة الدفع» بانتظار تدقيق الوصل وموافقة الإدارة العامة.",
         "actor": "عبدالله",
-        "note": "تم تسديد الاشتراك وإرسال وصل الدفع (199 MAD - Cash Plus - مرجع: DEP-407477). حالة الطلب الآن «قيد مراجعة الدفع» بانتظار تدقيق الوصل وموافقة الإدارة العامة."
+        "label": "قيد مراجعة الدفع"
       },
       {
         "status": "pending_activation",
         "label": "في انتظار التفعيل",
-        "timestamp": "2026-10-25T13:30:26.807Z",
         "actor": "عبدالله",
+        "timestamp": "2026-10-25T13:30:26.807Z",
         "note": "تم إرسال تأكيد تسديد الاشتراك (199 MAD) وبانتظار التحقق من الدفع والتفعيل الإداري من الإدارة العامة."
       },
       {
-        "status": "payment_verified",
-        "label": "تم التحقق من الدفع (بانتظار التفعيل الإداري)",
+        "note": "تمت مراجعة طلب الاشتراك والتحقق من صحة الدفع ومطابقة المبلغ بنجاح. المنصة في انتظار قرار التفعيل النهائي.",
         "timestamp": "2026-10-25T13:31:57.517Z",
         "actor": "الإدارة العامة",
-        "note": "تمت مراجعة طلب الاشتراك والتحقق من صحة الدفع ومطابقة المبلغ بنجاح. المنصة في انتظار قرار التفعيل النهائي."
+        "status": "payment_verified",
+        "label": "تم التحقق من الدفع (بانتظار التفعيل الإداري)"
       },
       {
-        "status": "active",
         "label": "مفعّلة",
-        "timestamp": "2026-10-25T13:32:09.202Z",
+        "note": "تم التحقق من صحة الدفع والموافقة الإدارية وتفعيل المنصة رسمياً.",
         "actor": "الإدارة العامة",
-        "note": "تم التحقق من صحة الدفع والموافقة الإدارية وتفعيل المنصة رسمياً."
+        "timestamp": "2026-10-25T13:32:09.202Z",
+        "status": "active"
       }
     ],
     "createdAt": "2026-10-24T20:35:52.358Z",
@@ -411,9 +461,9 @@
     "tagline": "الشفافية والتكافل والتنمية المجتمعية المستدامة وحملات تمويل المشاريع الخيرية",
     "stats": {
       "membersCount": 1,
+      "campaignsCount": 3,
       "activitiesCount": 3,
-      "totalBalance": 0,
-      "campaignsCount": 3
+      "totalBalance": 0
     },
     "paymentVerifiedAt": "2026-10-25T13:31:57.517Z",
     "paymentVerifiedBy": "الإدارة العامة",
@@ -428,7 +478,12 @@
     "phone": "+212 6 59 86 53 26",
     "rib": "011 780 0000 123456789012 45",
     "ribBank": "011 780 0000 123456789012 45",
-    "bankName": "التجاري وفا بنك / Attijariwafa Bank"
+    "bankName": "التجاري وفا بنك / Attijariwafa Bank",
+    "_updatedAt": "2026-11-21T21:55:42.576Z",
+    "passwordSalt": "db63a900330552ec26749e751382f992",
+    "passwordHash": "scrypt$db06f1d180d1b8c788f8c9fd96a4b7e552934e12a068a4408fddcf2bff6be1dbbe6f900ece047f192857885ef0e9d2c2048c2d60ebac3e1808574f4c268299de",
+    "hasCustomPassword": true,
+    "credentialsUpdatedAt": "2026-11-21T21:55:42.576Z"
   },
   {
     "id": "tenant_borj_nador",
@@ -453,42 +508,47 @@
     "enablePublicDonations": true,
     "tagline": "العمل الجمعوي التنموي والتكافل الاجتماعي بخدمة ساكنة برج الناضور",
     "stats": {
-      "membersCount": 1,
       "activitiesCount": 8,
       "totalBalance": 0,
+      "membersCount": 1,
       "campaignsCount": 3
     },
-    "ownerUsername": "admin2024"
+    "ownerUsername": "admin2024",
+    "_updatedAt": "2026-11-21T21:55:42.576Z",
+    "passwordSalt": "e0c8f77c24e1a7c3",
+    "passwordHash": "e5a781d0fd7591d5219c2fab34e8af2a3d7319dc19c25697367358fb6a3f2ec4",
+    "credentialsUpdatedAt": "2026-11-21T21:55:42.576Z",
+    "hasCustomPassword": true
   },
   {
     "subscriptionStatusHistory": [
       {
-        "note": "تم إنشاء المنصة بحالة «في انتظار الدفع» وبانتظار تسديد مبلغ الاشتراك المطلوب وتأكيد التفعيل من الإدارة العامة.",
-        "status": "pending_subscription",
-        "actor": "يوسف علي",
         "timestamp": "2026-10-27T16:25:07.996Z",
-        "label": "في انتظار الدفع"
+        "note": "تم إنشاء المنصة بحالة «في انتظار الدفع» وبانتظار تسديد مبلغ الاشتراك المطلوب وتأكيد التفعيل من الإدارة العامة.",
+        "label": "في انتظار الدفع",
+        "actor": "يوسف علي",
+        "status": "pending_subscription"
       },
       {
-        "status": "pending_activation",
+        "actor": "يوسف علي",
+        "timestamp": "2026-10-27T17:36:04.114Z",
         "label": "قيد مراجعة الدفع",
-        "note": "تم تسديد الاشتراك وإرسال وصل الدفع (199 MAD - Cash Plus - مرجع: DEP-564113). حالة الطلب الآن «قيد مراجعة الدفع» بانتظار تدقيق الوصل وموافقة الإدارة العامة.",
-        "actor": "يوسف علي",
-        "timestamp": "2026-10-27T17:36:04.114Z"
-      },
-      {
         "status": "pending_activation",
-        "label": "في انتظار التفعيل",
-        "actor": "يوسف علي",
-        "note": "تم إرسال تأكيد تسديد الاشتراك (199 MAD) وبانتظار التحقق من الدفع والتفعيل الإداري من الإدارة العامة.",
-        "timestamp": "2026-10-27T18:36:22.909Z"
+        "note": "تم تسديد الاشتراك وإرسال وصل الدفع (199 MAD - Cash Plus - مرجع: DEP-564113). حالة الطلب الآن «قيد مراجعة الدفع» بانتظار تدقيق الوصل وموافقة الإدارة العامة."
       },
       {
-        "actor": "الإدارة العامة",
-        "timestamp": "2026-10-27T18:36:50.859Z",
-        "status": "active",
+        "label": "في انتظار التفعيل",
+        "timestamp": "2026-10-27T18:36:22.909Z",
+        "actor": "يوسف علي",
+        "status": "pending_activation",
+        "note": "تم إرسال تأكيد تسديد الاشتراك (199 MAD) وبانتظار التحقق من الدفع والتفعيل الإداري من الإدارة العامة."
+      },
+      {
         "note": "تم التحقق من صحة الدفع والموافقة الإدارية وتفعيل المنصة رسمياً.",
-        "label": "مفعّلة"
+        "timestamp": "2026-10-27T18:36:50.859Z",
+        "label": "مفعّلة",
+        "status": "active",
+        "actor": "الإدارة العامة"
       }
     ],
     "ownerName": "يوسف علي",
@@ -497,9 +557,9 @@
     "paymentVerifiedBy": "الإدارة العامة",
     "lastRenewalPaymentId": "pay_1793122564114_7srnq",
     "stats": {
-      "totalBalance": 0,
-      "membersCount": 1,
       "activitiesCount": 3,
+      "membersCount": 1,
+      "totalBalance": 0,
       "campaignsCount": 3
     },
     "status": "active",
@@ -508,13 +568,13 @@
     "nameFr": "Jam3it ofok",
     "country": "المغرب",
     "legalDocument": {
-      "fileName": "23754.jpg",
-      "fileType": "image/jpeg",
+      "fileUrl": "/api/images/img-a075cf4a8412288f.jpg",
       "status": "pending",
-      "fileSizeFormatted": "622 كيلوبايت",
       "fileSize": 636972,
-      "uploadedAt": "2026-10-27T16:24:54.413Z",
-      "fileUrl": "/api/images/img-a075cf4a8412288f.jpg"
+      "fileType": "image/jpeg",
+      "fileName": "23754.jpg",
+      "fileSizeFormatted": "622 كيلوبايت",
+      "uploadedAt": "2026-10-27T16:24:54.413Z"
     },
     "monthlyFee": 299,
     "tier": "pro",
@@ -528,7 +588,7 @@
     "tagline": "الشفافية والتكافل والتنمية المجتمعية المستدامة وحملات تمويل المشاريع الخيرية",
     "paymentVerified": true,
     "ownerPasswordSalt": "6fb12a1a449c77267a6745c0fb14b5f1",
-    "_updatedAt": "2026-10-28T11:20:59.886Z",
+    "_updatedAt": "2026-11-21T21:55:42.576Z",
     "ownerId": "owner_1793118307992_9sn4",
     "subscriptionStartedAt": "2026-10-27T17:36:31.588Z",
     "city": "آسفي",
@@ -540,14 +600,22 @@
     "id": "tenant_1793118307992_urt8",
     "logoUrl": "/api/images/img-75f9560a84b1d500.png",
     "slug": "assoc-1793118307992",
-    "subscriptionExpiresAt": "2027-10-27T17:36:31.588Z"
+    "subscriptionExpiresAt": "2027-10-27T17:36:31.588Z",
+    "whatsapp": "+212 6 53 26 45 78",
+    "phone": "+212 6 53 26 45 78",
+    "rib": "011 780 0000 123456789012 45",
+    "ribBank": "011 780 0000 123456789012 45",
+    "bankName": "التجاري وفا بنك / Attijariwafa Bank",
+    "passwordHash": "21e5c042bb454a8ea78f3ba725781e2e7b01a80c00a844029975d05a01f96012",
+    "credentialsUpdatedAt": "2026-11-21T21:55:42.576Z",
+    "passwordSalt": "6226a5fe97bd3d4f"
   },
   {
     "stats": {
-      "membersCount": 1,
       "totalBalance": 0,
+      "campaignsCount": 3,
       "activitiesCount": 3,
-      "campaignsCount": 3
+      "membersCount": 1
     },
     "bannerImageUrl": "https://images.unsplash.com/photo-1593113598332-cd288d649433?auto=format&fit=crop&w=1600&q=80",
     "monthlyFee": 180,
@@ -558,26 +626,33 @@
     "ownerPhone": "+212 6 89 56 32 48",
     "subscriptionStatusHistory": [
       {
+        "status": "pending_subscription",
         "actor": "محمد الإدريسي",
         "label": "في انتظار الدفع",
-        "timestamp": "2026-11-21T10:49:50.144Z",
         "note": "تم إنشاء المنصة بحالة «في انتظار الدفع» وبانتظار تسديد مبلغ الاشتراك المطلوب وتأكيد التفعيل من الإدارة العامة.",
-        "status": "pending_subscription"
+        "timestamp": "2026-11-21T10:49:50.144Z"
+      },
+      {
+        "note": "تم قبول طلب التفعيل وتفعيل منصة الجمعية رسمياً من طرف الإدارة العامة.",
+        "status": "active",
+        "timestamp": "2026-11-21T21:02:25.549Z",
+        "label": "مفعّلة",
+        "actor": "الإدارة العامة"
       }
     ],
-    "ownerUsername": "mohamed446677",
+    "ownerUsername": "mohamed4567",
     "id": "tenant_1795258190139_2bwc",
     "slug": "assoc-1795258190139",
     "enablePublicDonations": true,
     "name": "جمعية الأمل",
-    "paymentVerified": false,
+    "paymentVerified": true,
     "ownerPasswordSalt": "c388cd858d62310bae37bf85d55d2ab2",
     "legalDocument": {
+      "uploadedAt": "2026-11-21T10:49:17.993Z",
       "fileName": "31264.png",
       "fileType": "image/png",
       "status": "pending",
       "fileSize": 1401396,
-      "uploadedAt": "2026-11-21T10:49:17.993Z",
       "fileSizeFormatted": "1.3 ميجابايت",
       "fileUrl": "/api/images/img-709989248012dbae.png"
     },
@@ -585,14 +660,160 @@
     "createdAt": "2026-11-21T10:49:50.144Z",
     "ownerPasswordHash": "0000000000000000000000005de86d6b",
     "hasCustomPassword": true,
-    "_updatedAt": "2026-11-21T10:49:50.219Z",
+    "_updatedAt": "2026-11-21T21:55:42.576Z",
     "ownerName": "محمد الإدريسي",
     "nameFr": "Association Al Amal",
     "tier": "pro",
     "tagline": "منصة العمل الجمعوي الشفاف والتنمية المستدامة - الدار البيضاء",
     "isTemplate": false,
-    "status": "pending_activation",
-    "updatedAt": "2026-11-21T10:52:49.619Z",
-    "ownerId": "owner_1795258190139_5jr9"
+    "status": "active",
+    "updatedAt": "2026-11-21T21:34:02.608Z",
+    "ownerId": "owner_1795258190139_5jr9",
+    "paymentVerifiedBy": "الإدارة العامة",
+    "bankName": "التجاري وفا بنك / Attijariwafa Bank",
+    "subscriptionStartedAt": "2026-11-21T21:02:25.549Z",
+    "subscriptionExpiresAt": "2027-11-21T21:02:25.549Z",
+    "activationFeePaid": 180,
+    "rib": "011 780 0000 123456789012 45",
+    "lastRenewalDate": "2026-11-21T21:02:25.549Z",
+    "activationFeeCurrency": "MAD",
+    "lastRenewalPaymentId": "pay_1795258369173_x3j3y",
+    "ribBank": "011 780 0000 123456789012 45",
+    "activationFeeDate": "2026-11-21T10:52:49.173Z",
+    "phone": "+212 6 89 56 32 48",
+    "whatsapp": "+212 6 89 56 32 48",
+    "paymentVerifiedAt": "2026-11-21T21:02:25.549Z",
+    "passwordHash": "4b7e4254cef2a76254b400e5ff9ce16fb87e85993583fbda1f48047aff557a6e",
+    "credentialsUpdatedAt": "2026-11-21T21:55:42.576Z",
+    "passwordSalt": "4bf09a5ed81d1025"
+  },
+  {
+    "ownerUsername": "admin7725",
+    "country": "المغرب",
+    "nameFr": "Association جمعية يوسف",
+    "isVisibleOnPublicPortal": false,
+    "paymentVerifiedAt": "2026-11-21T12:36:08.477Z",
+    "ownerPhone": "+212 6 89 56 24 78",
+    "name": "جمعية يوسف",
+    "id": "tenant_1793010003772_oec5",
+    "logoUrl": "https://images.unsplash.com/photo-1582213782179-e0d53f98f2ca?auto=format&fit=crop&w=300&q=80",
+    "tier": "pro",
+    "activationFeeDate": "2026-10-26T12:01:59.405Z",
+    "subscriptionExpiresAt": "2027-11-21T12:36:08.477Z",
+    "updatedAt": "2026-11-21T12:36:08.477Z",
+    "status": "active",
+    "ownerName": "يوسف",
+    "slug": "assoc-1793010003772",
+    "subscriptionStartedAt": "2026-11-21T12:36:08.477Z",
+    "paymentVerified": true,
+    "lastRenewalDate": "2026-11-21T12:36:08.477Z",
+    "bannerImageUrl": "https://images.unsplash.com/photo-1593113598332-cd288d649433?auto=format&fit=crop&w=1600&q=80",
+    "enablePublicDonations": true,
+    "city": "الدار البيضاء",
+    "activationFeePaid": 199,
+    "isTemplate": false,
+    "createdAt": "2026-10-26T12:01:59.405Z",
+    "nameEn": "Association جمعية يوسف",
+    "_updatedAt": "2026-11-21T12:36:08.477Z",
+    "monthlyFee": 180,
+    "paymentVerifiedBy": "الإدارة العامة",
+    "activationFeeCurrency": "MAD",
+    "ownerId": "owner_1793010003772_bo2u",
+    "subscriptionStatusHistory": [
+      {
+        "label": "مفعّلة",
+        "timestamp": "2026-11-21T12:36:08.477Z",
+        "actor": "الإدارة العامة",
+        "status": "active",
+        "note": "تم قبول طلب التفعيل وتفعيل منصة الجمعية رسمياً من طرف الإدارة العامة."
+      }
+    ],
+    "lastRenewalPaymentId": "pay_1793016119405_87dt9"
+  },
+  {
+    "activationFeePaid": 199,
+    "lastRenewalPaymentId": "pay_1793095155691_u08en",
+    "city": "الدار البيضاء",
+    "activationFeeCurrency": "MAD",
+    "id": "tenant_1793094581292_fxxr",
+    "isTemplate": false,
+    "ownerId": "owner_1793094581292_9zzz",
+    "ownerName": "علي طالب",
+    "paymentVerifiedBy": "الإدارة العامة",
+    "enablePublicDonations": true,
+    "_updatedAt": "2026-11-21T12:36:00.707Z",
+    "monthlyFee": 180,
+    "updatedAt": "2026-11-21T12:36:00.707Z",
+    "nameEn": "Association جمعية علي طالب",
+    "activationFeeDate": "2026-10-27T09:59:15.691Z",
+    "lastRenewalDate": "2026-11-21T12:36:00.707Z",
+    "subscriptionExpiresAt": "2027-11-21T12:36:00.707Z",
+    "paymentVerified": true,
+    "ownerPhone": "+212 6 98 65 48 75",
+    "subscriptionStartedAt": "2026-11-21T12:36:00.707Z",
+    "name": "جمعية علي طالب",
+    "isVisibleOnPublicPortal": false,
+    "paymentVerifiedAt": "2026-11-21T12:36:00.707Z",
+    "nameFr": "Association جمعية علي طالب",
+    "tier": "pro",
+    "status": "active",
+    "ownerUsername": "admin1292",
+    "country": "المغرب",
+    "slug": "assoc-1793094581292",
+    "logoUrl": "https://images.unsplash.com/photo-1582213782179-e0d53f98f2ca?auto=format&fit=crop&w=300&q=80",
+    "subscriptionStatusHistory": [
+      {
+        "timestamp": "2026-11-21T12:36:00.707Z",
+        "actor": "الإدارة العامة",
+        "label": "مفعّلة",
+        "note": "تم قبول طلب التفعيل وتفعيل منصة الجمعية رسمياً من طرف الإدارة العامة.",
+        "status": "active"
+      }
+    ],
+    "bannerImageUrl": "https://images.unsplash.com/photo-1593113598332-cd288d649433?auto=format&fit=crop&w=1600&q=80",
+    "createdAt": "2026-10-27T09:59:15.691Z"
+  },
+  {
+    "ownerName": "يوسف الادرييسي",
+    "enablePublicDonations": true,
+    "country": "المغرب",
+    "logoUrl": "https://images.unsplash.com/photo-1582213782179-e0d53f98f2ca?auto=format&fit=crop&w=300&q=80",
+    "_updatedAt": "2026-11-21T12:35:57.029Z",
+    "monthlyFee": 180,
+    "lastRenewalDate": "2026-11-21T12:35:57.029Z",
+    "nameEn": "Association جمعية النور",
+    "updatedAt": "2026-11-21T12:35:57.029Z",
+    "paymentVerified": true,
+    "city": "الدار البيضاء",
+    "activationFeeDate": "2026-10-28T12:55:49.195Z",
+    "isTemplate": false,
+    "subscriptionStatusHistory": [
+      {
+        "label": "مفعّلة",
+        "status": "active",
+        "actor": "الإدارة العامة",
+        "timestamp": "2026-11-21T12:35:57.029Z",
+        "note": "تم قبول طلب التفعيل وتفعيل منصة الجمعية رسمياً من طرف الإدارة العامة."
+      }
+    ],
+    "activationFeeCurrency": "MAD",
+    "isVisibleOnPublicPortal": false,
+    "paymentVerifiedAt": "2026-11-21T12:35:57.029Z",
+    "bannerImageUrl": "https://images.unsplash.com/photo-1593113598332-cd288d649433?auto=format&fit=crop&w=1600&q=80",
+    "lastRenewalPaymentId": "pay_1793192149195_r8iot",
+    "status": "active",
+    "paymentVerifiedBy": "الإدارة العامة",
+    "id": "tenant_1793192092092_o1a7",
+    "createdAt": "2026-10-28T12:55:49.195Z",
+    "slug": "assoc-1793192092092",
+    "activationFeePaid": 199,
+    "subscriptionExpiresAt": "2027-11-21T12:35:57.029Z",
+    "subscriptionStartedAt": "2026-11-21T12:35:57.029Z",
+    "nameFr": "Association جمعية النور",
+    "ownerUsername": "admin9217",
+    "tier": "pro",
+    "ownerId": "owner_1793192092092_ca46",
+    "ownerPhone": "+212 6 53 42 15 45",
+    "name": "جمعية النور"
   }
 ]
