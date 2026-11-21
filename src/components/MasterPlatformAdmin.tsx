@@ -81,7 +81,7 @@ import { PlatformTutorialsSection } from './PlatformTutorialsSection';
 import { PlatformDomainManager } from './PlatformDomainManager';
 import { usePlatformIdentity, verifyMasterSuperAdminPin, apiUnifiedMasterAdminLogin } from '../api/platformIdentityApi';
 import { apiLoginPlatformSubAdmin, apiLogPlatformAdminActivity } from '../api/platformSubAdminsApi';
-import { getAllTenantPayments, getTenantsRequiringRenewal } from '../paymentStorage';
+import { getAllTenantPayments, getTenantsRequiringRenewal, syncPaymentsFromBackend } from '../paymentStorage';
 import { getCountryFlag, COUNTRIES_LIST } from './CreateAssociationWizardModal';
 import { getCitiesForCountry, isCityValidForCountry } from '../data/geoCitiesDatabase';
 
@@ -167,21 +167,25 @@ export const MasterPlatformAdmin: React.FC<MasterPlatformAdminProps> = ({
 
   // Automatic real-time synchronization with disk/backend database
   useEffect(() => {
-    syncTenantsFromBackend().then((fresh) => {
+    syncTenantsFromBackend(true).then((fresh) => {
       if (Array.isArray(fresh) && fresh.length > 0) {
         setTenants(fresh);
         setOwners(getAllOwners());
       }
     }).catch(console.warn);
 
+    syncPaymentsFromBackend(true).catch(console.warn);
+
     const handleTenantsChanged = () => {
       setTenants(getAllTenants());
       setOwners(getAllOwners());
     };
     window.addEventListener('chayef-tenants-changed', handleTenantsChanged);
+    window.addEventListener('chayef-payments-changed', handleTenantsChanged);
     window.addEventListener('storage', handleTenantsChanged);
     return () => {
       window.removeEventListener('chayef-tenants-changed', handleTenantsChanged);
+      window.removeEventListener('chayef-payments-changed', handleTenantsChanged);
       window.removeEventListener('storage', handleTenantsChanged);
     };
   }, []);
@@ -237,7 +241,24 @@ export const MasterPlatformAdmin: React.FC<MasterPlatformAdminProps> = ({
   const inactiveTenantsCount = tenants.filter((t) => t.status === 'inactive').length;
   const pendingSubscriptionCount = tenants.filter((t) => t.status === 'pending_subscription').length;
   const pendingActivationCount = tenants.filter((t) => t.status === 'pending_activation').length;
-  const pendingPaymentsCount = getAllTenantPayments().filter((p) => p.status === 'pending' || p.status === 'verified').length;
+  const activeTenantIds = new Set(tenants.filter((t) => t.status === 'active').map((t) => t.id));
+  const pendingActivationTenantIds = new Set(
+    tenants
+      .filter((t) => !t.isTemplate && t.id !== MASTER_TEMPLATE_TENANT_ID && t.status !== 'active')
+      .map((t) => t.id)
+  );
+  getAllTenantPayments().forEach((p) => {
+    if (
+      (p.status === 'pending' || p.status === 'verified') &&
+      p.type !== 'renewal' &&
+      p.type !== 'ad_campaign' &&
+      p.tenantId &&
+      !activeTenantIds.has(p.tenantId)
+    ) {
+      pendingActivationTenantIds.add(p.tenantId);
+    }
+  });
+  const pendingPaymentsCount = pendingActivationTenantIds.size;
   const renewalRequiredCount = getTenantsRequiringRenewal(20).length;
 
   // Unified Login: automatically verifies password and determines role (Super Admin vs. Secondary Admin)

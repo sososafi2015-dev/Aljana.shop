@@ -114,5 +114,44 @@
     "plainPassword": "123456",
     "recoveredAccount": true,
     "username": "taqwa2024"
+  },
+  {
+    "id": "owner_borj_nador",
+    "username": "admin2024",
+    "fullName": "مسؤول جمعية برج الناضور",
+    "phone": "0661000101",
+    "passwordHash": "e5a781d0fd7591d5219c2fab34e8af2a3d7319dc19c25697367358fb6a3f2ec4",
+    "passwordSalt": "e0c8f77c24e1a7c3",
+    "hasCustomPassword": true,
+    "tenantId": "tenant_borj_nador",
+    "status": "active",
+    "createdAt": "2026-10-19T18:00:00.000Z",
+    "recoveredAccount": true
+  },
+  {
+    "id": "owner_1793118307992_9sn4",
+    "username": "youssef77",
+    "fullName": "يوسف علي",
+    "phone": "+212 6 53 26 45 78",
+    "passwordHash": "21e5c042bb454a8ea78f3ba725781e2e7b01a80c00a844029975d05a01f96012",
+    "passwordSalt": "6226a5fe97bd3d4f",
+    "hasCustomPassword": true,
+    "tenantId": "tenant_1793118307992_urt8",
+    "status": "active",
+    "createdAt": "2026-10-27T16:25:07.996Z",
+    "recoveredAccount": true
+  },
+  {
+    "id": "owner_1795258190139_5jr9",
+    "username": "mohamed446677",
+    "fullName": "محمد الإدريسي",
+    "phone": "+212 6 89 56 32 48",
+    "passwordHash": "4b7e4254cef2a76254b400e5ff9ce16fb87e85993583fbda1f48047aff557a6e",
+    "passwordSalt": "4bf09a5ed81d1025",
+    "hasCustomPassword": true,
+    "tenantId": "tenant_1795258190139_2bwc",
+    "status": "active",
+    "createdAt": "2026-11-21T10:49:50.144Z",
+    "recoveredAccount": true
   }
 ]

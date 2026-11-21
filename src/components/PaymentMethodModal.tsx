@@ -369,16 +369,15 @@ export const PaymentMethodModal: React.FC<PaymentMethodModalProps> = ({
       }
 
       // Confirm backend persistence on server disk & server-side Firestore
+      const fullPaymentPayload = {
+        ...result.payment,
+        proofDocumentUrl: permanentProofUrl || result.payment.proofDocumentUrl,
+      };
       try {
         const backendRes = await fetch('/api/platform-payments/submit', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            payment: {
-              ...result.payment,
-              proofDocumentUrl: permanentProofUrl || result.payment.proofDocumentUrl,
-            },
-          }),
+          body: JSON.stringify(fullPaymentPayload),
         });
         if (!backendRes.ok) {
           console.warn('[PaymentMethodModal] Backend submit returned non-OK status:', backendRes.status);
@@ -389,26 +388,38 @@ export const PaymentMethodModal: React.FC<PaymentMethodModalProps> = ({
 
       // Persist to Cloud Firestore (`tenant_payments` and `tenants` update) with undefined fields stripped
       try {
+        const nowIso = new Date().toISOString();
         const sanitizedPayment = JSON.parse(
           JSON.stringify({
-            ...result.payment,
-            proofDocumentUrl: permanentProofUrl || result.payment.proofDocumentUrl,
+            ...fullPaymentPayload,
             status: 'pending',
-            _updatedAt: new Date().toISOString(),
+            _updatedAt: nowIso,
           })
         );
         await setDoc(doc(db, 'tenant_payments', result.payment.id), sanitizedPayment, { merge: true });
 
         if (!isRenewal && !isAdCampaign && tenant.status !== 'active') {
-          await setDoc(
-            doc(db, 'tenants', tenant.id),
-            {
+          const sanitizedTenantUpdate = JSON.parse(
+            JSON.stringify({
+              id: tenant.id,
+              name: tenant.name,
+              nameFr: tenant.nameFr,
+              nameEn: tenant.nameEn,
+              slug: tenant.slug,
+              country: tenant.country,
+              city: tenant.city,
+              ownerId: tenant.ownerId,
+              ownerName: tenant.ownerName,
+              ownerPhone: tenant.ownerPhone,
+              createdAt: tenant.createdAt || nowIso,
+              isTemplate: Boolean(tenant.isTemplate),
               status: 'pending_activation',
               paymentVerified: false,
-              updatedAt: new Date().toISOString(),
-            },
-            { merge: true }
+              updatedAt: nowIso,
+              _updatedAt: nowIso,
+            })
           );
+          await setDoc(doc(db, 'tenants', tenant.id), sanitizedTenantUpdate, { merge: true });
         }
       } catch (fsErr) {
         console.warn('[Firestore] Notice persisting payment to Firestore:', fsErr);

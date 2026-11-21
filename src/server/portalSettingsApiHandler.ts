@@ -181,7 +181,10 @@ export function loadPortalSettingsDatabase(forceFresh = false): PlatformPortalSe
     console.error('[PortalSettingsDB] Error loading database:', err);
   }
 
-  inMemoryPortalSettings = { ...DEFAULT_PORTAL_SETTINGS };
+  inMemoryPortalSettings = {
+    ...DEFAULT_PORTAL_SETTINGS,
+    lastUpdated: '1970-01-01T00:00:00.000Z',
+  };
   savePortalSettingsDatabase(inMemoryPortalSettings);
   return inMemoryPortalSettings;
 }
@@ -268,13 +271,14 @@ async function saveBase64Image(
 }
 
 let lastPortalCloudReconcileAt = 0;
-const PORTAL_CLOUD_RECONCILE_TTL_MS = 15000;
+const PORTAL_CLOUD_RECONCILE_TTL_MS = 2000;
 
 async function reconcilePortalSettingsWithCloud(
   localSettings: PlatformPortalSettings
 ): Promise<PlatformPortalSettings> {
+  const isColdLocal = localSettings.lastUpdated === '1970-01-01T00:00:00.000Z';
   const now = Date.now();
-  if (now - lastPortalCloudReconcileAt < PORTAL_CLOUD_RECONCILE_TTL_MS) {
+  if (!isColdLocal && now - lastPortalCloudReconcileAt < PORTAL_CLOUD_RECONCILE_TTL_MS) {
     return localSettings;
   }
   lastPortalCloudReconcileAt = now;

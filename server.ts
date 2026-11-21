@@ -12,8 +12,34 @@ async function startServer() {
   const distPath = path.resolve(__dirname, 'dist');
   const indexHtmlPath = path.join(distPath, 'index.html');
 
-  // Allow CORS for API and multi-domain access
+  const CANONICAL_HOST = 'syomax.com';
+  const LEGACY_REDIRECT_HOSTS = new Set([
+    'youx.ai.studio',
+    'www.youx.ai.studio',
+    'syomax.ai.studio',
+    'www.syomax.ai.studio',
+    'al-shaif-association.ai.studio',
+    'www.syomax.com',
+  ]);
+
+  // Automatic 301 redirect from legacy domains & www.syomax.com to https://syomax.com
   app.use((req, res, next) => {
+    const rawHost = String(req.headers['x-forwarded-host'] || req.headers.host || '')
+      .split(',')[0]
+      .trim()
+      .toLowerCase()
+      .replace(/:\d+$/, '');
+
+    if (
+      rawHost &&
+      rawHost !== CANONICAL_HOST &&
+      (LEGACY_REDIRECT_HOSTS.has(rawHost) || rawHost.endsWith('.ai.studio')) &&
+      !req.url.startsWith('/api/')
+    ) {
+      const targetUrl = `https://${CANONICAL_HOST}${req.originalUrl || '/'}`;
+      res.redirect(301, targetUrl);
+      return;
+    }
 
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
@@ -21,6 +47,12 @@ async function startServer() {
       'Access-Control-Allow-Headers',
       'Content-Type, Authorization, x-admin-session, x-tenant-id, x-user-role, x-member-id, x-file-name, x-image-filename, x-mime-type, x-image-mimetype, x-storage-category, x-storage-path, x-record-id, x-activity-id, x-uploaded-by, x-uploaded-by-uid'
     );
+    if (req.url.startsWith('/api/') && !req.url.startsWith('/api/images/') && !req.url.startsWith('/api/videos/stream/')) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, private');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+      res.setHeader('Surrogate-Control', 'no-store');
+    }
     if (req.method === 'OPTIONS') {
       res.status(200).end();
       return;
@@ -59,6 +91,9 @@ async function startServer() {
         setHeaders: (res, filePath) => {
           if (filePath.endsWith('.html')) {
             res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+            res.setHeader('Pragma', 'no-cache');
+            res.setHeader('Expires', '0');
+            res.setHeader('Surrogate-Control', 'no-store');
           } else if (filePath.includes('/assets/')) {
             res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
           }
@@ -76,6 +111,9 @@ async function startServer() {
     if (fs.existsSync(indexHtmlPath)) {
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+      res.setHeader('Surrogate-Control', 'no-store');
       res.status(200).sendFile(indexHtmlPath);
     } else {
       res.status(404).send('Application build not found. Please run npm run build.');

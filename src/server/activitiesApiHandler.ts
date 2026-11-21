@@ -16,7 +16,15 @@ import {
 import {
   syncTenantCollectionToFirebaseServer,
   deleteDocFromFirebaseServer,
+  fetchTenantCollectionFromFirebaseServer,
+  saveDocToFirebaseServer,
+  getDocFromFirebaseServer,
+  awaitPendingOffloadBackups,
 } from './firebaseServerStorage';
+
+const activitiesCloudReconcileCache = new Map<string, number>();
+const ACTIVITIES_RECONCILE_TTL_MS = 2000;
+const COLD_SEED_EPOCH = '1970-01-01T00:00:00.000Z';
 
 export interface ActivitiesDatabase {
   activities: ActivityItem[];
@@ -124,9 +132,9 @@ export function loadActivitiesDatabase(tenantId?: string | null): ActivitiesData
   if (fs.existsSync(dbFile)) {
     const parsed = readJsonFileSync<ActivitiesDatabase | null>(dbFile, () => null);
     if (parsed && Array.isArray(parsed.activities)) {
-      // If a non-master tenant's database exists but has 0 activities (e.g. from earlier creation bug),
-      // re-seed automatically from master Nour template and save
-      if (cleanTenant !== 'tenant_nour' && parsed.activities.length === 0) {
+      // If a non-master tenant's database exists on disk with 0 activities and was never explicitly updated,
+      // keep cold epoch so Cloud Firestore reconciliation runs first instead of overwriting cloud data.
+      if (cleanTenant !== 'tenant_nour' && parsed.activities.length === 0 && parsed.lastUpdated === COLD_SEED_EPOCH) {
         const cloned = cloneReferenceActivitiesForServerTenant(cleanTenant);
         const master = getMasterActivitiesOnServer();
         const seededDb: ActivitiesDatabase = {
@@ -134,9 +142,9 @@ export function loadActivitiesDatabase(tenantId?: string | null): ActivitiesData
           referenceVersionId: master.referenceVersionId,
           referencePublishedAt: master.referencePublishedAt,
           referencePublishedBy: master.referencePublishedBy,
-          lastUpdated: new Date().toISOString(),
+          lastUpdated: COLD_SEED_EPOCH,
         };
-        saveActivitiesDatabase(seededDb, cleanTenant);
+        saveActivitiesDatabase(seededDb, cleanTenant, false, false);
         return seededDb;
       }
 
@@ -145,12 +153,12 @@ export function loadActivitiesDatabase(tenantId?: string | null): ActivitiesData
         referenceVersionId: parsed.referenceVersionId || 'v1.0.0',
         referencePublishedAt: parsed.referencePublishedAt || new Date().toISOString(),
         referencePublishedBy: parsed.referencePublishedBy || 'إدارة جمعية النور للتنمية والتضامن',
-        lastUpdated: parsed.lastUpdated || new Date().toISOString(),
+        lastUpdated: parsed.lastUpdated || COLD_SEED_EPOCH,
       };
     }
   }
 
-  // If database file does not exist on disk, initialize with master template or clone for child tenant
+  // Cold start / missing disk file: initialize locally with epoch timestamp and do NOT overwrite Cloud Firestore
   const master = getMasterActivitiesOnServer();
   const activitiesToSave =
     cleanTenant === 'tenant_nour'
@@ -162,11 +170,10 @@ export function loadActivitiesDatabase(tenantId?: string | null): ActivitiesData
     referenceVersionId: master.referenceVersionId,
     referencePublishedAt: master.referencePublishedAt,
     referencePublishedBy: master.referencePublishedBy,
-    lastUpdated: new Date().toISOString(),
+    lastUpdated: COLD_SEED_EPOCH,
   };
 
-  // Always save permanently so subsequent reads & reloads find it on disk
-  saveActivitiesDatabase(defaultDb, cleanTenant);
+  saveActivitiesDatabase(defaultDb, cleanTenant, false, false);
   return defaultDb;
 }
 
@@ -175,7 +182,12 @@ export function initializeTenantActivities(tenantId: string): ActivitiesDatabase
   return loadActivitiesDatabase(cleanTenant);
 }
 
-export function saveActivitiesDatabase(db: ActivitiesDatabase, tenantId?: string | null): void {
+export function saveActivitiesDatabase(
+  db: ActivitiesDatabase,
+  tenantId?: string | null,
+  syncFirestore = true,
+  reconcileDeletions = true
+): void {
   const cleanTenant = normalizeTenantId(tenantId);
   const dbFile = getTenantActivitiesFile(cleanTenant);
   const sanitizedActivities = Array.isArray(db.activities)
@@ -188,9 +200,114 @@ export function saveActivitiesDatabase(db: ActivitiesDatabase, tenantId?: string
   };
 
   writeJsonFileAtomicSync(dbFile, cleanDb, 'activity');
+  if (cleanDb.lastUpdated !== COLD_SEED_EPOCH) {
+    activitiesCloudReconcileCache.set(cleanTenant, Date.now());
+  }
 
-  // Mirror activities (including galleryImages) permanently to Cloud Firestore
-  syncTenantCollectionToFirebaseServer('activities', cleanTenant, sanitizedActivities).catch(() => {});
+  // Mirror activities (including galleryImages & deletions) permanently to Cloud Firestore
+  if (syncFirestore) {
+    syncTenantCollectionToFirebaseServer('activities', cleanTenant, sanitizedActivities, [], {
+      reconcileDeletions,
+    }).catch(() => {});
+    saveDocToFirebaseServer('settings', `${cleanTenant}_activities_meta`, {
+      tenantId: cleanTenant,
+      lastUpdated: cleanDb.lastUpdated,
+      _updatedAt: cleanDb.lastUpdated,
+      count: sanitizedActivities.length,
+    }).catch(() => {});
+  }
+}
+
+async function persistActivitiesDatabaseAndCloud(
+  db: ActivitiesDatabase,
+  tenantId?: string | null,
+  removedIds: string[] = [],
+  reconcileDeletions = true
+): Promise<ActivitiesDatabase> {
+  const cleanTenant = normalizeTenantId(tenantId);
+  const nowIso = db.lastUpdated && db.lastUpdated !== COLD_SEED_EPOCH ? db.lastUpdated : new Date().toISOString();
+  const sanitizedActivities = Array.isArray(db.activities)
+    ? db.activities.map((a) => ({
+        ...sanitizeActivityMedia(a),
+        tenantId: cleanTenant,
+        associationId: cleanTenant,
+      }))
+    : [];
+  const cleanDb: ActivitiesDatabase = {
+    ...db,
+    activities: sanitizedActivities,
+    lastUpdated: nowIso,
+  };
+
+  saveActivitiesDatabase(cleanDb, cleanTenant, false, false);
+  activitiesCloudReconcileCache.set(cleanTenant, Date.now());
+
+  await Promise.all([
+    awaitPendingOffloadBackups(),
+    syncTenantCollectionToFirebaseServer('activities', cleanTenant, sanitizedActivities, removedIds, {
+      reconcileDeletions,
+    }),
+    saveDocToFirebaseServer('settings', `${cleanTenant}_activities_meta`, {
+      tenantId: cleanTenant,
+      lastUpdated: nowIso,
+      _updatedAt: nowIso,
+      count: sanitizedActivities.length,
+    }),
+  ]);
+
+  return cleanDb;
+}
+
+async function reconcileActivitiesFromCloudFirestore(
+  tenantId: string,
+  force = false
+): Promise<ActivitiesDatabase> {
+  const cleanTenant = normalizeTenantId(tenantId);
+  const localDb = loadActivitiesDatabase(cleanTenant);
+  const isColdLocal = localDb.lastUpdated === COLD_SEED_EPOCH;
+  const lastCheck = activitiesCloudReconcileCache.get(cleanTenant) || 0;
+  if (!force && !isColdLocal && Date.now() - lastCheck < ACTIVITIES_RECONCILE_TTL_MS) {
+    return localDb;
+  }
+  activitiesCloudReconcileCache.set(cleanTenant, Date.now());
+
+  try {
+    const [cloudActivities, cloudMeta] = await Promise.all([
+      fetchTenantCollectionFromFirebaseServer<ActivityItem>('activities', cleanTenant),
+      getDocFromFirebaseServer<any>('settings', `${cleanTenant}_activities_meta`),
+    ]);
+
+    const localTs = isColdLocal ? 0 : new Date(localDb.lastUpdated || 0).getTime();
+    let maxCloudTs = cloudMeta
+      ? new Date(cloudMeta._updatedAt || cloudMeta.lastUpdated || 0).getTime()
+      : 0;
+
+    if (Array.isArray(cloudActivities)) {
+      for (const act of cloudActivities) {
+        const ts = new Date((act as any)._updatedAt || (act as any).updatedAt || (act as any).createdAt || act.date || 0).getTime();
+        if (ts > maxCloudTs) maxCloudTs = ts;
+      }
+    }
+
+    const hasCloudActivities = Array.isArray(cloudActivities) && cloudActivities.length > 0;
+    const hasAuthoritativeMeta = Boolean(cloudMeta && (cloudMeta._updatedAt || cloudMeta.lastUpdated));
+
+    if ((hasCloudActivities || hasAuthoritativeMeta) && (isColdLocal || maxCloudTs > localTs)) {
+      const cleaned = (cloudActivities || [])
+        .filter((a) => a && a.id)
+        .map((a) => sanitizeActivityMedia(a))
+        .sort((a, b) => new Date(b.date || (b as any).createdAt || 0).getTime() - new Date(a.date || (a as any).createdAt || 0).getTime());
+      const reconciledDb: ActivitiesDatabase = {
+        ...localDb,
+        activities: cleaned,
+        lastUpdated: maxCloudTs > 0 ? new Date(maxCloudTs).toISOString() : new Date().toISOString(),
+      };
+      saveActivitiesDatabase(reconciledDb, cleanTenant, false, false);
+      return reconciledDb;
+    }
+  } catch {}
+
+  return localDb;
 }
 
 function sendJson(res: ServerResponse, statusCode: number, data: any) {
@@ -229,11 +346,13 @@ export async function handleActivitiesApi(
   const queryTenant = parsedUrl.searchParams.get('tenantId')?.trim();
   const tenantId = normalizeTenantId(headerTenant || queryTenant);
 
-  const db = loadActivitiesDatabase(tenantId);
   const cleanPath = url.split('?')[0];
+
+  const forceCloud = parsedUrl.searchParams.get('force') === 'true';
 
   // 1. GET /api/activities
   if (req.method === 'GET' && cleanPath === '/api/activities') {
+    const db = await reconcileActivitiesFromCloudFirestore(tenantId, forceCloud);
     sendJson(res, 200, {
       success: true,
       tenantId,
@@ -255,29 +374,30 @@ export async function handleActivitiesApi(
     try {
       const body = await readLargeJsonBody(req);
       const targetTenant = normalizeTenantId(body.tenantId || tenantId);
-      const targetDb = loadActivitiesDatabase(targetTenant);
+      const targetDb = await reconcileActivitiesFromCloudFirestore(targetTenant, true);
 
       // Single activity create/upsert support
       if (body.activity && typeof body.activity === 'object' && !Array.isArray(body.activities)) {
-        const incomingAct = sanitizeActivityMedia(body.activity);
+        const nowIso = new Date().toISOString();
+        const incomingAct = sanitizeActivityMedia({ ...body.activity, updatedAt: nowIso } as ActivityItem);
         if (!incomingAct.id) {
           incomingAct.id = `act-${Date.now()}`;
         }
         const idx = targetDb.activities.findIndex((a) => a.id === incomingAct.id);
         if (idx >= 0) {
-          targetDb.activities[idx] = { ...targetDb.activities[idx], ...incomingAct };
+          targetDb.activities[idx] = { ...targetDb.activities[idx], ...incomingAct, updatedAt: nowIso } as ActivityItem;
         } else {
           targetDb.activities.unshift(incomingAct);
         }
-        targetDb.lastUpdated = new Date().toISOString();
-        saveActivitiesDatabase(targetDb, targetTenant);
+        targetDb.lastUpdated = nowIso;
+        const savedDb = await persistActivitiesDatabaseAndCloud(targetDb, targetTenant, [], true);
 
         sendJson(res, 200, {
           success: true,
           tenantId: targetTenant,
-          activity: incomingAct,
-          activities: targetDb.activities,
-          lastUpdated: targetDb.lastUpdated,
+          activity: savedDb.activities.find((a) => a.id === incomingAct.id) || incomingAct,
+          activities: savedDb.activities,
+          lastUpdated: savedDb.lastUpdated,
         });
         return true;
       }
@@ -287,8 +407,11 @@ export async function handleActivitiesApi(
         return true;
       }
 
-      targetDb.activities = body.activities.map((a: ActivityItem) => sanitizeActivityMedia(a));
-      targetDb.lastUpdated = new Date().toISOString();
+      const nowIso = new Date().toISOString();
+      targetDb.activities = body.activities.map((a: ActivityItem) =>
+        sanitizeActivityMedia({ ...a, updatedAt: (a as any)?.updatedAt || nowIso } as ActivityItem)
+      );
+      targetDb.lastUpdated = nowIso;
       if (body.referenceVersionId) {
         targetDb.referenceVersionId = body.referenceVersionId;
       }
@@ -296,13 +419,13 @@ export async function handleActivitiesApi(
         targetDb.referencePublishedBy = body.referencePublishedBy;
       }
 
-      saveActivitiesDatabase(targetDb, targetTenant);
+      const savedDb = await persistActivitiesDatabaseAndCloud(targetDb, targetTenant, [], true);
 
       sendJson(res, 200, {
         success: true,
         tenantId: targetTenant,
-        activities: targetDb.activities,
-        lastUpdated: targetDb.lastUpdated,
+        activities: savedDb.activities,
+        lastUpdated: savedDb.lastUpdated,
       });
       return true;
     } catch (err: any) {
@@ -315,7 +438,7 @@ export async function handleActivitiesApi(
   if (req.method === 'POST' && cleanPath === '/api/activities/publish-reference') {
     try {
       const body = await readLargeJsonBody(req);
-      const masterDb = loadActivitiesDatabase('tenant_nour');
+      const masterDb = await reconcileActivitiesFromCloudFirestore('tenant_nour', true);
       if (Array.isArray(body.activities)) {
         masterDb.activities = body.activities.map((a: ActivityItem) => sanitizeActivityMedia(a));
       }
@@ -331,14 +454,14 @@ export async function handleActivitiesApi(
         body.publishedBy || 'إدارة جمعية النور للتنمية والتضامن (النموذج المعتمد)';
       masterDb.lastUpdated = new Date().toISOString();
 
-      saveActivitiesDatabase(masterDb, 'tenant_nour');
+      const savedMaster = await persistActivitiesDatabaseAndCloud(masterDb, 'tenant_nour', [], true);
 
       sendJson(res, 200, {
         success: true,
-        referenceVersionId: masterDb.referenceVersionId,
-        referencePublishedAt: masterDb.referencePublishedAt,
-        referencePublishedBy: masterDb.referencePublishedBy,
-        activitiesCount: masterDb.activities.length,
+        referenceVersionId: savedMaster.referenceVersionId,
+        referencePublishedAt: savedMaster.referencePublishedAt,
+        referencePublishedBy: savedMaster.referencePublishedBy,
+        activitiesCount: savedMaster.activities.length,
       });
       return true;
     } catch (err: any) {
@@ -354,7 +477,7 @@ export async function handleActivitiesApi(
       const activityId = decodeURIComponent(statusPathMatch[1]);
       const body = await readLargeJsonBody(req);
       const targetTenant = normalizeTenantId(body.tenantId || tenantId);
-      const targetDb = loadActivitiesDatabase(targetTenant);
+      const targetDb = await reconcileActivitiesFromCloudFirestore(targetTenant, true);
       const actIndex = targetDb.activities.findIndex((a) => a.id === activityId);
 
       if (actIndex === -1) {
@@ -379,16 +502,16 @@ export async function handleActivitiesApi(
         updatedAt: nowIso,
       } as ActivityItem;
       targetDb.lastUpdated = nowIso;
-      saveActivitiesDatabase(targetDb, targetTenant);
+      const savedDb = await persistActivitiesDatabaseAndCloud(targetDb, targetTenant, [], true);
 
       sendJson(res, 200, {
         success: true,
         tenantId: targetTenant,
         activityId,
         isActive: nextIsActive,
-        activity: targetDb.activities[actIndex],
-        activities: targetDb.activities,
-        lastUpdated: targetDb.lastUpdated,
+        activity: savedDb.activities[actIndex],
+        activities: savedDb.activities,
+        lastUpdated: savedDb.lastUpdated,
       });
       return true;
     } catch (err: any) {
@@ -404,7 +527,7 @@ export async function handleActivitiesApi(
       const activityId = decodeURIComponent(galleryPathMatch[1]);
       const body = await readLargeJsonBody(req);
       const targetTenant = normalizeTenantId(body.tenantId || tenantId);
-      const targetDb = loadActivitiesDatabase(targetTenant);
+      const targetDb = await reconcileActivitiesFromCloudFirestore(targetTenant, true);
       const actIndex = targetDb.activities.findIndex((a) => a.id === activityId);
 
       if (actIndex === -1) {
@@ -438,23 +561,25 @@ export async function handleActivitiesApi(
 
       const currentCover = targetDb.activities[actIndex].coverImage;
       const updatedCover = currentCover || (mergedGallery.length > 0 ? mergedGallery[0] : '');
+      const nowIso = new Date().toISOString();
 
       targetDb.activities[actIndex] = {
         ...targetDb.activities[actIndex],
         coverImage: updatedCover,
         galleryImages: mergedGallery,
-      };
-      targetDb.lastUpdated = new Date().toISOString();
-      saveActivitiesDatabase(targetDb, targetTenant);
+        updatedAt: nowIso,
+      } as ActivityItem;
+      targetDb.lastUpdated = nowIso;
+      const savedDb = await persistActivitiesDatabaseAndCloud(targetDb, targetTenant, [], true);
 
       sendJson(res, 200, {
         success: true,
         tenantId: targetTenant,
         activityId,
         galleryImages: mergedGallery,
-        activity: targetDb.activities[actIndex],
-        activities: targetDb.activities,
-        lastUpdated: targetDb.lastUpdated,
+        activity: savedDb.activities[actIndex],
+        activities: savedDb.activities,
+        lastUpdated: savedDb.lastUpdated,
       });
       return true;
     } catch (err: any) {
@@ -473,7 +598,7 @@ export async function handleActivitiesApi(
       body = {};
     }
     const targetTenant = normalizeTenantId(body?.tenantId || tenantId);
-    const targetDb = loadActivitiesDatabase(targetTenant);
+    const targetDb = await reconcileActivitiesFromCloudFirestore(targetTenant, true);
     const actIndex = targetDb.activities.findIndex((a) => a.id === activityId);
 
     if (actIndex === -1) {
@@ -484,6 +609,8 @@ export async function handleActivitiesApi(
     const isDeleteAll =
       parsedUrl.searchParams.get('all') === 'true' ||
       body?.all === true;
+
+    const nowIso = new Date().toISOString();
 
     if (!isDeleteAll && (typeof body?.index === 'number' || typeof body?.imageUrl === 'string')) {
       const currentGallery = Array.isArray(targetDb.activities[actIndex].galleryImages)
@@ -509,15 +636,16 @@ export async function handleActivitiesApi(
         ...targetDb.activities[actIndex],
         coverImage: updatedCover,
         galleryImages: updatedGallery,
-      };
-      targetDb.lastUpdated = new Date().toISOString();
-      saveActivitiesDatabase(targetDb, targetTenant);
+        updatedAt: nowIso,
+      } as ActivityItem;
+      targetDb.lastUpdated = nowIso;
+      const savedDb = await persistActivitiesDatabaseAndCloud(targetDb, targetTenant, [], true);
 
       sendJson(res, 200, {
         success: true,
         activityId,
         galleryImages: updatedGallery,
-        activity: targetDb.activities[actIndex],
+        activity: savedDb.activities[actIndex],
       });
       return true;
     }
@@ -525,15 +653,16 @@ export async function handleActivitiesApi(
     targetDb.activities[actIndex] = {
       ...targetDb.activities[actIndex],
       galleryImages: [],
-    };
-    targetDb.lastUpdated = new Date().toISOString();
-    saveActivitiesDatabase(targetDb, targetTenant);
+      updatedAt: nowIso,
+    } as ActivityItem;
+    targetDb.lastUpdated = nowIso;
+    const savedDb = await persistActivitiesDatabaseAndCloud(targetDb, targetTenant, [], true);
 
     sendJson(res, 200, {
       success: true,
       activityId,
       galleryImages: [],
-      activity: targetDb.activities[actIndex],
+      activity: savedDb.activities[actIndex],
     });
     return true;
   }
@@ -543,6 +672,7 @@ export async function handleActivitiesApi(
   if (req.method === 'DELETE' && deleteSingleMatch) {
     const activityId = decodeURIComponent(deleteSingleMatch[1]);
     const targetIndex = parseInt(deleteSingleMatch[2], 10);
+    const db = await reconcileActivitiesFromCloudFirestore(tenantId, true);
 
     const actIndex = db.activities.findIndex((a) => a.id === activityId);
     if (actIndex === -1) {
@@ -567,13 +697,15 @@ export async function handleActivitiesApi(
       updatedCover = updatedGallery.length > 0 ? updatedGallery[0] : '';
     }
 
+    const nowIso = new Date().toISOString();
     db.activities[actIndex] = {
       ...db.activities[actIndex],
       coverImage: updatedCover,
       galleryImages: updatedGallery,
-    };
-    db.lastUpdated = new Date().toISOString();
-    saveActivitiesDatabase(db, tenantId);
+      updatedAt: nowIso,
+    } as ActivityItem;
+    db.lastUpdated = nowIso;
+    const savedDb = await persistActivitiesDatabaseAndCloud(db, tenantId, [], true);
 
     sendJson(res, 200, {
       success: true,
@@ -581,7 +713,7 @@ export async function handleActivitiesApi(
       removedIndex: targetIndex,
       removedUrl,
       galleryImages: updatedGallery,
-      activity: db.activities[actIndex],
+      activity: savedDb.activities[actIndex],
     });
     return true;
   }
@@ -594,8 +726,10 @@ export async function handleActivitiesApi(
       return false;
     }
 
+    const db = await reconcileActivitiesFromCloudFirestore(tenantId, true);
     const actIndex = db.activities.findIndex((a) => a.id === activityId);
     if (actIndex === -1) {
+      await deleteDocFromFirebaseServer('activities', `${tenantId}_${activityId}`).catch(() => {});
       sendJson(res, 200, {
         success: true,
         deletedId: activityId,
@@ -611,14 +745,14 @@ export async function handleActivitiesApi(
     db.lastUpdated = new Date().toISOString();
 
     try {
-      saveActivitiesDatabase(db, tenantId);
-      deleteDocFromFirebaseServer('activities', `${tenantId}_${activityId}`).catch(() => {});
+      const savedDb = await persistActivitiesDatabaseAndCloud(db, tenantId, [activityId], true);
+      await deleteDocFromFirebaseServer('activities', `${tenantId}_${activityId}`).catch(() => {});
       sendJson(res, 200, {
         success: true,
         deletedId: activityId,
         deletedActivity,
-        activities: db.activities,
-        lastUpdated: db.lastUpdated,
+        activities: savedDb.activities,
+        lastUpdated: savedDb.lastUpdated,
         message: 'تم حذف النشاط نهائيًا من قاعدة البيانات بنجاح.',
       });
     } catch (err: any) {

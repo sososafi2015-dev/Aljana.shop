@@ -12,6 +12,15 @@ import {
   writeJsonFileAtomicSync,
   readLargeJsonBody,
 } from './storageEngine';
+import {
+  saveDocToFirebaseServer,
+  getDocFromFirebaseServer,
+  awaitPendingOffloadBackups,
+} from './firebaseServerStorage';
+
+const cardSettingsCloudReconcileCache = new Map<string, number>();
+const CARD_RECONCILE_TTL_MS = 2000;
+const COLD_SEED_EPOCH = '1970-01-01T00:00:00.000Z';
 
 export interface CardSettingsDatabase extends MemberCardSettings {
   tenantId?: string;
@@ -40,7 +49,7 @@ export function readCardSettingsFromDisk(tenantId?: string | null): CardSettings
         tenantId: cleanTenant,
         stampImageUrl: parsed.stampImageUrl ?? '',
         signatureImageUrl: parsed.signatureImageUrl ?? '',
-        updatedAt: parsed.updatedAt || new Date().toISOString(),
+        updatedAt: parsed.updatedAt || COLD_SEED_EPOCH,
       };
     }
   }
@@ -50,14 +59,19 @@ export function readCardSettingsFromDisk(tenantId?: string | null): CardSettings
     tenantId: cleanTenant,
     stampImageUrl: initialMemberCardSettings.stampImageUrl || '',
     signatureImageUrl: initialMemberCardSettings.signatureImageUrl || '',
-    updatedAt: new Date().toISOString(),
+    updatedAt: COLD_SEED_EPOCH,
   };
 }
 
-export function writeCardSettingsToDisk(settings: CardSettingsDatabase, tenantId?: string | null): CardSettingsDatabase {
+export function writeCardSettingsToDisk(
+  settings: CardSettingsDatabase,
+  tenantId?: string | null,
+  syncFirestore = true
+): CardSettingsDatabase {
   ensureStorageDirectories();
   const cleanTenant = normalizeTenantId(tenantId || settings.tenantId);
   const filePath = getCardSettingsFile(cleanTenant);
+  const nowIso = settings.updatedAt || new Date().toISOString();
   const updated: CardSettingsDatabase = {
     ...initialMemberCardSettings,
     ...settings,
@@ -70,10 +84,73 @@ export function writeCardSettingsToDisk(settings: CardSettingsDatabase, tenantId
       settings.signatureImageUrl && settings.signatureImageUrl.startsWith('data:')
         ? offloadBase64ToDisk(settings.signatureImageUrl, 'president_signature')
         : settings.signatureImageUrl ?? '',
-    updatedAt: new Date().toISOString(),
+    updatedAt: nowIso,
   };
   writeJsonFileAtomicSync(filePath, updated, `card_${cleanTenant}`);
+  if (nowIso !== COLD_SEED_EPOCH) {
+    cardSettingsCloudReconcileCache.set(cleanTenant, Date.now());
+  }
+
+  if (syncFirestore) {
+    saveDocToFirebaseServer('settings', `${cleanTenant}_member_card`, {
+      ...updated,
+      tenantId: cleanTenant,
+      _updatedAt: nowIso,
+    }).catch(() => {});
+  }
   return updated;
+}
+
+async function persistCardSettingsAndCloud(
+  settings: CardSettingsDatabase,
+  tenantId?: string | null
+): Promise<CardSettingsDatabase> {
+  const cleanTenant = normalizeTenantId(tenantId || settings.tenantId);
+  const saved = writeCardSettingsToDisk(settings, cleanTenant, false);
+  await Promise.all([
+    awaitPendingOffloadBackups(),
+    saveDocToFirebaseServer('settings', `${cleanTenant}_member_card`, {
+      ...saved,
+      tenantId: cleanTenant,
+      _updatedAt: saved.updatedAt,
+    }),
+  ]);
+  return saved;
+}
+
+async function reconcileCardSettingsFromCloudFirestore(
+  tenantId: string,
+  force = false
+): Promise<CardSettingsDatabase> {
+  const cleanTenant = normalizeTenantId(tenantId);
+  const localSettings = readCardSettingsFromDisk(cleanTenant);
+  const isColdLocal = localSettings.updatedAt === COLD_SEED_EPOCH;
+  const lastCheck = cardSettingsCloudReconcileCache.get(cleanTenant) || 0;
+  if (!force && !isColdLocal && Date.now() - lastCheck < CARD_RECONCILE_TTL_MS) {
+    return localSettings;
+  }
+  cardSettingsCloudReconcileCache.set(cleanTenant, Date.now());
+
+  try {
+    const cloudDoc = await getDocFromFirebaseServer<any>('settings', `${cleanTenant}_member_card`);
+    if (cloudDoc && typeof cloudDoc === 'object') {
+      const cloudTs = new Date(cloudDoc._updatedAt || cloudDoc.updatedAt || 0).getTime();
+      const localTs = isColdLocal ? 0 : new Date(localSettings.updatedAt || 0).getTime();
+      if (isColdLocal || cloudTs > localTs) {
+        const { _updatedAt, ...rest } = cloudDoc;
+        return writeCardSettingsToDisk(
+          {
+            ...localSettings,
+            ...rest,
+            updatedAt: cloudDoc._updatedAt || cloudDoc.updatedAt || new Date().toISOString(),
+          },
+          cleanTenant,
+          false
+        );
+      }
+    }
+  } catch {}
+  return localSettings;
 }
 
 function sendJson(res: ServerResponse, statusCode: number, data: any): boolean {
@@ -117,8 +194,10 @@ export async function handleCardSettingsApi(req: IncomingMessage, res: ServerRes
   const method = req.method?.toUpperCase();
 
   try {
+    const forceCloud = parsedUrl.searchParams.get('force') === 'true';
+
     if (method === 'GET' && url === '/api/card-settings') {
-      const settings = readCardSettingsFromDisk(tenantId);
+      const settings = await reconcileCardSettingsFromCloudFirestore(tenantId, forceCloud);
       return sendJson(res, 200, {
         success: true,
         tenantId,
@@ -129,7 +208,7 @@ export async function handleCardSettingsApi(req: IncomingMessage, res: ServerRes
     if ((method === 'POST' || method === 'PUT') && url === '/api/card-settings') {
       const body = await readLargeJsonBody(req);
       const targetTenant = normalizeTenantId(body.tenantId || tenantId);
-      const current = readCardSettingsFromDisk(targetTenant);
+      const current = await reconcileCardSettingsFromCloudFirestore(targetTenant, true);
       const incoming = body.settings || body;
 
       let stampImageUrl = incoming.stampImageUrl !== undefined ? incoming.stampImageUrl : current.stampImageUrl;
@@ -150,7 +229,7 @@ export async function handleCardSettingsApi(req: IncomingMessage, res: ServerRes
         signatureImageUrl,
         updatedAt: new Date().toISOString(),
       };
-      const saved = writeCardSettingsToDisk(next, targetTenant);
+      const saved = await persistCardSettingsAndCloud(next, targetTenant);
 
       return sendJson(res, 200, {
         success: true,
@@ -163,7 +242,7 @@ export async function handleCardSettingsApi(req: IncomingMessage, res: ServerRes
     if (method === 'POST' && url === '/api/card-settings/stamp') {
       const body = await readLargeJsonBody(req);
       const targetTenant = normalizeTenantId(body.tenantId || tenantId);
-      const current = readCardSettingsFromDisk(targetTenant);
+      const current = await reconcileCardSettingsFromCloudFirestore(targetTenant, true);
       let finalUrl = body.stampImageUrl || '';
       if (finalUrl.startsWith('data:')) {
         finalUrl = offloadBase64ToDisk(finalUrl, 'official_stamp');
@@ -173,23 +252,23 @@ export async function handleCardSettingsApi(req: IncomingMessage, res: ServerRes
         stampImageUrl: finalUrl,
         updatedAt: new Date().toISOString(),
       };
-      const saved = writeCardSettingsToDisk(next, targetTenant);
+      const saved = await persistCardSettingsAndCloud(next, targetTenant);
       return sendJson(res, 200, {
         success: true,
-        stampImageUrl: finalUrl,
+        stampImageUrl: saved.stampImageUrl,
         settings: saved,
         message: 'تم حفظ الختم الرسمي في قاعدة البيانات بنجاح.',
       });
     }
 
     if (method === 'DELETE' && url === '/api/card-settings/stamp') {
-      const current = readCardSettingsFromDisk(tenantId);
+      const current = await reconcileCardSettingsFromCloudFirestore(tenantId, true);
       const next: CardSettingsDatabase = {
         ...current,
         stampImageUrl: '',
         updatedAt: new Date().toISOString(),
       };
-      const saved = writeCardSettingsToDisk(next, tenantId);
+      const saved = await persistCardSettingsAndCloud(next, tenantId);
       return sendJson(res, 200, {
         success: true,
         stampImageUrl: '',
@@ -201,7 +280,7 @@ export async function handleCardSettingsApi(req: IncomingMessage, res: ServerRes
     if (method === 'POST' && url === '/api/card-settings/signature') {
       const body = await readLargeJsonBody(req);
       const targetTenant = normalizeTenantId(body.tenantId || tenantId);
-      const current = readCardSettingsFromDisk(targetTenant);
+      const current = await reconcileCardSettingsFromCloudFirestore(targetTenant, true);
       let finalUrl = body.signatureImageUrl || '';
       if (finalUrl.startsWith('data:')) {
         finalUrl = offloadBase64ToDisk(finalUrl, 'president_signature');
@@ -211,23 +290,23 @@ export async function handleCardSettingsApi(req: IncomingMessage, res: ServerRes
         signatureImageUrl: finalUrl,
         updatedAt: new Date().toISOString(),
       };
-      const saved = writeCardSettingsToDisk(next, targetTenant);
+      const saved = await persistCardSettingsAndCloud(next, targetTenant);
       return sendJson(res, 200, {
         success: true,
-        signatureImageUrl: finalUrl,
+        signatureImageUrl: saved.signatureImageUrl,
         settings: saved,
         message: 'تم حفظ توقيع الرئيس في قاعدة البيانات بنجاح.',
       });
     }
 
     if (method === 'DELETE' && url === '/api/card-settings/signature') {
-      const current = readCardSettingsFromDisk(tenantId);
+      const current = await reconcileCardSettingsFromCloudFirestore(tenantId, true);
       const next: CardSettingsDatabase = {
         ...current,
         signatureImageUrl: '',
         updatedAt: new Date().toISOString(),
       };
-      const saved = writeCardSettingsToDisk(next, tenantId);
+      const saved = await persistCardSettingsAndCloud(next, tenantId);
       return sendJson(res, 200, {
         success: true,
         signatureImageUrl: '',

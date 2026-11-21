@@ -52,7 +52,7 @@ interface MyAccountSectionProps {
   settings?: AssociationSettings;
   polls: Poll[];
   lang: Language;
-  onUpdateProfile: (updatedData: Partial<Member>) => void;
+  onUpdateProfile: (updatedData: Partial<Member>) => Promise<{ success: boolean; message: string }> | void;
   onChangePassword: (currentPass: string, newPass: string) => Promise<{ success: boolean; message: string }>;
   onAddContribution?: (contribution: Omit<MemberContribution, 'id' | 'createdAt'>) => Promise<{ success: boolean; message: string; contribution?: MemberContribution }>;
   onLogout: () => void;
@@ -349,15 +349,19 @@ export const MyAccountSection: React.FC<MyAccountSectionProps> = ({
       const compressed = await compressAvatar(file);
       const permanentAvatarUrl = await ensurePermanentImageUrl(compressed, `member_avatar_${member.id}`);
       setAvatarUrl(permanentAvatarUrl);
-      onUpdateProfile({ avatarUrl: permanentAvatarUrl });
-      setProfileMessage({ type: 'success', text: 'تم تحديث وحفظ الصورة الشخصية بشكل دائم بنجاح!' });
+      const res = await onUpdateProfile({ avatarUrl: permanentAvatarUrl });
+      if (res && res.success === false) {
+        setProfileMessage({ type: 'error', text: res.message || 'تعذر حفظ الصورة الشخصية في قاعدة البيانات.' });
+      } else {
+        setProfileMessage({ type: 'success', text: 'تم تحديث وحفظ الصورة الشخصية بشكل دائم ونشرها تلقائياً بنجاح!' });
+      }
     } catch (err: any) {
       setProfileMessage({ type: 'error', text: err.message || 'فشل تحميل الصورة' });
     }
   };
 
   // Handle Profile Update
-  const handleSaveProfile = (e: React.FormEvent) => {
+  const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     setProfileMessage(null);
 
@@ -374,7 +378,7 @@ export const MyAccountSection: React.FC<MyAccountSectionProps> = ({
     setIsSavingProfile(true);
 
     try {
-      onUpdateProfile({
+      const res = await onUpdateProfile({
         fullName: fullName.trim(),
         phone: phone.trim(),
         email: email.trim() || undefined,
@@ -382,9 +386,13 @@ export const MyAccountSection: React.FC<MyAccountSectionProps> = ({
         avatarUrl: avatarUrl || undefined,
       });
 
-      setProfileMessage({ type: 'success', text: t.profileUpdatedSuccess || 'تم حفظ وتحديث بيانات حسابك بنجاح!' });
-    } catch (err) {
-      setProfileMessage({ type: 'error', text: 'حدث خطأ أثناء حفظ البيانات.' });
+      if (res && res.success === false) {
+        setProfileMessage({ type: 'error', text: res.message || 'تعذر حفظ التعديلات في قاعدة البيانات.' });
+      } else {
+        setProfileMessage({ type: 'success', text: t.profileUpdatedSuccess || 'تم حفظ وتحديث بيانات حسابك ونشرها تلقائياً بنجاح!' });
+      }
+    } catch (err: any) {
+      setProfileMessage({ type: 'error', text: err?.message || 'حدث خطأ أثناء حفظ البيانات.' });
     } finally {
       setIsSavingProfile(false);
     }

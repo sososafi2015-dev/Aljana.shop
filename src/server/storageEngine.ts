@@ -28,6 +28,20 @@ export function normalizeTenantId(tenantId?: string | null): string {
   return clean || 'tenant_nour';
 }
 
+export type OffloadCloudBackupHook = (params: {
+  filename: string;
+  buffer: Buffer;
+  mimeType: string;
+  url: string;
+  category: string;
+}) => void;
+
+let offloadCloudBackupHook: OffloadCloudBackupHook | null = null;
+
+export function registerOffloadCloudBackupHook(hook: OffloadCloudBackupHook): void {
+  offloadCloudBackupHook = hook;
+}
+
 /**
  * Offloads a single base64 Data URL (image, PDF, document, or video) to permanent disk storage
  * and returns its permanent `/api/images/...` or `/api/videos/stream/...` URL.
@@ -68,7 +82,17 @@ export function offloadBase64ToDisk(dataUrl: string, prefix = 'media'): string {
         fs.writeFileSync(tmpPath, buffer);
         fs.renameSync(tmpPath, filePath);
       }
-      return `/api/videos/stream/${videoId}`;
+      const videoUrl = `/api/videos/stream/${videoId}`;
+      try {
+        offloadCloudBackupHook?.({
+          filename,
+          buffer,
+          mimeType,
+          url: videoUrl,
+          category: 'videos',
+        });
+      } catch {}
+      return videoUrl;
     }
 
     let ext = '.jpg';
@@ -90,7 +114,18 @@ export function offloadBase64ToDisk(dataUrl: string, prefix = 'media'): string {
       fs.renameSync(tmpPath, filePath);
     }
 
-    return `/api/images/${filename}`;
+    const imageUrl = `/api/images/${filename}`;
+    try {
+      offloadCloudBackupHook?.({
+        filename,
+        buffer,
+        mimeType,
+        url: imageUrl,
+        category: safePrefix || 'images',
+      });
+    } catch {}
+
+    return imageUrl;
   } catch (err) {
     console.error('[StorageEngine] Failed to offload base64 media to disk:', err);
     return dataUrl;

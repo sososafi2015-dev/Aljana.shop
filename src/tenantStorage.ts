@@ -526,15 +526,53 @@ export function saveAllTenants(tenants: AssociationTenant[]): void {
 }
 
 /**
+ * Applies live Cloud Firestore tenant snapshot updates to local cache & UI without triggering write-back loops
+ */
+export function applyRealtimeTenants(incomingTenants: AssociationTenant[]): void {
+  if (!Array.isArray(incomingTenants) || incomingTenants.length === 0) return;
+  const deletedIds = getDeletedTenantIds();
+  const currentTenants = getAllTenants();
+  const mergedMap = new Map<string, AssociationTenant>();
+
+  for (const existing of currentTenants) {
+    if (existing && existing.id && !deletedIds.has(existing.id)) {
+      mergedMap.set(existing.id, existing);
+    }
+  }
+
+  for (const incoming of incomingTenants) {
+    if (!incoming || !incoming.id || !incoming.name || deletedIds.has(incoming.id)) continue;
+    const prev = mergedMap.get(incoming.id);
+    if (!prev) {
+      mergedMap.set(incoming.id, incoming);
+    } else {
+      mergedMap.set(incoming.id, {
+        ...prev,
+        ...incoming,
+        logoUrl: incoming.logoUrl || prev.logoUrl,
+        bannerImageUrl: incoming.bannerImageUrl || prev.bannerImageUrl,
+      });
+    }
+  }
+
+  const mergedList = Array.from(mergedMap.values());
+  saveData(TENANT_STORAGE_KEYS.ALL_TENANTS, mergedList);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('chayef-tenants-changed', { detail: mergedList }));
+  }
+}
+
+/**
  * Fetches tenants & owners from backend disk database and performs a non-destructive bidirectional merge
  * with local storage so newly created associations are never lost!
  */
-export async function syncTenantsFromBackend(): Promise<AssociationTenant[]> {
+export async function syncTenantsFromBackend(force = false): Promise<AssociationTenant[]> {
   try {
     const deletedIds = getDeletedTenantIds();
+    const q = force ? `?force=true&_t=${Date.now()}` : `?_t=${Date.now()}`;
     const [tenantsRes, ownersRes] = await Promise.all([
-      fetch('/api/tenants'),
-      fetch('/api/tenants/owners').catch(() => null),
+      fetch(`/api/tenants${q}`, { cache: 'no-store' }),
+      fetch('/api/tenants/owners', { cache: 'no-store' }).catch(() => null),
     ]);
 
     if (tenantsRes.ok) {
@@ -1277,21 +1315,22 @@ export function createAssociationPlatform(input: CreateAssociationInput): { tena
     }).catch(() => {});
   } catch {}
 
-  // Also persist tenant & hashed owner credentials permanently to Cloud Firestore
+  // Also persist tenant & hashed owner credentials permanently to Cloud Firestore (strip undefined fields cleanly)
   try {
     if (db) {
-      setDoc(
-        doc(db, 'tenants', newTenantId),
-        {
+      const sanitizedTenantPayload = JSON.parse(
+        JSON.stringify({
           ...newTenant,
           ownerUsername: cleanUsername || '',
           ownerPasswordHash: passwordHash,
           ownerPasswordSalt: salt,
           hasCustomPassword: true,
           _updatedAt: new Date().toISOString(),
-        },
-        { merge: true }
-      ).catch(() => {});
+        })
+      );
+      setDoc(doc(db, 'tenants', newTenantId), sanitizedTenantPayload, { merge: true }).catch((err) => {
+        console.warn('[tenantStorage] Firestore new tenant write warning:', err);
+      });
     }
   } catch {}
 
@@ -1504,10 +1543,12 @@ export function setTenantStatus(tenantId: string, newStatus: AssociationStatus):
   if (index === -1) return null;
 
   const current = tenants[index];
+  const now = new Date().toISOString();
   tenants[index] = {
     ...current,
     status: newStatus,
-    updatedAt: new Date().toISOString(),
+    ...(newStatus === 'active' ? { paymentVerified: true, paymentVerifiedAt: current.paymentVerifiedAt || now } : {}),
+    updatedAt: now,
   };
 
   saveAllTenants(tenants);
@@ -1519,6 +1560,14 @@ export function setTenantStatus(tenantId: string, newStatus: AssociationStatus):
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: newStatus }),
     }).catch(() => {});
+  } catch {}
+
+  // Persist status change directly to Cloud Firestore
+  try {
+    if (db) {
+      const sanitized = JSON.parse(JSON.stringify({ ...tenants[index], _updatedAt: now }));
+      setDoc(doc(db, 'tenants', tenantId), sanitized, { merge: true }).catch(() => {});
+    }
   } catch {}
 
   return tenants[index];

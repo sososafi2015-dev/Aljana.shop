@@ -507,7 +507,7 @@ export async function apiFetchActivitiesWithMeta(tenantId?: string): Promise<Act
   const activeTenant = !rawTenant || rawTenant === 'portal' ? 'tenant_nour' : rawTenant;
   try {
     const [res, firestoreActivities] = await Promise.all([
-      fetch(`/api/activities?ts=${Date.now()}&tenantId=${encodeURIComponent(activeTenant)}`, {
+      fetch(`/api/activities?ts=${Date.now()}&force=true&tenantId=${encodeURIComponent(activeTenant)}`, {
         method: 'GET',
         headers: {
           'Accept': 'application/json',

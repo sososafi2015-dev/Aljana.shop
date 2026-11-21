@@ -13,6 +13,15 @@ import {
   writeJsonFileAtomicSync,
   readLargeJsonBody,
 } from './storageEngine';
+import {
+  saveDocToFirebaseServer,
+  getDocFromFirebaseServer,
+  awaitPendingOffloadBackups,
+} from './firebaseServerStorage';
+
+const settingsCloudReconcileCache = new Map<string, number>();
+const SETTINGS_RECONCILE_TTL_MS = 2000;
+const COLD_SEED_EPOCH = '1970-01-01T00:00:00.000Z';
 
 export interface SettingsDatabase {
   settings: AssociationSettings;
@@ -168,36 +177,55 @@ export function loadSettingsDatabase(tenantId?: string | null): SettingsDatabase
 
       return {
         settings: merged,
-        lastUpdated: parsed.lastUpdated || new Date().toISOString(),
+        lastUpdated: parsed.lastUpdated || COLD_SEED_EPOCH,
       };
     }
   }
 
+  // Cold start / missing disk file: never overwrite Cloud Firestore with defaults!
   const defaultDb: SettingsDatabase = {
     settings: baseDefaults,
-    lastUpdated: new Date().toISOString(),
+    lastUpdated: COLD_SEED_EPOCH,
   };
 
   if (cleanTenant === 'tenant_nour' || tenantRecord) {
-    saveSettingsDatabase(defaultDb, cleanTenant);
+    saveSettingsDatabase(defaultDb, cleanTenant, false);
   }
   return defaultDb;
 }
 
-export function saveSettingsDatabase(db: SettingsDatabase, tenantId?: string | null): void {
+export function saveSettingsDatabase(
+  db: SettingsDatabase,
+  tenantId?: string | null,
+  syncFirestore = true
+): void {
   const cleanTenant = normalizeTenantId(tenantId);
   const dbFile = getTenantSettingsFile(cleanTenant);
   const tenantRecord = cleanTenant !== 'tenant_nour' ? getTenantRecordFromDisk(cleanTenant) : null;
   const sanitizedSettings = ensureBankDefaults(sanitizeSettingsMedia(db.settings), null, tenantRecord);
+  const nowIso = db.lastUpdated || new Date().toISOString();
 
   const cleanDb: SettingsDatabase = {
     settings: sanitizedSettings,
-    lastUpdated: db.lastUpdated || new Date().toISOString(),
+    lastUpdated: nowIso,
   };
 
   writeJsonFileAtomicSync(dbFile, cleanDb, 'branding');
+  if (nowIso !== COLD_SEED_EPOCH) {
+    settingsCloudReconcileCache.set(cleanTenant, Date.now());
+  }
 
-  // Synchronize association branding, identity, bank info & whatsapp back into tenants_database.json
+  // Mirror association settings permanently to Cloud Firestore (`settings/{cleanTenant}`)
+  if (syncFirestore) {
+    saveDocToFirebaseServer('settings', cleanTenant, {
+      ...sanitizedSettings,
+      tenantId: cleanTenant,
+      lastUpdated: nowIso,
+      _updatedAt: nowIso,
+    }).catch(() => {});
+  }
+
+  // Synchronize association branding, identity, bank info & whatsapp back into tenants_database.json & Firestore `tenants/{cleanTenant}`
   try {
     if (fs.existsSync(TENANTS_DB_FILE)) {
       const tenants = readJsonFileSync<any[]>(TENANTS_DB_FILE, () => []);
@@ -205,7 +233,7 @@ export function saveSettingsDatabase(db: SettingsDatabase, tenantId?: string | n
         const idx = tenants.findIndex((t) => t && t.id === cleanTenant);
         if (idx >= 0) {
           const s = sanitizedSettings;
-          tenants[idx] = {
+          const updatedTenantRecord = {
             ...tenants[idx],
             ...(s.name && (cleanTenant === 'tenant_nour' || s.name !== 'جمعية الشايف') ? { name: s.name } : {}),
             ...(s.nameFr ? { nameFr: s.nameFr } : {}),
@@ -218,15 +246,62 @@ export function saveSettingsDatabase(db: SettingsDatabase, tenantId?: string | n
             ...(s.ribBank ? { rib: s.ribBank, ribBank: s.ribBank } : {}),
             ...(s.bankName ? { bankName: s.bankName } : {}),
             ...(s.enablePublicDonations !== undefined ? { enablePublicDonations: s.enablePublicDonations } : {}),
-            updatedAt: new Date().toISOString(),
+            updatedAt: nowIso,
           };
+          tenants[idx] = updatedTenantRecord;
           writeJsonFileAtomicSync(TENANTS_DB_FILE, tenants, 'tenant');
+
+          if (syncFirestore) {
+            saveDocToFirebaseServer('tenants', cleanTenant, {
+              ...updatedTenantRecord,
+              _updatedAt: nowIso,
+            }).catch(() => {});
+          }
         }
       }
     }
   } catch (syncErr) {
     console.warn('[SettingsDB] Could not sync tenant record:', syncErr);
   }
+}
+
+async function reconcileSettingsFromCloudFirestore(
+  tenantId: string,
+  force = false
+): Promise<SettingsDatabase> {
+  const cleanTenant = normalizeTenantId(tenantId);
+  const localDb = loadSettingsDatabase(cleanTenant);
+  const isColdLocal = localDb.lastUpdated === COLD_SEED_EPOCH;
+  const lastCheck = settingsCloudReconcileCache.get(cleanTenant) || 0;
+  if (!force && !isColdLocal && Date.now() - lastCheck < SETTINGS_RECONCILE_TTL_MS) {
+    return localDb;
+  }
+  settingsCloudReconcileCache.set(cleanTenant, Date.now());
+
+  try {
+    const cloudDoc = await getDocFromFirebaseServer<any>('settings', cleanTenant);
+    if (cloudDoc && typeof cloudDoc === 'object') {
+      const cloudTs = new Date(cloudDoc._updatedAt || cloudDoc.lastUpdated || 0).getTime();
+      const localTs = isColdLocal ? 0 : new Date(localDb.lastUpdated || 0).getTime();
+      if (isColdLocal || cloudTs > localTs) {
+        const { _updatedAt, lastUpdated, tenantId: _tid, ...cloudSettingsFields } = cloudDoc;
+        const mergedSettings = ensureBankDefaults(
+          sanitizeSettingsMedia({
+            ...localDb.settings,
+            ...cloudSettingsFields,
+          }),
+          localDb.settings
+        );
+        const reconciledDb: SettingsDatabase = {
+          settings: mergedSettings,
+          lastUpdated: cloudDoc._updatedAt || cloudDoc.lastUpdated || new Date().toISOString(),
+        };
+        saveSettingsDatabase(reconciledDb, cleanTenant, false);
+        return reconciledDb;
+      }
+    }
+  } catch {}
+  return localDb;
 }
 
 export function initializeTenantSettings(tenantRecord: any): SettingsDatabase {
@@ -276,11 +351,13 @@ export async function handleSettingsApi(
   const queryTenant = parsedUrl.searchParams.get('tenantId')?.trim();
   const tenantId = normalizeTenantId(headerTenant || queryTenant);
 
-  const db = loadSettingsDatabase(tenantId);
   const cleanPath = url.split('?')[0];
+
+  const forceCloud = parsedUrl.searchParams.get('force') === 'true';
 
   // 1. GET /api/settings
   if (req.method === 'GET' && cleanPath === '/api/settings') {
+    const db = await reconcileSettingsFromCloudFirestore(tenantId, forceCloud);
     sendJson(res, 200, {
       success: true,
       tenantId,
@@ -299,7 +376,28 @@ export async function handleSettingsApi(
     try {
       const body = await readLargeJsonBody(req);
       const targetTenant = normalizeTenantId(body.tenantId || tenantId);
-      const targetDb = loadSettingsDatabase(targetTenant);
+
+      // Strict tenant-isolation guard: association admin can only edit their own tenant settings
+      const adminSessionHeader = (req.headers['x-admin-session'] as string | undefined)?.trim();
+      if (adminSessionHeader) {
+        try {
+          const parsedAdmin = JSON.parse(decodeURIComponent(adminSessionHeader));
+          const isMaster =
+            parsedAdmin?.isMaster === true ||
+            parsedAdmin?.isMasterPlatformAdmin === true ||
+            parsedAdmin?.role === 'master_super_admin';
+          const sessionTenant = parsedAdmin?.tenantId ? normalizeTenantId(parsedAdmin.tenantId) : '';
+          if (!isMaster && sessionTenant && sessionTenant !== targetTenant) {
+            sendJson(res, 403, {
+              success: false,
+              error: 'غير مصرح لمدير جمعية بتعديل إعدادات جمعية أخرى.',
+            });
+            return true;
+          }
+        } catch {}
+      }
+
+      const targetDb = await reconcileSettingsFromCloudFirestore(targetTenant, true);
 
       const incomingSettings = body.settings || body;
       if (!incomingSettings || typeof incomingSettings !== 'object') {
@@ -315,10 +413,29 @@ export async function handleSettingsApi(
         targetDb.settings
       );
 
+      const nowIso = new Date().toISOString();
       targetDb.settings = sanitizedIncoming;
-      targetDb.lastUpdated = new Date().toISOString();
+      targetDb.lastUpdated = nowIso;
 
-      saveSettingsDatabase(targetDb, targetTenant);
+      saveSettingsDatabase(targetDb, targetTenant, false);
+
+      // Await primary Firestore persistence + tenant doc + offloaded logo/banner media BEFORE responding
+      const tenantRec = getTenantRecordFromDisk(targetTenant);
+      await Promise.all([
+        awaitPendingOffloadBackups(),
+        saveDocToFirebaseServer('settings', targetTenant, {
+          ...targetDb.settings,
+          tenantId: targetTenant,
+          lastUpdated: nowIso,
+          _updatedAt: nowIso,
+        }).catch(() => {}),
+        tenantRec
+          ? saveDocToFirebaseServer('tenants', targetTenant, {
+              ...tenantRec,
+              _updatedAt: nowIso,
+            }).catch(() => {})
+          : Promise.resolve(),
+      ]);
 
       sendJson(res, 200, {
         success: true,

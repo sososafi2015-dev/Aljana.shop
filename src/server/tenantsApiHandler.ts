@@ -9,6 +9,15 @@ import { initializeTenantSettings, loadSettingsDatabase, saveSettingsDatabase } 
 import { readTenantRecordsFromDisk, writeTenantRecordsToDisk } from './tenantRecordsApiHandler';
 import { loadSubAdminsDatabase, hydrateSubAdminsFromFirestore } from './subAdminsApiHandler';
 import { offloadBase64ToDisk, readLargeJsonBody, writeJsonFileAtomicSync } from './storageEngine';
+import {
+  saveDocToFirebaseServer,
+  getDocFromFirebaseServer,
+  listCollectionFromFirebaseServer,
+  deleteDocFromFirebaseServer,
+} from './firebaseServerStorage';
+
+let tenantsCloudReconcileLastTs = 0;
+const TENANTS_RECONCILE_TTL_MS = 8000;
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const IMAGES_DIR = path.join(DATA_DIR, 'images');
@@ -55,6 +64,10 @@ function addDeletedTenantIdOnServer(tenantId: string): void {
   loadDeletedTenantIdsFromDisk();
   explicitlyDeletedTenantIds.add(tenantId);
   saveDeletedTenantIdsToDisk();
+  saveDocToFirebaseServer('settings', 'deleted_tenants_registry', {
+    deletedTenantIds: Array.from(explicitlyDeletedTenantIds),
+    _updatedAt: new Date().toISOString(),
+  }).catch(() => {});
 }
 
 function removeDeletedTenantIdOnServer(tenantId: string): void {
@@ -260,7 +273,7 @@ export function readTenantsFromDisk(): any[] {
   }
 }
 
-export function writeTenantsToDisk(tenants: any[]): void {
+export function writeTenantsToDisk(tenants: any[], syncFirestore = true): void {
   ensureDataDir();
   try {
     const existingTenants = fs.existsSync(TENANTS_FILE)
@@ -296,9 +309,83 @@ export function writeTenantsToDisk(tenants: any[]): void {
     const tmpFile = `${TENANTS_FILE}.tmp.${process.pid}.${Date.now()}`;
     fs.writeFileSync(tmpFile, JSON.stringify(finalArray, null, 2), 'utf-8');
     fs.renameSync(tmpFile, TENANTS_FILE);
+    tenantsCloudReconcileLastTs = Date.now();
+
+    if (syncFirestore) {
+      const nowIso = new Date().toISOString();
+      Promise.all(
+        finalArray.map((t) =>
+          saveDocToFirebaseServer('tenants', t.id, {
+            ...t,
+            _updatedAt: t.updatedAt || nowIso,
+          }).catch(() => {})
+        )
+      ).catch(() => {});
+    }
   } catch (err) {
     console.error('[tenantsApiHandler] Error writing tenants_database.json:', err);
   }
+}
+
+async function reconcileTenantsFromCloudFirestore(force = false): Promise<any[]> {
+  const localTenants = readTenantsFromDisk();
+  if (!force && Date.now() - tenantsCloudReconcileLastTs < TENANTS_RECONCILE_TTL_MS) {
+    return localTenants;
+  }
+  tenantsCloudReconcileLastTs = Date.now();
+
+  try {
+    const [cloudTenants, deletedRegistry] = await Promise.all([
+      listCollectionFromFirebaseServer<any>('tenants'),
+      getDocFromFirebaseServer<any>('settings', 'deleted_tenants_registry'),
+    ]);
+
+    const deletedIds = loadDeletedTenantIdsFromDisk();
+    if (deletedRegistry && Array.isArray(deletedRegistry.deletedTenantIds)) {
+      let addedDeleted = false;
+      for (const delId of deletedRegistry.deletedTenantIds) {
+        if (typeof delId === 'string' && delId.trim() && delId !== 'tenant_nour' && !deletedIds.has(delId.trim())) {
+          explicitlyDeletedTenantIds.add(delId.trim());
+          addedDeleted = true;
+        }
+      }
+      if (addedDeleted) saveDeletedTenantIdsToDisk();
+    }
+
+    if (Array.isArray(cloudTenants) && cloudTenants.length > 0) {
+      const mergedMap = new Map<string, any>();
+      for (const lt of localTenants) {
+        if (lt && lt.id && !explicitlyDeletedTenantIds.has(lt.id)) {
+          mergedMap.set(lt.id, lt);
+        }
+      }
+
+      let changed = false;
+      for (const ct of cloudTenants) {
+        if (!ct || !ct.id || !ct.name || explicitlyDeletedTenantIds.has(ct.id)) continue;
+        const existing = mergedMap.get(ct.id);
+        if (!existing) {
+          mergedMap.set(ct.id, sanitizeTenantMedia(ct));
+          changed = true;
+        } else {
+          const cloudTs = new Date(ct._updatedAt || ct.updatedAt || ct.createdAt || 0).getTime();
+          const localTs = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
+          if (cloudTs > localTs) {
+            mergedMap.set(ct.id, sanitizeTenantMedia({ ...existing, ...ct }));
+            changed = true;
+          }
+        }
+      }
+
+      if (changed) {
+        const mergedList = Array.from(mergedMap.values());
+        writeTenantsToDisk(mergedList, false);
+        return mergedList;
+      }
+    }
+  } catch {}
+
+  return localTenants;
 }
 
 function hashPasswordSha256(password: string, salt: string): string {
@@ -1277,11 +1364,12 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
       return sendJson(res, 200, { success: true, owners });
     }
 
-    // 1. GET /api/tenants -> List all tenants (support publicOnly filter)
+    // 1. GET /api/tenants -> List all tenants (support publicOnly & force sync)
     if (method === 'GET' && pathname === '/api/tenants') {
       const isPublicOnly = fullUrl.includes('public=true') || fullUrl.includes('publicOnly=true');
+      const forceSync = fullUrl.includes('force=true') || fullUrl.includes('refresh=true');
+      const allTenants = await reconcileTenantsFromCloudFirestore(forceSync);
       const deletedIds = loadDeletedTenantIdsFromDisk();
-      const allTenants = readTenantsFromDisk();
       const tenants = isPublicOnly
         ? allTenants.filter((t) => (t.isTemplate || t.id === 'tenant_nour') && t.isVisibleOnPublicPortal !== false)
         : allTenants;
@@ -1378,7 +1466,11 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
       } else {
         existing.unshift(newTenant);
       }
-      writeTenantsToDisk(existing);
+      writeTenantsToDisk(existing, false);
+      await saveDocToFirebaseServer('tenants', newTenant.id, {
+        ...newTenant,
+        _updatedAt: newTenant.updatedAt || new Date().toISOString(),
+      }).catch(() => {});
 
       // Initialize campaigns database and clone active contribution types from master template
       try {
@@ -1674,11 +1766,47 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
         return sendJson(res, 404, { success: false, error: 'الجمعية المطلوبة غير موجودة.' });
       }
 
+      const now = new Date().toISOString();
       const currentStatus = tenants[index].status;
       const requestedStatus = body?.status;
-      tenants[index].status = requestedStatus || (currentStatus === 'active' ? 'inactive' : 'active');
-      tenants[index].updatedAt = new Date().toISOString();
-      writeTenantsToDisk(tenants);
+      const nextStatus = requestedStatus || (currentStatus === 'active' ? 'inactive' : 'active');
+      tenants[index].status = nextStatus;
+      if (nextStatus === 'active') {
+        tenants[index].paymentVerified = true;
+        tenants[index].paymentVerifiedAt = tenants[index].paymentVerifiedAt || now;
+      }
+      tenants[index].updatedAt = now;
+      writeTenantsToDisk(tenants, false);
+      await saveDocToFirebaseServer('tenants', tenants[index].id, {
+        ...tenants[index],
+        _updatedAt: now,
+      }).catch(() => {});
+
+      // If activating a tenant, also mark any pending/verified activation payments for this tenant as confirmed
+      if (nextStatus === 'active') {
+        try {
+          const { reconcilePaymentsFromCloudFirestore, writePaymentsToDisk } = await import('./platformPaymentsApiHandler');
+          const allPayments = await reconcilePaymentsFromCloudFirestore(true);
+          let payChanged = false;
+          const updatedPayments = allPayments.map((p: any) => {
+            if (p && p.tenantId === id && (!p.type || p.type === 'activation') && (p.status === 'pending' || p.status === 'verified')) {
+              payChanged = true;
+              return {
+                ...p,
+                status: 'confirmed',
+                paymentVerified: true,
+                reviewedAt: now,
+                reviewedBy: body?.adminName || 'الإدارة العامة',
+                _updatedAt: now,
+              };
+            }
+            return p;
+          });
+          if (payChanged) {
+            writePaymentsToDisk(updatedPayments, true);
+          }
+        } catch {}
+      }
 
       return sendJson(res, 200, {
         success: true,
@@ -1717,12 +1845,13 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
         } catch {}
       }
 
-      // Persist deleted tenant ID on disk so it never resurrects
+      // Persist deleted tenant ID on disk and in Cloud Firestore so it never resurrects
       addDeletedTenantIdOnServer(id);
+      await deleteDocFromFirebaseServer('tenants', id).catch(() => {});
 
       const tenants = readTenantsFromDisk();
       const filtered = tenants.filter((t) => t.id !== id);
-      writeTenantsToDisk(filtered);
+      writeTenantsToDisk(filtered, false);
 
       // Remove only owners linked to this deleted tenant
       const owners = readOwnersFromDisk();

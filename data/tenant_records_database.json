@@ -17,21 +17,24 @@
       "id": "m-1793615620192"
     },
     {
-      "id": "m1",
-      "memberCode": "ACH-001",
+      "fullName": "محمد بن عبد الله",
       "username": "chayef24",
-      "fullName": "محمد بن عبد الله الشايفي",
+      "memberCode": "ACH-001",
       "phone": "0661122334",
       "email": "mohamed.chayefi@gmail.com",
       "cin": "AB123456",
       "joinDate": "2024-01-10",
       "renewalDate": "2025-01-10",
       "annualFee": 2000,
+      "membershipPaymentMethod": "bank_transfer",
       "status": "active",
       "avatarUrl": "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=200&q=80",
       "notes": "عضو مؤسس ومساهم دائم",
       "isAnonymousInPublic": false,
-      "membershipPaymentMethod": "bank_transfer"
+      "id": "m1",
+      "tenantId": "tenant_nour",
+      "associationId": "tenant_nour",
+      "updatedAt": "2026-11-20T15:23:15.795Z"
     },
     {
       "id": "m2",
@@ -225,6 +228,24 @@
     }
   ],
   "contributions": [
+    {
+      "id": "contrib-fee-m1",
+      "memberId": "m1",
+      "memberCode": "REC-2026-ACH-001",
+      "memberName": "محمد بن عبد الله",
+      "amount": 2000,
+      "date": "2024-01-10",
+      "time": "13:53:12",
+      "createdAt": "2026-11-20T13:53:12.691Z",
+      "status": "pending",
+      "category": "membership_fee",
+      "paymentMethod": "bank_transfer",
+      "notes": "واجب انخراط سنوي: محمد بن عبد الله (ACH-001) - استخلاص واجب الانخراط السنوي للمنخرط محمد بن عبد الله (ACH-001) بتاريخ 2024-01-10",
+      "financialOperationId": "op-fee-m1",
+      "contributionTypeName": "واجب الانخراط السنوي",
+      "tenantId": "tenant_nour",
+      "associationId": "tenant_nour"
+    },
     {
       "id": "contrib-fee-m-1793615620192",
       "memberId": "m-1793615620192",
@@ -752,6 +773,24 @@
   ],
   "operations": [
     {
+      "id": "op-fee-m1",
+      "code": "REC-2026-ACH-001",
+      "title": "واجب انخراط سنوي: محمد بن عبد الله (ACH-001)",
+      "description": "استخلاص واجب الانخراط السنوي للمنخرط محمد بن عبد الله (ACH-001) بتاريخ 2024-01-10",
+      "type": "income",
+      "category": "membership_fee",
+      "amount": 2000,
+      "date": "2024-01-10",
+      "memberId": "m1",
+      "memberName": "محمد بن عبد الله",
+      "paymentMethod": "bank_transfer",
+      "addedBy": "الأدمين الرئيسي (Super Admin)",
+      "createdAt": "2026-11-20T13:53:12.691Z",
+      "balanceAfter": 2000,
+      "tenantId": "tenant_nour",
+      "associationId": "tenant_nour"
+    },
+    {
       "id": "op-camp-cc-9",
       "code": "OP-2026-CC-9",
       "type": "income",
@@ -767,7 +806,7 @@
       "createdAt": "2024-01-15T11:00:00.000Z",
       "tenantId": "tenant_nour",
       "associationId": "tenant_nour",
-      "balanceAfter": 35000
+      "balanceAfter": 37000
     },
     {
       "id": "op-camp-cc-10",
@@ -785,7 +824,7 @@
       "createdAt": "2024-01-28T16:00:00.000Z",
       "tenantId": "tenant_nour",
       "associationId": "tenant_nour",
-      "balanceAfter": 55000
+      "balanceAfter": 57000
     },
     {
       "id": "op-inc-1",
@@ -799,7 +838,7 @@
       "proofUrls": [
         "https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?auto=format&fit=crop&w=600&q=80"
       ],
-      "balanceAfter": 60500,
+      "balanceAfter": 62500,
       "addedBy": "إدارة الجمعية",
       "createdAt": "2024-02-15T10:00:00Z",
       "tenantId": "tenant_nour",
@@ -817,7 +856,7 @@
       "proofUrls": [
         "https://images.unsplash.com/photo-1554224154-26032ffc0d07?auto=format&fit=crop&w=600&q=80"
       ],
-      "balanceAfter": 65000,
+      "balanceAfter": 67000,
       "addedBy": "إدارة الجمعية",
       "createdAt": "2024-04-20T11:30:00Z",
       "tenantId": "tenant_nour",
@@ -837,7 +876,7 @@
         "https://images.unsplash.com/photo-1464226184884-fa280b87c399?auto=format&fit=crop&w=800&q=80"
       ],
       "videoUrl": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-      "balanceAfter": 62500,
+      "balanceAfter": 64500,
       "addedBy": "أمين المال - إدارة الجمعية",
       "createdAt": "2024-05-10T16:00:00Z",
       "tenantId": "tenant_nour",
@@ -855,7 +894,7 @@
       "proofUrls": [
         "https://images.unsplash.com/photo-1581783342308-f792dbdd27c5?auto=format&fit=crop&w=800&q=80"
       ],
-      "balanceAfter": 61500,
+      "balanceAfter": 63500,
       "addedBy": "رئيس الجمعية",
       "createdAt": "2024-06-02T14:20:00Z",
       "tenantId": "tenant_nour",
@@ -877,7 +916,7 @@
       "createdAt": "2024-07-05T12:30:00.000Z",
       "tenantId": "tenant_nour",
       "associationId": "tenant_nour",
-      "balanceAfter": 76500
+      "balanceAfter": 78500
     },
     {
       "id": "op-camp-cc-8",
@@ -895,7 +934,7 @@
       "createdAt": "2024-07-19T15:20:00.000Z",
       "tenantId": "tenant_nour",
       "associationId": "tenant_nour",
-      "balanceAfter": 83500
+      "balanceAfter": 85500
     },
     {
       "id": "op-exp-3",
@@ -910,7 +949,7 @@
         "https://images.unsplash.com/photo-1488521787991-ed7bbaae773c?auto=format&fit=crop&w=800&q=80",
         "https://images.unsplash.com/photo-1593113598332-cd288d649433?auto=format&fit=crop&w=800&q=80"
       ],
-      "balanceAfter": 82000,
+      "balanceAfter": 84000,
       "addedBy": "مسؤولة الشؤون الاجتماعية",
       "createdAt": "2024-09-08T18:45:00Z",
       "tenantId": "tenant_nour",
@@ -932,7 +971,7 @@
       "createdAt": "2026-11-01T20:36:17.263Z",
       "tenantId": "tenant_nour",
       "associationId": "tenant_nour",
-      "balanceAfter": 82400
+      "balanceAfter": 84400
     },
     {
       "id": "op-camp-cc-1793559590850-yp80",
@@ -950,7 +989,7 @@
       "createdAt": "2026-11-01T18:59:50.850Z",
       "tenantId": "tenant_nour",
       "associationId": "tenant_nour",
-      "balanceAfter": 82700
+      "balanceAfter": 84700
     },
     {
       "id": "op-camp-cc-1793557347872-aw89",
@@ -968,7 +1007,7 @@
       "createdAt": "2026-11-01T18:22:27.872Z",
       "tenantId": "tenant_nour",
       "associationId": "tenant_nour",
-      "balanceAfter": 82900
+      "balanceAfter": 84900
     },
     {
       "id": "op-unpaid-deduction-contrib-don-cc-1793612813834-jh6i",
@@ -988,7 +1027,7 @@
       "associationId": "tenant_nour",
       "linkedContributionId": "contrib-don-cc-1793612813834-jh6i",
       "isUnpaidContributionDeduction": true,
-      "balanceAfter": 82400
+      "balanceAfter": 84400
     },
     {
       "id": "op-unpaid-deduction-contrib-don-cc-1793613824388-01gj",
@@ -1008,7 +1047,7 @@
       "associationId": "tenant_nour",
       "linkedContributionId": "contrib-don-cc-1793613824388-01gj",
       "isUnpaidContributionDeduction": true,
-      "balanceAfter": 81600
+      "balanceAfter": 83600
     },
     {
       "id": "op-fee-m-1793615620192",
@@ -1026,7 +1065,7 @@
       "createdAt": "2026-11-02T10:33:40.195Z",
       "tenantId": "tenant_nour",
       "associationId": "tenant_nour",
-      "balanceAfter": 82600
+      "balanceAfter": 84600
     },
     {
       "id": "op-camp-cc-1793613991826-xvro",
@@ -1043,7 +1082,7 @@
       "createdAt": "2026-11-02T09:06:13.591Z",
       "tenantId": "tenant_nour",
       "associationId": "tenant_nour",
-      "balanceAfter": 83400
+      "balanceAfter": 85400
     },
     {
       "id": "op-camp-cc-1793613824388-01gj",
@@ -1060,7 +1099,7 @@
       "createdAt": "2026-11-02T09:03:26.187Z",
       "tenantId": "tenant_nour",
       "associationId": "tenant_nour",
-      "balanceAfter": 84200
+      "balanceAfter": 86200
     },
     {
       "id": "op-camp-cc-1793613460905-jvye",
@@ -1077,7 +1116,7 @@
       "createdAt": "2026-11-02T08:57:22.807Z",
       "tenantId": "tenant_nour",
       "associationId": "tenant_nour",
-      "balanceAfter": 84700
+      "balanceAfter": 86700
     },
     {
       "id": "op-camp-cc-1793612898749-ujkj",
@@ -1094,7 +1133,7 @@
       "createdAt": "2026-11-02T08:48:00.530Z",
       "tenantId": "tenant_nour",
       "associationId": "tenant_nour",
-      "balanceAfter": 85500
+      "balanceAfter": 87500
     },
     {
       "id": "op-camp-cc-1793612813834-jh6i",
@@ -1111,7 +1150,7 @@
       "createdAt": "2026-11-02T08:46:35.624Z",
       "tenantId": "tenant_nour",
       "associationId": "tenant_nour",
-      "balanceAfter": 86000
+      "balanceAfter": 88000
     }
   ],
   "registrationFields": [
@@ -1617,7 +1656,9 @@
         }
       },
       "tenantId": "tenant_nour",
-      "associationId": "tenant_nour"
+      "associationId": "tenant_nour",
+      "_updatedAt": "2026-11-20T15:06:45.220Z",
+      "lastLoginAt": "2026-11-12T10:36:38.350Z"
     },
     {
       "id": "subadmin-1",
@@ -1800,7 +1841,9 @@
       },
       "notes": "مكلف بمتابعة أنشطة الجمعية ومشاريعها واستطلاعات الرأي",
       "tenantId": "tenant_nour",
-      "associationId": "tenant_nour"
+      "associationId": "tenant_nour",
+      "_updatedAt": "2026-11-20T15:06:45.220Z",
+      "updatedAt": "2024-02-01T10:00:00.000Z"
     }
   ],
   "adCampaigns": [],
@@ -1808,5 +1851,5 @@
     "op-unpaid-deduction-contrib-don-cc-1793559590850-yp80"
   ],
   "deletedContributionIds": [],
-  "updatedAt": "2026-11-04T09:45:40.991Z"
+  "updatedAt": "2026-11-20T15:23:15.795Z"
 }

@@ -155,6 +155,11 @@ function broadcastCampaignsChange(campaigns: PlatformAdCampaign[]): void {
   }
 }
 
+export function applyRealtimeAdCampaigns(campaigns: PlatformAdCampaign[]): void {
+  if (!Array.isArray(campaigns)) return;
+  broadcastCampaignsChange(campaigns);
+}
+
 /**
  * Get all advertising campaigns
  */

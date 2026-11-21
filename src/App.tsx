@@ -67,6 +67,7 @@ import {
   ensureMandatoryPasswordFields,
   GLOBAL_REGISTRATION_FIELDS_UPDATED_EVENT,
   saveData,
+  getScopedKey,
   KEYS,
   VOTING_RESTRICTED_MESSAGE,
 } from './storage';
@@ -99,6 +100,11 @@ import { apiFetchSubAdminsWithMeta, apiSyncSubAdmins } from './api/subAdminsApi'
 import { fetchGlobalContributionTypesFromServer } from './contributionTypesStorage';
 import { fetchPortalSettings } from './portalSettingsStorage';
 import { firestoreSyncService } from './services/firestoreSyncService';
+import {
+  subscribePlatformRealtime,
+  subscribeTenantRealtime,
+} from './services/realtimeSyncService';
+import { ensurePermanentImageUrl } from './api/imageApi';
 import {
   rescueLegacyVideos,
   deleteVideoFromObjectStorage,
@@ -1818,6 +1824,101 @@ export default function App() {
     };
   }, []);
 
+  // Genuine Real-Time Global Platform Auto-Publishing via Cloud Firestore `onSnapshot`
+  // Automatically syncs platform identity/logo, portal settings, associations directory & ad campaigns
+  // to all visitors and open tabs on any domain with zero manual republishing or cache clearing.
+  useEffect(() => {
+    const unsubscribePlatform = subscribePlatformRealtime();
+    return () => {
+      unsubscribePlatform();
+    };
+  }, []);
+
+  // Genuine Real-Time Per-Tenant Auto-Publishing via Cloud Firestore `onSnapshot`
+  // Strictly isolated per `activeTenantId` — instantly pushes settings/logo/banner, activities & gallery photos,
+  // donation campaigns, member profiles, board members, ledger operations, contributions, polls & UI visibility.
+  useEffect(() => {
+    const cleanTenant =
+      !activeTenantId || activeTenantId === 'portal'
+        ? MASTER_TEMPLATE_TENANT_ID
+        : activeTenantId;
+
+    const unsubscribeTenant = subscribeTenantRealtime(cleanTenant, {
+      onSettings: (liveSettings) => {
+        setSettings((prev) => {
+          const resolvedBank = resolveEffectiveBankSettings(
+            liveSettings as AssociationSettings,
+            prev
+          );
+          const merged: AssociationSettings = {
+            ...prev,
+            ...liveSettings,
+            ribBank: resolvedBank.ribBank,
+            bankName: resolvedBank.bankName,
+          };
+          saveData(getScopedKey(KEYS.SETTINGS, cleanTenant), merged);
+          if (merged.themeColors) {
+            applyStoreTheme(merged.themeColors);
+          }
+          return merged;
+        });
+      },
+      onActivities: (liveActivities) => {
+        saveData(getScopedKey(KEYS.ACTIVITIES, cleanTenant), liveActivities);
+        setActivities(liveActivities);
+      },
+      onCampaigns: (liveCampaigns) => {
+        saveData(getScopedKey(KEYS.CAMPAIGNS, cleanTenant), liveCampaigns);
+        setCampaigns(liveCampaigns);
+      },
+      onMembers: (liveMembers) => {
+        saveData(getScopedKey(KEYS.MEMBERS, cleanTenant), liveMembers);
+        setMembers(liveMembers);
+        setLoggedInMember((prevLogged) => {
+          if (!prevLogged) return prevLogged;
+          const refreshed = liveMembers.find((m) => m.id === prevLogged.id);
+          return refreshed ? { ...prevLogged, ...refreshed } : prevLogged;
+        });
+      },
+      onBoardMembers: (liveBoard) => {
+        saveData(getScopedKey(KEYS.BOARD_MEMBERS, cleanTenant), liveBoard);
+        setBoardMembers(liveBoard);
+      },
+      onOperations: (liveOps) => {
+        saveData(getScopedKey(KEYS.OPERATIONS, cleanTenant), liveOps);
+        setOperations(liveOps);
+      },
+      onContributions: (liveContribs) => {
+        saveData(getScopedKey(KEYS.CONTRIBUTIONS, cleanTenant), liveContribs);
+        setContributions(liveContribs);
+      },
+      onPolls: (livePolls) => {
+        saveData(getScopedKey(KEYS.POLLS, cleanTenant), livePolls);
+        setPolls(livePolls);
+      },
+      onUIElements: (liveElements) => {
+        saveData(getScopedKey(KEYS.UI_ELEMENTS, cleanTenant), liveElements);
+        setUIElements(liveElements);
+      },
+      onMemberCardSettings: (liveCardSettings) => {
+        setMemberCardSettings((prev) => {
+          const merged = { ...prev, ...liveCardSettings };
+          saveData(getScopedKey(KEYS.MEMBER_CARD_SETTINGS, cleanTenant), merged);
+          return merged;
+        });
+      },
+      onRegistrationFields: (liveFields) => {
+        const normalized = ensureMandatoryPasswordFields(liveFields);
+        saveData(getScopedKey(KEYS.FIELDS, cleanTenant), normalized);
+        setRegistrationFields(normalized);
+      },
+    });
+
+    return () => {
+      unsubscribeTenant();
+    };
+  }, [activeTenantId]);
+
   // Modals States
   const [isAdminAuthOpen, setIsAdminAuthOpen] = useState(false);
   const [isAddOperationOpen, setIsAddOperationOpen] = useState(false);
@@ -3027,26 +3128,85 @@ export default function App() {
     addToast('info', 'تم تسجيل الخروج من فضاء المنخرطين بنجاح.');
   };
 
-  const handleUpdateMemberProfile = (updatedData: Partial<Member>) => {
-    if (!loggedInMember) return;
+  const handleUpdateMemberProfile = async (
+    updatedData: Partial<Member>
+  ): Promise<{ success: boolean; message: string }> => {
+    if (!loggedInMember) {
+      return { success: false, message: 'لم يتم العثور على جلسة المنخرط.' };
+    }
+
+    const cleanTenant =
+      !activeTenantId || activeTenantId === 'portal'
+        ? MASTER_TEMPLATE_TENANT_ID
+        : activeTenantId;
+
+    // Enforce strict Member Self-Edit Whitelist: member can ONLY update their own allowed personal fields
+    const safePersonalUpdate: Partial<Member> = {};
+    if (updatedData.fullName !== undefined) safePersonalUpdate.fullName = String(updatedData.fullName).trim();
+    if (updatedData.phone !== undefined) safePersonalUpdate.phone = String(updatedData.phone).trim();
+    if (updatedData.email !== undefined) safePersonalUpdate.email = updatedData.email ? String(updatedData.email).trim() : undefined;
+    if (updatedData.cin !== undefined) safePersonalUpdate.cin = updatedData.cin ? String(updatedData.cin).trim() : undefined;
+    if ((updatedData as any).city !== undefined) (safePersonalUpdate as any).city = (updatedData as any).city;
+    if ((updatedData as any).address !== undefined) (safePersonalUpdate as any).address = (updatedData as any).address;
+    if ((updatedData as any).profession !== undefined) (safePersonalUpdate as any).profession = (updatedData as any).profession;
+    if ((updatedData as any).bio !== undefined) (safePersonalUpdate as any).bio = (updatedData as any).bio;
+    if (updatedData.customFields !== undefined) safePersonalUpdate.customFields = updatedData.customFields;
+
+    // Permanently upload avatar to Firebase Storage / Cloud Firestore media chunks if it is a base64 Data URL
+    if ('avatarUrl' in updatedData) {
+      let nextAvatar = updatedData.avatarUrl;
+      if (typeof nextAvatar === 'string' && nextAvatar.startsWith('data:')) {
+        try {
+          nextAvatar = await ensurePermanentImageUrl(nextAvatar, `member_avatar_${loggedInMember.id}`);
+        } catch (uploadErr: any) {
+          const errMsg = uploadErr?.message || 'تعذر رفع الصورة الشخصية إلى التخزين السحابي.';
+          addToast('error', errMsg);
+          return { success: false, message: errMsg };
+        }
+      }
+      safePersonalUpdate.avatarUrl = nextAvatar;
+    }
+
     const updated: Member = {
       ...loggedInMember,
-      ...updatedData,
+      ...safePersonalUpdate,
+      id: loggedInMember.id,
+      username: loggedInMember.username,
+      memberCode: loggedInMember.memberCode,
+      status: loggedInMember.status,
+      joinDate: loggedInMember.joinDate,
     };
+
     const updatedMembers = members.map((m) => (m.id === loggedInMember.id ? updated : m));
-    saveMembers(updatedMembers);
     setMembers(updatedMembers);
     setLoggedInMember(updated);
 
-    const updatedLogs = addAuditLog(
-      'update',
-      'member',
-      `تحديث المنخرط (${updated.fullName}) لبيانات حسابه الشخصي`,
-      updated.fullName
-    );
-    setAuditLogs(updatedLogs);
+    try {
+      const [backendSaved] = await Promise.all([
+        saveMembers(updatedMembers, cleanTenant, true),
+        firestoreSyncService.syncMembersToFirestore(cleanTenant, [updated]).catch(() => false),
+      ]);
 
-    addToast('success', 'تم حفظ وتحديث بيانات حسابك الشخصي بنجاح!');
+      if (!backendSaved) {
+        addToast('error', 'تعذر تأكيد حفظ التعديلات على الخادم. يرجى إعادة المحاولة.');
+        return { success: false, message: 'تعذر تأكيد حفظ التعديلات على الخادم.' };
+      }
+
+      const updatedLogs = addAuditLog(
+        'update',
+        'member',
+        `تحديث المنخرط (${updated.fullName}) لبيانات حسابه الشخصي`,
+        updated.fullName
+      );
+      setAuditLogs(updatedLogs);
+
+      addToast('success', 'تم حفظ وتحديث بيانات حسابك الشخصي ونشرها تلقائياً بنجاح!');
+      return { success: true, message: 'تم حفظ وتحديث بيانات حسابك الشخصي بنجاح!' };
+    } catch (err: any) {
+      const msg = err?.message || 'حدث خطأ أثناء حفظ البيانات في قاعدة البيانات.';
+      addToast('error', msg);
+      return { success: false, message: msg };
+    }
   };
 
   const handleChangeMemberPassword = async (
@@ -3072,6 +3232,11 @@ export default function App() {
       return { success: false, message: 'يجب أن تتكون كلمة المرور الجديدة من 4 أحرف أو أرقام على الأقل.' };
     }
 
+    const cleanTenant =
+      !activeTenantId || activeTenantId === 'portal'
+        ? MASTER_TEMPLATE_TENANT_ID
+        : activeTenantId;
+
     const salt = generateSalt();
     const hash = await hashPasswordWithSalt(newPass, salt);
 
@@ -3082,9 +3247,13 @@ export default function App() {
     };
 
     const updatedMembers = members.map((m) => (m.id === loggedInMember.id ? updated : m));
-    saveMembers(updatedMembers);
     setMembers(updatedMembers);
     setLoggedInMember(updated);
+
+    await Promise.all([
+      saveMembers(updatedMembers, cleanTenant, true),
+      firestoreSyncService.syncMembersToFirestore(cleanTenant, [updated]).catch(() => false),
+    ]);
 
     const updatedLogs = addAuditLog(
       'update',
@@ -3094,7 +3263,7 @@ export default function App() {
     );
     setAuditLogs(updatedLogs);
 
-    addToast('success', 'تم تغيير وتأمين كلمة المرور بنجاح! 🔒');
+    addToast('success', 'تم تغيير وتأمين كلمة المرور وحفظها دائماً بنجاح! 🔒');
     return { success: true, message: 'تم تغيير وتحديث كلمة المرور بنجاح!' };
   };
 

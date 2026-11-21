@@ -119,6 +119,9 @@ function verifySuperAdminAuth(req: IncomingMessage): { isAuthorized: boolean; ad
   }
 }
 
+export const OFFICIAL_PLATFORM_DOMAIN = 'syomax.com';
+export const OFFICIAL_PLATFORM_URL = 'https://syomax.com';
+
 export function normalizeDomainName(raw: string): string {
   if (!raw || typeof raw !== 'string') return '';
   let clean = raw.trim().toLowerCase();
@@ -126,8 +129,8 @@ export function normalizeDomainName(raw: string): string {
   clean = clean.split('/')[0].split('?')[0].split('#')[0];
   clean = clean.split(':')[0];
   clean = clean.replace(/\.+$/, '');
-  if (clean.endsWith('.ai.studio') && clean !== 'syomax.ai.studio') {
-    return 'syomax.ai.studio';
+  if (clean.endsWith('.ai.studio') || clean === 'www.syomax.com') {
+    return OFFICIAL_PLATFORM_DOMAIN;
   }
   return clean;
 }
@@ -144,8 +147,10 @@ export function normalizeTargetUrl(raw: string): string {
   try {
     const parsed = new URL(withScheme);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
-    if (parsed.hostname.toLowerCase().endsWith('.ai.studio') && parsed.hostname.toLowerCase() !== 'syomax.ai.studio') {
-      return 'https://syomax.ai.studio';
+    const host = parsed.hostname.toLowerCase();
+    if (host.endsWith('.ai.studio') || host === 'www.syomax.com') {
+      const pathAndQuery = `${parsed.pathname === '/' ? '' : parsed.pathname}${parsed.search}${parsed.hash}`;
+      return `${OFFICIAL_PLATFORM_URL}${pathAndQuery}`.replace(/\/+$/, '');
     }
     return parsed.toString().replace(/\/+$/, '');
   } catch {
@@ -523,7 +528,7 @@ async function performRealDomainVerification(domainConfig: PlatformDomainConfig)
       resolvedMxRecords: [],
       targetResolvedARecords: [],
       httpStatus: null,
-      summaryAr: 'صيغة اسم الدومين غير صالحة. يرجى إدخال اسم دومين صحيح مثل syomax.ai.studio.',
+      summaryAr: 'صيغة اسم الدومين غير صالحة. يرجى إدخال اسم دومين صحيح مثل syomax.com.',
       issuesAr: ['اسم الدومين المدخل لا يتوافق مع معايير أسماء النطاقات الصحيحة.'],
     };
   }
@@ -821,7 +826,7 @@ export async function handleDomainsApi(
     if (!isValidDomainName(domainName)) {
       sendJson(res, 400, {
         success: false,
-        error: 'يرجى إدخال اسم دومين صحيح مثل syomax.ai.studio بدون مسافات أو بروتوكول.',
+        error: 'يرجى إدخال اسم دومين صحيح مثل syomax.com بدون مسافات أو بروتوكول.',
       });
       return true;
     }
@@ -829,7 +834,7 @@ export async function handleDomainsApi(
     if (!targetUrl) {
       sendJson(res, 400, {
         success: false,
-        error: 'يرجى إدخال عنوان الموقع المستهدف بشكل صحيح (مثال: https://example.com).',
+        error: 'يرجى إدخال عنوان الموقع المستهدف بشكل صحيح (مثال: https://syomax.com).',
       });
       return true;
     }

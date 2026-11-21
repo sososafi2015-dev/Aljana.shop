@@ -142,7 +142,7 @@ export function loadPlatformIdentityDatabase(forceFresh = false): PlatformIdenti
     console.error('[PlatformIdentityDB] Error reading DB:', err);
   }
 
-  // Default database initialization
+  // Default database initialization (epoch 1970 so Cloud Firestore always wins on cold start)
   inMemoryIdentityDb = {
     platformName: DEFAULT_PLATFORM_NAME,
     platformLogo: '',
@@ -151,7 +151,7 @@ export function loadPlatformIdentityDatabase(forceFresh = false): PlatformIdenti
     masterPinHash: hashPin('Yo@7412589', DEFAULT_SALT),
     masterPinSalt: DEFAULT_SALT,
     isPinCustomized: true,
-    updatedAt: new Date().toISOString(),
+    updatedAt: '1970-01-01T00:00:00.000Z',
     updatedBy: 'System',
   };
   savePlatformIdentityDatabase(inMemoryIdentityDb);
@@ -202,14 +202,15 @@ export async function syncPlatformIdentityToCloud(db: PlatformIdentityDatabase):
 }
 
 let lastCloudReconcileAt = 0;
-const CLOUD_RECONCILE_TTL_MS = 15000;
+const CLOUD_RECONCILE_TTL_MS = 2000;
 
 async function reconcilePlatformIdentityWithCloud(
   localDb: PlatformIdentityDatabase,
   force = false
 ): Promise<PlatformIdentityDatabase> {
+  const isColdLocal = localDb.updatedAt === '1970-01-01T00:00:00.000Z';
   const now = Date.now();
-  if (!force && now - lastCloudReconcileAt < CLOUD_RECONCILE_TTL_MS) {
+  if (!force && !isColdLocal && now - lastCloudReconcileAt < CLOUD_RECONCILE_TTL_MS) {
     return localDb;
   }
   lastCloudReconcileAt = now;
@@ -218,9 +219,9 @@ async function reconcilePlatformIdentityWithCloud(
     const cloudDoc = await getDocFromFirebaseServer<any>('platform_identity', 'main');
     if (cloudDoc && typeof cloudDoc === 'object') {
       const cloudTs = new Date(cloudDoc.updatedAt || cloudDoc._updatedAt || 0).getTime();
-      const localTs = new Date(localDb.updatedAt || 0).getTime();
+      const localTs = isColdLocal ? 0 : new Date(localDb.updatedAt || 0).getTime();
 
-      if (cloudTs > localTs) {
+      if (isColdLocal || cloudTs > localTs) {
         let changed = false;
         if (typeof cloudDoc.platformLogo === 'string' && cloudDoc.platformLogo !== localDb.platformLogo) {
           localDb.platformLogo = cloudDoc.platformLogo;
@@ -242,16 +243,15 @@ async function reconcilePlatformIdentityWithCloud(
           localDb.associationsWhatsapp = cloudDoc.associationsWhatsapp.trim();
           changed = true;
         }
-        if (changed) {
+        if (changed || isColdLocal) {
           localDb.updatedAt = cloudDoc.updatedAt || cloudDoc._updatedAt || new Date().toISOString();
           localDb.updatedBy = cloudDoc.updatedBy || localDb.updatedBy || 'Super Admin';
           savePlatformIdentityDatabase(localDb);
         }
-      } else if (localTs > cloudTs) {
+      } else if (!isColdLocal && localTs > cloudTs) {
         await syncPlatformIdentityToCloud(localDb);
       }
-    } else {
-      // Seed Cloud Firestore `platform_identity/main` if it doesn't exist yet
+    } else if (!isColdLocal) {
       await syncPlatformIdentityToCloud(localDb);
     }
   } catch (err) {

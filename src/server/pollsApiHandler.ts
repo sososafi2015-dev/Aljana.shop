@@ -11,6 +11,17 @@ import {
   writeJsonFileAtomicSync,
   readLargeJsonBody,
 } from './storageEngine';
+import {
+  syncTenantCollectionToFirebaseServer,
+  deleteDocFromFirebaseServer,
+  fetchTenantCollectionFromFirebaseServer,
+  saveDocToFirebaseServer,
+  getDocFromFirebaseServer,
+} from './firebaseServerStorage';
+
+const pollsCloudReconcileCache = new Map<string, number>();
+const POLLS_RECONCILE_TTL_MS = 2000;
+const COLD_SEED_EPOCH = '1970-01-01T00:00:00.000Z';
 
 export interface PollsDatabase {
   polls: Poll[];
@@ -90,20 +101,20 @@ export function loadPollsDatabase(tenantId?: string | null): PollsDatabase {
     if (parsed && Array.isArray(parsed.polls)) {
       // If a non-master tenant's database exists on disk with 0 polls and was never initialized from master
       // (e.g., created when loadPollsDatabase previously returned []), seed it from tenant_nour and save permanently
-      if (cleanTenant !== 'tenant_nour' && parsed.polls.length === 0 && !parsed.initializedFromMaster) {
+      if (cleanTenant !== 'tenant_nour' && parsed.polls.length === 0 && !parsed.initializedFromMaster && parsed.lastUpdated === COLD_SEED_EPOCH) {
         const clonedPolls = cloneReferencePollsForServerTenant(cleanTenant);
         const seededDb: PollsDatabase = {
           polls: clonedPolls,
-          lastUpdated: new Date().toISOString(),
+          lastUpdated: COLD_SEED_EPOCH,
           initializedFromMaster: true,
         };
-        savePollsDatabase(seededDb, cleanTenant);
+        savePollsDatabase(seededDb, cleanTenant, false);
         return seededDb;
       }
 
       return {
         polls: parsed.polls.map(normalizePoll),
-        lastUpdated: parsed.lastUpdated || new Date().toISOString(),
+        lastUpdated: parsed.lastUpdated || COLD_SEED_EPOCH,
         initializedFromMaster: parsed.initializedFromMaster ?? true,
       };
     }
@@ -116,11 +127,11 @@ export function loadPollsDatabase(tenantId?: string | null): PollsDatabase {
 
   const defaultDb: PollsDatabase = {
     polls: defaultPolls,
-    lastUpdated: new Date().toISOString(),
+    lastUpdated: COLD_SEED_EPOCH,
     initializedFromMaster: true,
   };
 
-  savePollsDatabase(defaultDb, cleanTenant);
+  savePollsDatabase(defaultDb, cleanTenant, false);
   return defaultDb;
 }
 
@@ -141,17 +152,111 @@ export function initializeTenantPolls(tenantId: string, associationName?: string
   return db;
 }
 
-export function savePollsDatabase(db: PollsDatabase, tenantId?: string | null): void {
+export function savePollsDatabase(
+  db: PollsDatabase,
+  tenantId?: string | null,
+  syncFirestore = true
+): void {
   ensureStorageDirectories();
   const cleanTenant = normalizeTenantId(tenantId);
   const dbFile = getTenantPollsFile(cleanTenant);
+  const cleanPolls = Array.isArray(db.polls) ? db.polls.map(normalizePoll) : [];
   const cleanDb: PollsDatabase = {
     ...db,
-    polls: Array.isArray(db.polls) ? db.polls.map(normalizePoll) : [],
+    polls: cleanPolls,
     lastUpdated: db.lastUpdated || new Date().toISOString(),
     initializedFromMaster: db.initializedFromMaster ?? true,
   };
   writeJsonFileAtomicSync(dbFile, cleanDb, `polls_${cleanTenant}`);
+  if (cleanDb.lastUpdated !== COLD_SEED_EPOCH) {
+    pollsCloudReconcileCache.set(cleanTenant, Date.now());
+  }
+
+  if (syncFirestore) {
+    syncTenantCollectionToFirebaseServer('polls', cleanTenant, cleanPolls, [], {
+      reconcileDeletions: true,
+    }).catch(() => {});
+    saveDocToFirebaseServer('settings', `${cleanTenant}_polls_meta`, {
+      tenantId: cleanTenant,
+      lastUpdated: cleanDb.lastUpdated,
+      _updatedAt: cleanDb.lastUpdated,
+      count: cleanPolls.length,
+    }).catch(() => {});
+  }
+}
+
+async function persistPollsDatabaseAndCloud(
+  db: PollsDatabase,
+  tenantId?: string | null,
+  removedIds: string[] = []
+): Promise<PollsDatabase> {
+  const cleanTenant = normalizeTenantId(tenantId);
+  const nowIso = db.lastUpdated && db.lastUpdated !== COLD_SEED_EPOCH ? db.lastUpdated : new Date().toISOString();
+  const cleanPolls = Array.isArray(db.polls) ? db.polls.map(normalizePoll) : [];
+  const cleanDb: PollsDatabase = {
+    ...db,
+    polls: cleanPolls,
+    lastUpdated: nowIso,
+    initializedFromMaster: db.initializedFromMaster ?? true,
+  };
+  savePollsDatabase(cleanDb, cleanTenant, false);
+  pollsCloudReconcileCache.set(cleanTenant, Date.now());
+
+  await Promise.all([
+    syncTenantCollectionToFirebaseServer('polls', cleanTenant, cleanPolls, removedIds, {
+      reconcileDeletions: true,
+    }),
+    saveDocToFirebaseServer('settings', `${cleanTenant}_polls_meta`, {
+      tenantId: cleanTenant,
+      lastUpdated: nowIso,
+      _updatedAt: nowIso,
+      count: cleanPolls.length,
+    }),
+  ]);
+  return cleanDb;
+}
+
+async function reconcilePollsFromCloudFirestore(
+  tenantId: string,
+  force = false
+): Promise<PollsDatabase> {
+  const cleanTenant = normalizeTenantId(tenantId);
+  const localDb = loadPollsDatabase(cleanTenant);
+  const isColdLocal = localDb.lastUpdated === COLD_SEED_EPOCH;
+  const lastCheck = pollsCloudReconcileCache.get(cleanTenant) || 0;
+  if (!force && !isColdLocal && Date.now() - lastCheck < POLLS_RECONCILE_TTL_MS) {
+    return localDb;
+  }
+  pollsCloudReconcileCache.set(cleanTenant, Date.now());
+
+  try {
+    const [cloudPolls, cloudMeta] = await Promise.all([
+      fetchTenantCollectionFromFirebaseServer<Poll>('polls', cleanTenant),
+      getDocFromFirebaseServer<any>('settings', `${cleanTenant}_polls_meta`),
+    ]);
+    const localTs = isColdLocal ? 0 : new Date(localDb.lastUpdated || 0).getTime();
+    let maxCloudTs = cloudMeta ? new Date(cloudMeta._updatedAt || cloudMeta.lastUpdated || 0).getTime() : 0;
+    if (Array.isArray(cloudPolls)) {
+      for (const p of cloudPolls) {
+        const ts = new Date((p as any)._updatedAt || (p as any).updatedAt || p.createdAt || 0).getTime();
+        if (ts > maxCloudTs) maxCloudTs = ts;
+      }
+    }
+    const hasCloudPolls = Array.isArray(cloudPolls) && cloudPolls.length > 0;
+    const hasMeta = Boolean(cloudMeta && (cloudMeta._updatedAt || cloudMeta.lastUpdated));
+    if ((hasCloudPolls || hasMeta) && (isColdLocal || maxCloudTs > localTs)) {
+      const reconciledDb: PollsDatabase = {
+        ...localDb,
+        polls: (cloudPolls || []).map(normalizePoll),
+        lastUpdated: maxCloudTs > 0 ? new Date(maxCloudTs).toISOString() : new Date().toISOString(),
+        initializedFromMaster: true,
+      };
+      savePollsDatabase(reconciledDb, cleanTenant, false);
+      return reconciledDb;
+    }
+  } catch {}
+
+  return localDb;
 }
 
 function sendJson(res: ServerResponse, statusCode: number, data: any) {
@@ -190,12 +295,14 @@ export async function handlePollsApi(
   const queryTenant = parsedUrl.searchParams.get('tenantId')?.trim();
   const tenantId = normalizeTenantId(headerTenant || queryTenant);
 
-  const db = loadPollsDatabase(tenantId);
   const cleanPath = parsedUrl.pathname;
   const method = req.method?.toUpperCase() || 'GET';
 
+  const forceCloud = parsedUrl.searchParams.get('force') === 'true';
+
   // 1. GET /api/polls
   if (method === 'GET' && (cleanPath === '/api/polls' || cleanPath === '/api/polls/')) {
+    const db = await reconcilePollsFromCloudFirestore(tenantId, forceCloud);
     sendJson(res, 200, {
       success: true,
       tenantId,
@@ -204,6 +311,8 @@ export async function handlePollsApi(
     });
     return true;
   }
+
+  const db = await reconcilePollsFromCloudFirestore(tenantId, true);
 
   // 2. POST /api/polls -> Create new poll
   if (method === 'POST' && (cleanPath === '/api/polls' || cleanPath === '/api/polls/')) {
@@ -224,7 +333,7 @@ export async function handlePollsApi(
 
       db.polls = [newPoll, ...db.polls.filter((p) => p.id !== newPoll.id)];
       db.lastUpdated = new Date().toISOString();
-      savePollsDatabase(db, tenantId);
+      await persistPollsDatabaseAndCloud(db, tenantId);
 
       sendJson(res, 201, {
         success: true,
@@ -244,11 +353,11 @@ export async function handlePollsApi(
     try {
       const body = await readLargeJsonBody(req);
       const targetTenant = normalizeTenantId(body?.tenantId || tenantId);
-      const targetDb = loadPollsDatabase(targetTenant);
+      const targetDb = await reconcilePollsFromCloudFirestore(targetTenant, true);
       if (Array.isArray(body?.polls)) {
         targetDb.polls = body.polls.map(normalizePoll);
         targetDb.lastUpdated = new Date().toISOString();
-        savePollsDatabase(targetDb, targetTenant);
+        await persistPollsDatabaseAndCloud(targetDb, targetTenant);
       }
       sendJson(res, 200, {
         success: true,
@@ -328,7 +437,7 @@ export async function handlePollsApi(
 
       db.polls[pollIndex] = updatedPoll;
       db.lastUpdated = now;
-      savePollsDatabase(db, tenantId);
+      await persistPollsDatabaseAndCloud(db, tenantId);
 
       sendJson(res, 200, {
         success: true,
@@ -369,7 +478,7 @@ export async function handlePollsApi(
       };
       db.polls[pollIndex] = updatedPoll;
       db.lastUpdated = new Date().toISOString();
-      savePollsDatabase(db, tenantId);
+      await persistPollsDatabaseAndCloud(db, tenantId);
 
       sendJson(res, 200, {
         success: true,
@@ -405,7 +514,7 @@ export async function handlePollsApi(
       };
       db.polls[pollIndex] = updatedPoll;
       db.lastUpdated = new Date().toISOString();
-      savePollsDatabase(db, tenantId);
+      await persistPollsDatabaseAndCloud(db, tenantId);
 
       sendJson(res, 200, {
         success: true,
@@ -444,7 +553,7 @@ export async function handlePollsApi(
 
         db.polls[pollIndex] = updatedPoll;
         db.lastUpdated = new Date().toISOString();
-        savePollsDatabase(db, tenantId);
+        await persistPollsDatabaseAndCloud(db, tenantId);
 
         sendJson(res, 200, {
           success: true,
@@ -463,7 +572,8 @@ export async function handlePollsApi(
       try {
         db.polls = db.polls.filter((p) => p.id !== pollId);
         db.lastUpdated = new Date().toISOString();
-        savePollsDatabase(db, tenantId);
+        await persistPollsDatabaseAndCloud(db, tenantId, [pollId]);
+        await deleteDocFromFirebaseServer('polls', `${tenantId}_${pollId}`).catch(() => {});
 
         sendJson(res, 200, {
           success: true,

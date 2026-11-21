@@ -506,14 +506,18 @@ export function loadCampaignsDatabase(tenantId?: string | null): CampaignsDataba
     contributionTypes: clonedTypes,
     presets: getGlobalPresetsFromDisk(),
     deletedCampaignIds: [],
-    lastUpdated: new Date().toISOString(),
+    lastUpdated: '1970-01-01T00:00:00.000Z',
   };
 
-  saveCampaignsDatabase(defaultDb, cleanTenant);
+  saveCampaignsDatabase(defaultDb, cleanTenant, false);
   return defaultDb;
 }
 
-export function saveCampaignsDatabase(db: CampaignsDatabase, tenantId?: string | null): void {
+export function saveCampaignsDatabase(
+  db: CampaignsDatabase,
+  tenantId?: string | null,
+  syncFirestore = true
+): void {
   ensureStorageDirectories();
   const cleanTenant = normalizeTenantId(tenantId);
   const dbFile = getTenantCampaignsFile(cleanTenant);
@@ -529,26 +533,32 @@ export function saveCampaignsDatabase(db: CampaignsDatabase, tenantId?: string |
     `campaign_${cleanTenant}`
   );
   writeJsonFileAtomicSync(dbFile, sanitized, `campaign_${cleanTenant}`);
-  // Sync campaigns and campaign contributions to Firebase Firestore for real-time transparency
-  syncTenantCollectionToFirebaseServer('campaign_contributions', cleanTenant, sanitized.contributions).catch(() => {});
-  syncTenantCollectionToFirebaseServer(
-    'campaigns',
-    cleanTenant,
-    sanitized.campaigns,
-    sanitized.deletedCampaignIds || []
-  ).catch(() => {});
+  if (syncFirestore) {
+    // Sync campaigns and campaign contributions to Firebase Firestore for real-time transparency
+    syncTenantCollectionToFirebaseServer('campaign_contributions', cleanTenant, sanitized.contributions).catch(() => {});
+    syncTenantCollectionToFirebaseServer(
+      'campaigns',
+      cleanTenant,
+      sanitized.campaigns,
+      sanitized.deletedCampaignIds || []
+    ).catch(() => {});
+  }
 }
 
 const lastCloudHydrationByTenant = new Map<string, number>();
 
-async function ensureCampaignsHydratedFromCloud(tenantId: string): Promise<CampaignsDatabase> {
+async function ensureCampaignsHydratedFromCloud(
+  tenantId: string,
+  force = false
+): Promise<CampaignsDatabase> {
   const cleanTenant = normalizeTenantId(tenantId);
   const localDb = loadCampaignsDatabase(cleanTenant);
+  const isColdLocal = localDb.lastUpdated === '1970-01-01T00:00:00.000Z';
   const now = Date.now();
   const lastHydrated = lastCloudHydrationByTenant.get(cleanTenant) || 0;
 
-  // Hydrate on first request per tenant or every 30 seconds
-  if (now - lastHydrated < 30000 && localDb.campaigns.length > 0) {
+  // Hydrate immediately on cold start, force=true, or every 2 seconds
+  if (!force && !isColdLocal && now - lastHydrated < 2000 && localDb.campaigns.length > 0) {
     return localDb;
   }
   lastCloudHydrationByTenant.set(cleanTenant, now);
@@ -673,7 +683,8 @@ export async function handleCampaignsApi(
   const cleanPath = parsedUrl.pathname;
   const method = req.method?.toUpperCase() || 'GET';
 
-  const db = await ensureCampaignsHydratedFromCloud(tenantId);
+  const forceCloud = parsedUrl.searchParams.get('force') === 'true' || method !== 'GET';
+  const db = await ensureCampaignsHydratedFromCloud(tenantId, forceCloud);
 
   // ================= 0. GLOBAL CONTRIBUTION TYPES & PRESETS =================
   if (
@@ -1085,7 +1096,11 @@ export async function handleCampaignsApi(
         ];
         targetDb.campaigns = recalculateCampaignTotals(targetDb.campaigns, targetDb.contributions);
         targetDb.lastUpdated = now.toISOString();
-        saveCampaignsDatabase(targetDb, targetTenant);
+        saveCampaignsDatabase(targetDb, targetTenant, false);
+        await Promise.all([
+          syncTenantCollectionToFirebaseServer('campaign_contributions', targetTenant, targetDb.contributions),
+          syncTenantCollectionToFirebaseServer('campaigns', targetTenant, targetDb.campaigns, targetDb.deletedCampaignIds || []),
+        ]);
 
         // Immediately persist the linked MemberContribution and FinancialOperation in tenant_records_database & Firestore
         if (newContribution.isFinancial !== false && Number(newContribution.amount) > 0) {
@@ -1237,7 +1252,8 @@ export async function handleCampaignsApi(
       updatedAt: new Date().toISOString(),
     };
     db.lastUpdated = new Date().toISOString();
-    saveCampaignsDatabase(db, tenantId);
+    saveCampaignsDatabase(db, tenantId, false);
+    await syncTenantCollectionToFirebaseServer('campaigns', tenantId, db.campaigns, db.deletedCampaignIds || []);
     sendJson(res, 200, {
       success: true,
       campaign: db.campaigns[idx],
@@ -1269,7 +1285,8 @@ export async function handleCampaignsApi(
       updatedAt: new Date().toISOString(),
     };
     db.lastUpdated = new Date().toISOString();
-    saveCampaignsDatabase(db, tenantId);
+    saveCampaignsDatabase(db, tenantId, false);
+    await syncTenantCollectionToFirebaseServer('campaigns', tenantId, db.campaigns, db.deletedCampaignIds || []);
     sendJson(res, 200, {
       success: true,
       campaign: db.campaigns[idx],

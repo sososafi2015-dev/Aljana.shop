@@ -8,6 +8,7 @@ import { handleSubAdminsApi, loadSubAdminsDatabase } from './subAdminsApiHandler
 import { handlePollsApi } from './pollsApiHandler';
 import { handleSettingsApi } from './settingsApiHandler';
 import { handleCampaignsApi } from './campaignsApiHandler';
+import { handleAdCampaignsApi } from './adCampaignsApiHandler';
 import { handleGeoApi } from './geoApiHandler';
 import { handleTenantsApi } from './tenantsApiHandler';
 import { handlePortalSettingsApi } from './portalSettingsApiHandler';
@@ -15,7 +16,11 @@ import { handlePlatformIdentityApi } from './platformIdentityApiHandler';
 import { handlePlatformSubAdminsApi } from './platformSubAdminsApiHandler';
 import { handleUIElementsApi } from './uiElementsApiHandler';
 import { handleCardSettingsApi } from './cardSettingsApiHandler';
-import { handleTenantRecordsApi, readTenantRecordsFromDisk, writeTenantRecordsToDisk } from './tenantRecordsApiHandler';
+import {
+  handleTenantRecordsApi,
+  reconcileTenantRecordsFromCloudFirestore,
+  writeTenantRecordsToDiskAndCloud,
+} from './tenantRecordsApiHandler';
 import { handleTutorialsApi } from './tutorialsApiHandler';
 import { handleImageApi } from './imageApiHandler';
 import { handleAssociationSectionsApi } from './associationSectionsApiHandler';
@@ -57,6 +62,14 @@ export function associationApiPlugin(): Plugin {
 
     if (!url.startsWith('/api/')) {
       return next();
+    }
+
+    // Prevent stale CDN / browser caching on all dynamic JSON API routes (immutable media routes override this)
+    if (!url.startsWith('/api/images/') && !url.startsWith('/api/videos/stream/')) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, private');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+      res.setHeader('Surrogate-Control', 'no-store');
     }
 
         try {
@@ -132,6 +145,12 @@ export function associationApiPlugin(): Plugin {
         // 0.3 Handle Persistent Donation Campaigns & Contributions (/api/campaigns*)
         const handledByCampaigns = await handleCampaignsApi(req, res, url);
         if (handledByCampaigns) {
+          return;
+        }
+
+        // 0.3b Handle Persistent Ad Campaigns & Ad Campaign Requests (/api/ad-campaigns* & /api/ad-campaign-requests*)
+        const handledByAdCampaigns = await handleAdCampaignsApi(req, res);
+        if (handledByAdCampaigns) {
           return;
         }
 
@@ -230,7 +249,7 @@ export function associationApiPlugin(): Plugin {
             const canEdit = checkAdminPermission(session, liveSubAdmins, section, 'canEdit').allowed;
             const canAdd = checkAdminPermission(session, liveSubAdmins, section, 'canAdd').allowed;
             const canDelete = checkAdminPermission(session, liveSubAdmins, section, 'canDelete').allowed;
-            const db = readTenantRecordsFromDisk(tenantId);
+            const db = await reconcileTenantRecordsFromCloudFirestore(tenantId, true);
 
             sendJson(res, 200, {
               success: true,
@@ -244,7 +263,7 @@ export function associationApiPlugin(): Plugin {
             return;
           }
 
-          // POST /api/operations -> Requires canAdd AND persists operation to disk
+          // POST /api/operations -> Requires canAdd AND persists operation to disk + Cloud Firestore
           if (req.method === 'POST') {
             const check = checkAdminPermission(session, liveSubAdmins, section, 'canAdd');
             if (!check.allowed) {
@@ -267,14 +286,14 @@ export function associationApiPlugin(): Plugin {
               createdAt: sanitizedOp.createdAt || new Date().toISOString(),
             };
 
-            const db = readTenantRecordsFromDisk(resolvedTenant);
+            const db = await reconcileTenantRecordsFromCloudFirestore(resolvedTenant, true);
             const existingIdx = db.operations.findIndex((o: any) => o && o.id === id);
             if (existingIdx >= 0) {
               db.operations[existingIdx] = { ...db.operations[existingIdx], ...newOperation };
             } else {
               db.operations.unshift(newOperation);
             }
-            const savedDb = writeTenantRecordsToDisk(db, resolvedTenant, true);
+            const savedDb = await writeTenantRecordsToDiskAndCloud(db, resolvedTenant, new Set(['operations', 'contributions']));
             const persistedOp = savedDb.operations.find((o: any) => o && o.id === id) || newOperation;
 
             sendJson(res, 201, {
@@ -286,7 +305,7 @@ export function associationApiPlugin(): Plugin {
             return;
           }
 
-          // PUT or PATCH /api/operations/:id -> Strictly Requires canEdit AND updates disk record
+          // PUT or PATCH /api/operations/:id -> Strictly Requires canEdit AND updates disk + Cloud Firestore
           if (req.method === 'PUT' || req.method === 'PATCH') {
             const check = checkAdminPermission(session, liveSubAdmins, section, 'canEdit');
             if (!check.allowed) {
@@ -313,7 +332,7 @@ export function associationApiPlugin(): Plugin {
             );
             const sanitizedUpdates = offloadEmbeddedMediaDeep(body.updatedData || body, `op_${resolvedTenant}`);
             const targetId = body.id || url.replace('/api/operations/', '').split('?')[0];
-            const db = readTenantRecordsFromDisk(resolvedTenant);
+            const db = await reconcileTenantRecordsFromCloudFirestore(resolvedTenant, true);
             const idx = db.operations.findIndex((o: any) => o && o.id === targetId);
             if (idx >= 0) {
               const updatedOp = {
@@ -344,7 +363,7 @@ export function associationApiPlugin(): Plugin {
                 return c;
               });
 
-              writeTenantRecordsToDisk(db, resolvedTenant, true);
+              await writeTenantRecordsToDiskAndCloud(db, resolvedTenant, new Set(['operations', 'contributions']));
             }
 
             sendJson(res, 200, {
@@ -357,7 +376,7 @@ export function associationApiPlugin(): Plugin {
             return;
           }
 
-          // DELETE /api/operations/:id -> Strictly Requires canDelete AND removes from disk
+          // DELETE /api/operations/:id -> Strictly Requires canDelete AND removes from disk + Cloud Firestore
           if (req.method === 'DELETE') {
             const check = checkAdminPermission(session, liveSubAdmins, section, 'canDelete');
             if (!check.allowed) {
@@ -370,7 +389,7 @@ export function associationApiPlugin(): Plugin {
 
             const targetId = decodeURIComponent(url.replace('/api/operations/', '').split('?')[0]);
             if (targetId) {
-              const db = readTenantRecordsFromDisk(tenantId);
+              const db = await reconcileTenantRecordsFromCloudFirestore(tenantId, true);
               const opToDelete = db.operations.find((o: any) => o && o.id === targetId);
               const linkedContribIds = (db.contributions || [])
                 .filter(
@@ -390,7 +409,7 @@ export function associationApiPlugin(): Plugin {
               db.contributions = (db.contributions || []).filter(
                 (c: any) => c && !linkedContribIds.includes(c.id) && c.id !== `contrib-op-${targetId}`
               );
-              writeTenantRecordsToDisk(db, tenantId, true);
+              await writeTenantRecordsToDiskAndCloud(db, tenantId, new Set(['operations', 'contributions']));
             }
 
             sendJson(res, 200, {

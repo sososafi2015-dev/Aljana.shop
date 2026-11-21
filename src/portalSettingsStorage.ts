@@ -257,6 +257,19 @@ function reconcileSettings(base: PlatformPortalSettings, fresh: any): PlatformPo
 }
 
 /**
+ * Applies a live Cloud Firestore snapshot update to portal settings cache & UI without write-back loops
+ */
+export function applyRealtimePortalSettings(incoming: any): void {
+  if (!incoming || typeof incoming !== 'object') return;
+  const current = getPortalSettings();
+  const next = reconcileSettings(current, incoming);
+  safeSetLocalStorage(PORTAL_SETTINGS_STORAGE_KEY, next);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(PORTAL_SETTINGS_EVENT, { detail: next }));
+  }
+}
+
+/**
  * Fetches settings from both backend database and Firestore to ensure freshness and persistence across sessions
  */
 export async function fetchPortalSettings(): Promise<PlatformPortalSettings> {

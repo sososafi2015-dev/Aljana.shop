@@ -1,0 +1,36 @@
+[
+  {
+    "id": "ad_camp_default_1",
+    "tenantId": "tenant_nour",
+    "tenantName": "جمعية النور للتنمية والتضامن",
+    "tenantSlug": "nour",
+    "tenantLogoUrl": "https://images.unsplash.com/photo-1582213782179-e0d53f98f2ca?auto=format&fit=crop&w=200&q=80",
+    "tenantCity": "الدار البيضاء",
+    "tenantCountry": "المغرب",
+    "priorityOrder": 1,
+    "startDate": "2026-11-18T15:50:23.317Z",
+    "endDate": "2026-12-20T15:50:23.317Z",
+    "title": "حملة ترويجية للمشاريع التنموية الكبرى",
+    "notes": "حملة إعلانية مميزة لتصدر مشاريع التنمية في الصفحة الأولى",
+    "enabled": true,
+    "createdAt": "2026-11-18T15:50:23.317Z",
+    "createdBy": "Super Admin"
+  },
+  {
+    "id": "ad_camp_default_2",
+    "tenantId": "tenant_amal_atlas",
+    "tenantName": "جمعية أمل الأطلس لرعاية الأيتام",
+    "tenantSlug": "amal-atlas",
+    "tenantLogoUrl": "https://images.unsplash.com/photo-1542810634-71277d95dcbb?auto=format&fit=crop&w=200&q=80",
+    "tenantCity": "مراكش",
+    "tenantCountry": "المغرب",
+    "priorityOrder": 2,
+    "startDate": "2026-11-19T15:50:23.317Z",
+    "endDate": "2026-12-04T15:50:23.317Z",
+    "title": "رعاية ودعم المبادرات التعليمية واليتامى",
+    "notes": "ترتيب متقدم ضمن قائمة الجمعيات الأكثر نشاطاً",
+    "enabled": true,
+    "createdAt": "2026-11-19T15:50:23.317Z",
+    "createdBy": "Super Admin"
+  }
+]

@@ -2,11 +2,21 @@ import type { IncomingMessage, ServerResponse } from 'http';
 import fs from 'fs';
 import path from 'path';
 import type { PlatformAdCampaign, AdCampaignRequest } from '../types';
+import {
+  saveDocToFirebaseServer,
+  getDocFromFirebaseServer,
+  listCollectionFromFirebaseServer,
+  deleteDocFromFirebaseServer,
+} from './firebaseServerStorage';
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'ad_campaigns_database.json');
 const REQUESTS_DB_FILE = path.join(DATA_DIR, 'ad_campaign_requests_database.json');
 const SETTINGS_FILE = path.join(DATA_DIR, 'platform_payment_settings.json');
+
+let adCampaignsCloudReconcileLastTs = 0;
+let adRequestsCloudReconcileLastTs = 0;
+const AD_RECONCILE_TTL_MS = 8000;
 
 const defaultCampaigns: PlatformAdCampaign[] = [
   {
@@ -192,14 +202,58 @@ function readCampaignsFromDisk(): PlatformAdCampaign[] {
   return defaultCampaigns;
 }
 
-function writeCampaignsToDisk(campaigns: PlatformAdCampaign[]): void {
+function writeCampaignsToDisk(campaigns: PlatformAdCampaign[], syncFirestore = true): void {
   ensureDataDir();
   try {
     fs.writeFileSync(DB_FILE, JSON.stringify(campaigns, null, 2), 'utf-8');
     inMemoryCampaigns = campaigns;
+    adCampaignsCloudReconcileLastTs = Date.now();
+    if (syncFirestore) {
+      const nowIso = new Date().toISOString();
+      Promise.all(
+        campaigns.map((c) =>
+          c && c.id
+            ? saveDocToFirebaseServer('ad_campaigns', c.id, {
+                ...c,
+                _updatedAt: c.updatedAt || c.createdAt || nowIso,
+              }).catch(() => {})
+            : Promise.resolve()
+        )
+      ).catch(() => {});
+    }
   } catch (err) {
     console.error('[adCampaignsApiHandler] Error writing ad_campaigns_database.json:', err);
   }
+}
+
+async function reconcileAdCampaignsFromCloudFirestore(): Promise<PlatformAdCampaign[]> {
+  if (!inMemoryCampaigns) {
+    inMemoryCampaigns = readCampaignsFromDisk();
+  }
+  if (Date.now() - adCampaignsCloudReconcileLastTs < AD_RECONCILE_TTL_MS) {
+    return inMemoryCampaigns;
+  }
+  adCampaignsCloudReconcileLastTs = Date.now();
+
+  try {
+    const cloudList = await listCollectionFromFirebaseServer<PlatformAdCampaign>('ad_campaigns');
+    if (Array.isArray(cloudList) && cloudList.length > 0) {
+      let maxCloudTs = 0;
+      for (const c of cloudList) {
+        const ts = new Date((c as any)._updatedAt || c.updatedAt || c.createdAt || 0).getTime();
+        if (ts > maxCloudTs) maxCloudTs = ts;
+      }
+      let maxLocalTs = 0;
+      for (const c of inMemoryCampaigns) {
+        const ts = new Date(c.updatedAt || c.createdAt || 0).getTime();
+        if (ts > maxLocalTs) maxLocalTs = ts;
+      }
+      if (maxCloudTs > maxLocalTs || inMemoryCampaigns.length === 0) {
+        writeCampaignsToDisk(cloudList, false);
+      }
+    }
+  } catch {}
+  return inMemoryCampaigns;
 }
 
 function readRequestsFromDisk(): AdCampaignRequest[] {
@@ -221,19 +275,57 @@ function readRequestsFromDisk(): AdCampaignRequest[] {
   return defaultRequests;
 }
 
-function writeRequestsToDisk(requests: AdCampaignRequest[]): void {
+function writeRequestsToDisk(requests: AdCampaignRequest[], syncFirestore = true): void {
   ensureDataDir();
   try {
     fs.writeFileSync(REQUESTS_DB_FILE, JSON.stringify(requests, null, 2), 'utf-8');
     inMemoryRequests = requests;
+    adRequestsCloudReconcileLastTs = Date.now();
+    if (syncFirestore) {
+      const nowIso = new Date().toISOString();
+      saveDocToFirebaseServer('settings', 'ad_campaign_requests_bundle', {
+        requests,
+        updatedAt: nowIso,
+        _updatedAt: nowIso,
+      }).catch(() => {});
+    }
   } catch (err) {
     console.error('[adCampaignsApiHandler] Error writing ad_campaign_requests_database.json:', err);
   }
 }
 
+async function reconcileAdRequestsFromCloudFirestore(): Promise<AdCampaignRequest[]> {
+  if (!inMemoryRequests) {
+    inMemoryRequests = readRequestsFromDisk();
+  }
+  if (Date.now() - adRequestsCloudReconcileLastTs < AD_RECONCILE_TTL_MS) {
+    return inMemoryRequests;
+  }
+  adRequestsCloudReconcileLastTs = Date.now();
+
+  try {
+    const cloudBundle = await getDocFromFirebaseServer<any>('settings', 'ad_campaign_requests_bundle');
+    if (cloudBundle && Array.isArray(cloudBundle.requests) && cloudBundle.requests.length > 0) {
+      const cloudTs = new Date(cloudBundle._updatedAt || cloudBundle.updatedAt || 0).getTime();
+      let maxLocalTs = 0;
+      for (const r of inMemoryRequests) {
+        const ts = new Date(r.updatedAt || r.createdAt || 0).getTime();
+        if (ts > maxLocalTs) maxLocalTs = ts;
+      }
+      if (cloudTs > maxLocalTs) {
+        writeRequestsToDisk(cloudBundle.requests, false);
+      }
+    }
+  } catch {}
+  return inMemoryRequests;
+}
+
 function sendJson(res: ServerResponse, statusCode: number, data: any): boolean {
   res.statusCode = statusCode;
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-admin-session');
@@ -337,10 +429,11 @@ export async function handleAdCampaignsApi(req: IncomingMessage, res: ServerResp
   
   // GET /api/ad-campaign-requests or /api/ad-campaigns/requests
   if ((cleanUrl === '/api/ad-campaign-requests' || cleanUrl === '/api/ad-campaigns/requests') && method === 'GET') {
+    const requests = await reconcileAdRequestsFromCloudFirestore();
     return sendJson(res, 200, {
       success: true,
-      requests: inMemoryRequests,
-      total: inMemoryRequests.length,
+      requests,
+      total: requests.length,
       lastUpdated: new Date().toISOString(),
     });
   }
@@ -568,10 +661,11 @@ export async function handleAdCampaignsApi(req: IncomingMessage, res: ServerResp
 
   // GET /api/ad-campaigns
   if (cleanUrl === '/api/ad-campaigns' && method === 'GET') {
+    const campaigns = await reconcileAdCampaignsFromCloudFirestore();
     return sendJson(res, 200, {
       success: true,
-      campaigns: inMemoryCampaigns,
-      total: inMemoryCampaigns.length,
+      campaigns,
+      total: campaigns.length,
       lastUpdated: new Date().toISOString(),
     });
   }
@@ -697,7 +791,8 @@ export async function handleAdCampaignsApi(req: IncomingMessage, res: ServerResp
     }
 
     inMemoryCampaigns = filtered;
-    writeCampaignsToDisk(inMemoryCampaigns);
+    writeCampaignsToDisk(inMemoryCampaigns, false);
+    await deleteDocFromFirebaseServer('ad_campaigns', id).catch(() => {});
     return sendJson(res, 200, {
       success: true,
       deletedId: id,

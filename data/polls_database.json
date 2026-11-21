@@ -1,0 +1,119 @@
+{
+  "polls": [
+    {
+      "id": "poll-medical-caravan",
+      "title": "المصادقة على برنامج القافلة الطبية الشاملة",
+      "description": "المصادقة الرسمية للمكتب المسير والجمع العام على تنظيم القافلة الطبية الشاملة وتقديم الفحوصات والاستشارات الطبية المتخصصة وتوزيع الأدوية المجانية لفائدة ساكنة المنطقة والأسر المستفيدة.",
+      "createdAt": "2025-01-20T10:00:00.000Z",
+      "status": "active",
+      "isVisibleInApp": true,
+      "allowVoteChange": true,
+      "votes": [
+        {
+          "memberId": "m1",
+          "memberCode": "ACH-001",
+          "memberName": "محمد بن عبد الله الشايفي",
+          "choice": "for",
+          "votedAt": "2025-01-21T14:30:00.000Z"
+        },
+        {
+          "memberId": "m2",
+          "memberCode": "ACH-002",
+          "memberName": "فاطمة الزهراء الإدريسي",
+          "choice": "for",
+          "votedAt": "2025-01-22T09:15:00.000Z"
+        },
+        {
+          "memberId": "m3",
+          "memberCode": "ACH-003",
+          "memberName": "عمر التازي",
+          "choice": "for",
+          "votedAt": "2025-01-22T11:40:00.000Z"
+        },
+        {
+          "memberId": "m5",
+          "memberCode": "ACH-005",
+          "memberName": "يوسف العثماني",
+          "choice": "for",
+          "votedAt": "2025-01-23T16:00:00.000Z"
+        }
+      ],
+      "createdBy": "المكتب التنفيذي للجمعية"
+    },
+    {
+      "id": "poll-school-bags",
+      "title": "المصادقة على برنامج توزيع الحقائب المدرسية للموسم القادم",
+      "description": "المصادقة على تخصيص الميزانية اللوجستية لاقتناء وتوزيع 150 حقيبة ومقررات دراسية متكاملة على أطفال الأسر الهشة قبيل الدخول المدرسي الجديد لتشجيع التمدرس ومحاربة الهدر المدرسي.",
+      "createdAt": "2025-01-22T11:00:00.000Z",
+      "status": "active",
+      "isVisibleInApp": true,
+      "allowVoteChange": true,
+      "votes": [
+        {
+          "memberId": "m1",
+          "memberCode": "ACH-001",
+          "memberName": "محمد بن عبد الله الشايفي",
+          "choice": "for",
+          "votedAt": "2025-01-22T14:00:00.000Z"
+        },
+        {
+          "memberId": "m2",
+          "memberCode": "ACH-002",
+          "memberName": "فاطمة الزهراء الإدريسي",
+          "choice": "for",
+          "votedAt": "2025-01-22T15:30:00.000Z"
+        },
+        {
+          "memberId": "m4",
+          "memberCode": "ACH-004",
+          "memberName": "سعاد البقالي",
+          "choice": "for",
+          "votedAt": "2025-01-23T10:15:00.000Z"
+        },
+        {
+          "memberId": "m5",
+          "memberCode": "ACH-005",
+          "memberName": "يوسف العثماني",
+          "choice": "for",
+          "votedAt": "2025-01-23T17:20:00.000Z"
+        }
+      ],
+      "createdBy": "المكتب التنفيذي للجمعية"
+    },
+    {
+      "id": "poll-2025-02",
+      "title": "إحداث ورشة تطوعية أسبوعية لتشجير وتزيين الفضاءات العامة",
+      "description": "مشروع بيئي تشاركي لغرس 300 شجرة زيتون وخروب وتأهيل المساحات المحاذية للمسجد والمدرسة بدعم من منخرطي وشباب الجمعية.",
+      "createdAt": "2025-01-25T12:00:00.000Z",
+      "status": "active",
+      "isVisibleInApp": true,
+      "allowVoteChange": false,
+      "votes": [
+        {
+          "memberId": "m1",
+          "memberCode": "ACH-001",
+          "memberName": "محمد بن عبد الله الشايفي",
+          "choice": "for",
+          "votedAt": "2025-01-26T10:00:00.000Z"
+        },
+        {
+          "memberId": "m2",
+          "memberCode": "ACH-002",
+          "memberName": "فاطمة الزهراء الإدريسي",
+          "choice": "for",
+          "votedAt": "2025-01-26T11:20:00.000Z"
+        },
+        {
+          "memberId": "m4",
+          "memberCode": "ACH-004",
+          "memberName": "سعاد البقالي",
+          "choice": "for",
+          "votedAt": "2025-01-26T15:10:00.000Z"
+        }
+      ],
+      "createdBy": "لجنة البيئة والتنمية المستدامة"
+    }
+  ],
+  "lastUpdated": "2026-11-20T15:23:18.044Z",
+  "initializedFromMaster": true
+}

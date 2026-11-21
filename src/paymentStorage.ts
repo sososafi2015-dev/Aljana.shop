@@ -5,7 +5,7 @@ import { getAllTenants, saveAllTenants, getTenantById } from './tenantStorage';
 import { saveAdCampaign, createOrUpdateAdCampaignRequest } from './adCampaignStorage';
 import { getPlatformSupportSettings, savePlatformSupportSettings, submitPlatformSupportDonation, confirmPlatformSupportDonation } from './platformSupportStorage';
 import { db } from './firebase';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, getDocs, deleteDoc } from 'firebase/firestore';
 
 export const PAYMENT_STORAGE_KEYS = {
   SETTINGS: 'chayef_platform_payment_settings_v1',
@@ -407,20 +407,64 @@ export async function updateAdCreationFee(
   return updated;
 }
 
+function isValidClientTenantPayment(p: any): p is TenantPaymentRecord {
+  if (!p || typeof p !== 'object') return false;
+  if (!p.id || typeof p.id !== 'string') return false;
+  if (!p.tenantId || typeof p.tenantId !== 'string' || !p.tenantId.trim()) return false;
+  if ((p.type as string) === 'platform_support' || (p.type as string) === 'support' || p.tenantId === 'platform' || p.tenantId === 'platform_support') {
+    return false;
+  }
+  return true;
+}
+
 export function getAllTenantPayments(): TenantPaymentRecord[] {
   const all = loadData<TenantPaymentRecord[]>(PAYMENT_STORAGE_KEYS.PAYMENTS, []);
-  // Strictly isolate: platform support payments are never tenant payments
-  return (all || []).filter(
-    (p) => p && (p.type as string) !== 'platform_support' && (p.type as string) !== 'support' && p.tenantId !== 'platform' && p.tenantId !== 'platform_support'
+  // Strictly isolate valid association payments only
+  return (all || []).filter(isValidClientTenantPayment);
+}
+
+/**
+ * Zero-loop real-time updater invoked by Cloud Firestore `onSnapshot` listener on `tenant_payments`
+ */
+export function applyRealtimeTenantPayments(incomingPayments: TenantPaymentRecord[]): void {
+  if (!Array.isArray(incomingPayments)) return;
+  const validIncoming = incomingPayments.filter(isValidClientTenantPayment);
+  const current = getAllTenantPayments();
+  const map = new Map<string, TenantPaymentRecord>();
+
+  for (const p of validIncoming) {
+    map.set(p.id, p);
+  }
+  // Preserve any very recently created local payment (last 15s) that might still be in-flight
+  const nowMs = Date.now();
+  for (const localP of current) {
+    if (!map.has(localP.id)) {
+      const createdMs = new Date(localP.submittedAt || localP.createdAt || 0).getTime();
+      if (nowMs - createdMs < 15000) {
+        map.set(localP.id, localP);
+      }
+    } else {
+      const remoteP = map.get(localP.id)!;
+      if (!remoteP.proofDocumentUrl && localP.proofDocumentUrl) {
+        map.set(localP.id, { ...remoteP, proofDocumentUrl: localP.proofDocumentUrl });
+      }
+    }
+  }
+
+  const merged = Array.from(map.values()).sort(
+    (a, b) => new Date(b.submittedAt || b.createdAt || 0).getTime() - new Date(a.submittedAt || a.createdAt || 0).getTime()
   );
+
+  saveData(PAYMENT_STORAGE_KEYS.PAYMENTS, merged);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('chayef-payments-changed', { detail: merged }));
+  }
 }
 
 export function saveAllTenantPayments(payments: TenantPaymentRecord[]): void {
   // Ensure payments don't hoard unlimited megabytes of data URLs in local storage
   const optimized = payments
-    .filter(
-      (p) => p && (p.type as string) !== 'platform_support' && (p.type as string) !== 'support' && p.tenantId !== 'platform' && p.tenantId !== 'platform_support'
-    )
+    .filter(isValidClientTenantPayment)
     .map((p, index) => {
       // Keep full proofDocumentUrl for recent 5 payments, but prune large dataUrls (> 50KB) for older history
       if (index > 4 && p.proofDocumentUrl && p.proofDocumentUrl.startsWith('data:') && p.proofDocumentUrl.length > 50000) {
@@ -447,57 +491,77 @@ export function saveAllTenantPayments(payments: TenantPaymentRecord[]): void {
 }
 
 /**
- * Fetches all platform payments from server and merges with local records
+ * Fetches all platform payments directly from backend database & Cloud Firestore (`tenant_payments`)
  */
-export async function syncPaymentsFromBackend(): Promise<TenantPaymentRecord[]> {
+export async function syncPaymentsFromBackend(force = false): Promise<TenantPaymentRecord[]> {
+  const map = new Map<string, TenantPaymentRecord>();
+  const statusPriority: Record<string, number> = { confirmed: 4, rejected: 3, verified: 2, pending: 1 };
+
+  const upsertRecord = (p: any, authoritative: boolean) => {
+    if (!isValidClientTenantPayment(p)) return;
+    const existing = map.get(p.id);
+    if (!existing) {
+      map.set(p.id, p);
+      return;
+    }
+    const incTs = new Date((p as any)._updatedAt || p.reviewedAt || p.paymentVerifiedAt || p.submittedAt || p.createdAt || 0).getTime();
+    const prevTs = new Date((existing as any)._updatedAt || existing.reviewedAt || existing.paymentVerifiedAt || existing.submittedAt || existing.createdAt || 0).getTime();
+    const incPri = statusPriority[p.status] || 0;
+    const prevPri = statusPriority[existing.status] || 0;
+    if (authoritative ? (incTs >= prevTs || incPri > prevPri) : incTs > prevTs) {
+      map.set(p.id, {
+        ...existing,
+        ...p,
+        status: p.status || existing.status,
+        proofDocumentUrl: p.proofDocumentUrl || existing.proofDocumentUrl,
+      });
+    }
+  };
+
+  // Seed with local valid cache first
+  for (const p of getAllTenantPayments()) {
+    upsertRecord(p, false);
+  }
+
+  // 1. Fetch from server backend (which reconciles disk + Cloud Firestore)
   try {
-    const res = await fetch('/api/platform-payments');
+    const queryStr = force ? `?force=true&_t=${Date.now()}` : `?_t=${Date.now()}`;
+    const res = await fetch(`/api/platform-payments${queryStr}`, { cache: 'no-store' });
     if (res.ok) {
       const data = await res.json();
       if (data && Array.isArray(data.payments)) {
-        const local = getAllTenantPayments();
-        const map = new Map<string, TenantPaymentRecord>();
-
-        for (const p of local) {
-          if (p && p.id) map.set(p.id, p);
-        }
-
         for (const p of data.payments) {
-          if (p && p.id) {
-            const existing = map.get(p.id);
-            if (!existing) {
-              map.set(p.id, p);
-            } else {
-              // Remote authoritative for status / review
-              map.set(p.id, {
-                ...existing,
-                ...p,
-                status: p.status || existing.status,
-                proofDocumentUrl: existing.proofDocumentUrl || p.proofDocumentUrl,
-              });
-            }
-          }
+          upsertRecord(p, true);
         }
-
-        const currentAll = getAllTenantPayments();
-        const merged = Array.from(map.values()).sort(
-          (a, b) => new Date(b.submittedAt || b.createdAt).getTime() - new Date(a.submittedAt || a.createdAt).getTime()
-        );
-        const hasDifferences = JSON.stringify(currentAll) !== JSON.stringify(merged);
-
-        if (hasDifferences) {
-          saveData(PAYMENT_STORAGE_KEYS.PAYMENTS, merged);
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent('chayef-payments-changed', { detail: merged }));
-          }
-        }
-        return merged;
       }
     }
   } catch (e) {
-    console.warn('[paymentStorage] syncPaymentsFromBackend failed:', e);
+    console.warn('[paymentStorage] syncPaymentsFromBackend API failed:', e);
   }
-  return getAllTenantPayments();
+
+  // 2. Also read directly from Cloud Firestore `tenant_payments` collection for guaranteed freshness
+  try {
+    const snap = await getDocs(collection(db, 'tenant_payments'));
+    snap.forEach((docSnap) => {
+      const data = docSnap.data() as TenantPaymentRecord;
+      upsertRecord({ ...data, id: data.id || docSnap.id }, true);
+    });
+  } catch (fsErr) {
+    console.warn('[paymentStorage] Firestore tenant_payments direct sync warning:', fsErr);
+  }
+
+  const merged = Array.from(map.values()).sort(
+    (a, b) => new Date(b.submittedAt || b.createdAt || 0).getTime() - new Date(a.submittedAt || a.createdAt || 0).getTime()
+  );
+
+  const currentAll = getAllTenantPayments();
+  if (JSON.stringify(currentAll) !== JSON.stringify(merged)) {
+    saveData(PAYMENT_STORAGE_KEYS.PAYMENTS, merged);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('chayef-payments-changed', { detail: merged }));
+    }
+  }
+  return merged;
 }
 
 export function getPaymentsByTenantId(tenantId: string): TenantPaymentRecord[] {
@@ -1330,16 +1394,145 @@ export function confirmPaymentAndActivateTenant(paymentId: string, adminName: st
     saveAllTenants(allTenants);
   }
 
-  // Also call server backend API endpoint
+  // Also call server backend API endpoint and persist directly to Cloud Firestore
   try {
     fetch(`/api/platform-payments/${paymentId}/confirm`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ adminName, periodStart, periodEnd }),
+      body: JSON.stringify({ adminName, periodStart, periodEnd, tenantId: payment.tenantId }),
     }).catch(() => {});
   } catch {}
 
+  try {
+    const confirmedPayPayload = JSON.parse(JSON.stringify({ ...allPayments[paymentIndex], _updatedAt: now }));
+    setDoc(doc(db, 'tenant_payments', paymentId), confirmedPayPayload, { merge: true }).catch(() => {});
+    if (tenantIndex !== -1) {
+      const activeTenantPayload = JSON.parse(JSON.stringify({ ...allTenants[tenantIndex], _updatedAt: now }));
+      setDoc(doc(db, 'tenants', allTenants[tenantIndex].id), activeTenantPayload, { merge: true }).catch(() => {});
+    }
+  } catch {}
+
   return { success: true };
+}
+
+/**
+ * Super Admin: Async permanent activation for ANY pending/unactivated association
+ * (whether it has already uploaded a payment receipt OR just registered and is awaiting activation).
+ * Awaits server API + Cloud Firestore persistence so state survives reload/logout and propagates live.
+ */
+export async function activatePendingTenantPlatform(input: {
+  tenantId: string;
+  tenantSnapshot?: Partial<AssociationTenant>;
+  paymentId?: string;
+  adminName?: string;
+  note?: string;
+  amount?: number;
+  currency?: 'MAD' | 'USD';
+}): Promise<{ success: boolean; error?: string; tenant?: AssociationTenant; payment?: TenantPaymentRecord }> {
+  const adminName = input.adminName || 'الإدارة العامة';
+  const now = new Date().toISOString();
+
+  // 1. Optimistically update local cache immediately for instant UI response
+  if (input.paymentId) {
+    confirmPaymentAndActivateTenant(input.paymentId, adminName);
+  } else {
+    const allTenants = getAllTenants();
+    const tIdx = allTenants.findIndex((t) => t.id === input.tenantId);
+    const { periodStart, periodEnd } = computeRenewalDates(tIdx !== -1 ? allTenants[tIdx].subscriptionExpiresAt : undefined, now);
+    if (tIdx !== -1) {
+      const currentTenant = allTenants[tIdx];
+      const existingHistory = Array.isArray(currentTenant.subscriptionStatusHistory)
+        ? currentTenant.subscriptionStatusHistory
+        : [];
+      allTenants[tIdx] = {
+        ...currentTenant,
+        status: 'active',
+        paymentVerified: true,
+        paymentVerifiedAt: currentTenant.paymentVerifiedAt || now,
+        paymentVerifiedBy: currentTenant.paymentVerifiedBy || adminName,
+        subscriptionStartedAt: currentTenant.subscriptionStartedAt || periodStart,
+        subscriptionExpiresAt: periodEnd,
+        activationFeePaid: currentTenant.activationFeePaid || input.amount || 180,
+        activationFeeCurrency: currentTenant.activationFeeCurrency || input.currency || 'MAD',
+        activationFeeDate: currentTenant.activationFeeDate || now,
+        updatedAt: now,
+        subscriptionStatusHistory: [
+          ...existingHistory,
+          {
+            status: 'active',
+            label: 'مفعّلة',
+            timestamp: now,
+            actor: adminName,
+            note: input.note || 'تم قبول طلب التفعيل وتفعيل منصة الجمعية رسمياً من طرف الإدارة العامة.',
+          },
+        ],
+      };
+      saveAllTenants(allTenants);
+    }
+  }
+
+  // 2. Await authoritative server persistence (writes disk + Cloud Firestore `tenants` & `tenant_payments`)
+  let serverTenant: AssociationTenant | undefined;
+  let serverPayment: TenantPaymentRecord | undefined;
+  try {
+    const res = await fetch('/api/platform-payments/activate-tenant', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tenantId: input.tenantId,
+        paymentId: input.paymentId,
+        tenantSnapshot: input.tenantSnapshot,
+        adminName,
+        note: input.note,
+        amount: input.amount,
+        currency: input.currency,
+      }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.success) {
+      return { success: false, error: data?.error || 'تعذر حفظ تفعيل المنصة في الخادم.' };
+    }
+    serverTenant = data.tenant;
+    serverPayment = data.payment;
+  } catch (err: any) {
+    console.warn('[paymentStorage] activatePendingTenantPlatform server call warning:', err);
+  }
+
+  // 3. Ensure direct client Cloud Firestore write & local cache reconciliation
+  try {
+    if (serverTenant) {
+      const sanitizedTenant = JSON.parse(JSON.stringify({ ...serverTenant, _updatedAt: now }));
+      await setDoc(doc(db, 'tenants', serverTenant.id), sanitizedTenant, { merge: true }).catch(() => {});
+      const allTenants = getAllTenants();
+      const idx = allTenants.findIndex((t) => t.id === serverTenant!.id);
+      if (idx !== -1) {
+        allTenants[idx] = { ...allTenants[idx], ...serverTenant };
+      } else {
+        allTenants.unshift(serverTenant);
+      }
+      saveData('chayef_all_tenants_v2', allTenants);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('chayef-tenants-changed', { detail: allTenants }));
+      }
+    }
+    if (serverPayment) {
+      const sanitizedPay = JSON.parse(JSON.stringify({ ...serverPayment, _updatedAt: now }));
+      await setDoc(doc(db, 'tenant_payments', serverPayment.id), sanitizedPay, { merge: true }).catch(() => {});
+      const allPayments = getAllTenantPayments();
+      const pIdx = allPayments.findIndex((p) => p.id === serverPayment!.id);
+      if (pIdx !== -1) {
+        allPayments[pIdx] = { ...allPayments[pIdx], ...serverPayment };
+      } else {
+        allPayments.unshift(serverPayment);
+      }
+      saveData(PAYMENT_STORAGE_KEYS.PAYMENTS, allPayments);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('chayef-payments-changed', { detail: allPayments }));
+      }
+    }
+  } catch {}
+
+  return { success: true, tenant: serverTenant, payment: serverPayment };
 }
 
 /**
@@ -1418,6 +1611,15 @@ export function verifyTenantPayment(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ adminName, note: noteText }),
     }).catch(() => {});
+  } catch {}
+
+  try {
+    const sanitizedPay = JSON.parse(JSON.stringify({ ...allPayments[paymentIndex], _updatedAt: now }));
+    setDoc(doc(db, 'tenant_payments', paymentId), sanitizedPay, { merge: true }).catch(() => {});
+    if (tenantIndex !== -1) {
+      const sanitizedTenant = JSON.parse(JSON.stringify({ ...allTenants[tenantIndex], _updatedAt: now }));
+      setDoc(doc(db, 'tenants', allTenants[tenantIndex].id), sanitizedTenant, { merge: true }).catch(() => {});
+    }
   } catch {}
 
   return { success: true };
@@ -1584,13 +1786,22 @@ export function rejectTenantPayment(paymentId: string, adminName: string = 'ال
     saveAllTenants(allTenants);
   }
 
-  // Also call server backend API endpoint
+  // Also call server backend API endpoint & persist directly to Cloud Firestore
   try {
     fetch(`/api/platform-payments/${paymentId}/reject`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ adminName, reason: finalReason }),
     }).catch(() => {});
+  } catch {}
+
+  try {
+    const sanitizedPay = JSON.parse(JSON.stringify({ ...allPayments[paymentIndex], _updatedAt: now }));
+    setDoc(doc(db, 'tenant_payments', paymentId), sanitizedPay, { merge: true }).catch(() => {});
+    if (tenantIndex !== -1 && payment.type === 'activation') {
+      const sanitizedTenant = JSON.parse(JSON.stringify({ ...allTenants[tenantIndex], _updatedAt: now }));
+      setDoc(doc(db, 'tenants', allTenants[tenantIndex].id), sanitizedTenant, { merge: true }).catch(() => {});
+    }
   } catch {}
 
   return { success: true };
@@ -1651,6 +1862,10 @@ export function cancelTenantPayment(paymentId: string): { success: boolean; erro
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     }).catch(() => {});
+  } catch {}
+
+  try {
+    deleteDoc(doc(db, 'tenant_payments', paymentId)).catch(() => {});
   } catch {}
 
   return { success: true };

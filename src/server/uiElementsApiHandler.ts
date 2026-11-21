@@ -11,6 +11,13 @@ import {
   writeJsonFileAtomicSync,
   readLargeJsonBody,
 } from './storageEngine';
+import {
+  saveDocToFirebaseServer,
+  getDocFromFirebaseServer,
+} from './firebaseServerStorage';
+
+const uiElementsCloudReconcileCache = new Map<string, number>();
+const UI_RECONCILE_TTL_MS = 2000;
 
 function getUIElementsFile(tenantId?: string | null): string {
   const clean = normalizeTenantId(tenantId);
@@ -89,7 +96,11 @@ export function readUIElementsFromDisk(tenantId?: string | null): UIElementConfi
     );
 }
 
-export function writeUIElementsToDisk(elements: UIElementConfig[], tenantId?: string | null): void {
+export function writeUIElementsToDisk(
+  elements: UIElementConfig[],
+  tenantId?: string | null,
+  syncFirestore = true
+): void {
   ensureStorageDirectories();
   const cleanTenant = normalizeTenantId(tenantId);
   const filePath = getUIElementsFile(cleanTenant);
@@ -101,6 +112,64 @@ export function writeUIElementsToDisk(elements: UIElementConfig[], tenantId?: st
         : el
     );
   writeJsonFileAtomicSync(filePath, cleaned, 'ui_elements');
+  uiElementsCloudReconcileCache.set(`ui_${cleanTenant}`, Date.now());
+
+  if (syncFirestore) {
+    const nowIso = new Date().toISOString();
+    saveDocToFirebaseServer('ui_elements', cleanTenant, {
+      tenantId: cleanTenant,
+      elements: cleaned,
+      updatedAt: nowIso,
+      _updatedAt: nowIso,
+    }).catch(() => {});
+  }
+}
+
+async function persistUIElementsAndCloud(
+  elements: UIElementConfig[],
+  tenantId?: string | null
+): Promise<void> {
+  const cleanTenant = normalizeTenantId(tenantId);
+  writeUIElementsToDisk(elements, cleanTenant, false);
+  const nowIso = new Date().toISOString();
+  const cleaned = readUIElementsFromDisk(cleanTenant);
+  await saveDocToFirebaseServer('ui_elements', cleanTenant, {
+    tenantId: cleanTenant,
+    elements: cleaned,
+    updatedAt: nowIso,
+    _updatedAt: nowIso,
+  });
+}
+
+async function reconcileUIElementsFromCloudFirestore(
+  tenantId: string,
+  force = false
+): Promise<UIElementConfig[]> {
+  const cleanTenant = normalizeTenantId(tenantId);
+  const localElements = readUIElementsFromDisk(cleanTenant);
+  const cacheKey = `ui_${cleanTenant}`;
+  const lastCheck = uiElementsCloudReconcileCache.get(cacheKey) || 0;
+  if (!force && Date.now() - lastCheck < UI_RECONCILE_TTL_MS) {
+    return localElements;
+  }
+  uiElementsCloudReconcileCache.set(cacheKey, Date.now());
+
+  try {
+    const cloudDoc = await getDocFromFirebaseServer<any>('ui_elements', cleanTenant);
+    if (cloudDoc && Array.isArray(cloudDoc.elements) && cloudDoc.elements.length > 0) {
+      const cloudTs = new Date(cloudDoc._updatedAt || cloudDoc.updatedAt || 0).getTime();
+      let maxLocalTs = 0;
+      for (const el of localElements) {
+        const ts = new Date((el as any).updatedAt || 0).getTime();
+        if (ts > maxLocalTs) maxLocalTs = ts;
+      }
+      if (cloudTs > maxLocalTs) {
+        writeUIElementsToDisk(cloudDoc.elements, cleanTenant, false);
+        return readUIElementsFromDisk(cleanTenant);
+      }
+    }
+  } catch {}
+  return localElements;
 }
 
 export function readVisibilitySettingsFromDisk(tenantId?: string | null): Record<string, any> {
@@ -114,11 +183,68 @@ export function readVisibilitySettingsFromDisk(tenantId?: string | null): Record
   return parsed && typeof parsed === 'object' ? parsed : {};
 }
 
-export function writeVisibilitySettingsToDisk(settings: Record<string, any>, tenantId?: string | null): void {
+export function writeVisibilitySettingsToDisk(
+  settings: Record<string, any>,
+  tenantId?: string | null,
+  syncFirestore = true
+): void {
   ensureStorageDirectories();
   const cleanTenant = normalizeTenantId(tenantId);
   const filePath = getVisibilitySettingsFile(cleanTenant);
   writeJsonFileAtomicSync(filePath, settings, 'visibility');
+  uiElementsCloudReconcileCache.set(`vis_${cleanTenant}`, Date.now());
+
+  if (syncFirestore) {
+    const nowIso = new Date().toISOString();
+    saveDocToFirebaseServer('settings', `${cleanTenant}_visibility`, {
+      tenantId: cleanTenant,
+      settings,
+      updatedAt: nowIso,
+      _updatedAt: nowIso,
+    }).catch(() => {});
+  }
+}
+
+async function persistVisibilityAndCloud(
+  settings: Record<string, any>,
+  tenantId?: string | null
+): Promise<void> {
+  const cleanTenant = normalizeTenantId(tenantId);
+  writeVisibilitySettingsToDisk(settings, cleanTenant, false);
+  const nowIso = new Date().toISOString();
+  await saveDocToFirebaseServer('settings', `${cleanTenant}_visibility`, {
+    tenantId: cleanTenant,
+    settings,
+    updatedAt: nowIso,
+    _updatedAt: nowIso,
+  });
+}
+
+async function reconcileVisibilityFromCloudFirestore(
+  tenantId: string,
+  force = false
+): Promise<Record<string, any>> {
+  const cleanTenant = normalizeTenantId(tenantId);
+  const localVis = readVisibilitySettingsFromDisk(cleanTenant);
+  const cacheKey = `vis_${cleanTenant}`;
+  const lastCheck = uiElementsCloudReconcileCache.get(cacheKey) || 0;
+  if (!force && Date.now() - lastCheck < UI_RECONCILE_TTL_MS) {
+    return localVis;
+  }
+  uiElementsCloudReconcileCache.set(cacheKey, Date.now());
+
+  try {
+    const cloudDoc = await getDocFromFirebaseServer<any>('settings', `${cleanTenant}_visibility`);
+    if (cloudDoc && cloudDoc.settings && typeof cloudDoc.settings === 'object') {
+      const cloudTs = new Date(cloudDoc._updatedAt || cloudDoc.updatedAt || 0).getTime();
+      const localTs = new Date(localVis.updatedAt || 0).getTime();
+      if (cloudTs > localTs) {
+        writeVisibilitySettingsToDisk(cloudDoc.settings, cleanTenant, false);
+        return cloudDoc.settings;
+      }
+    }
+  } catch {}
+  return localVis;
 }
 
 function sendJson(res: ServerResponse, statusCode: number, data: any): boolean {
@@ -163,10 +289,12 @@ export async function handleUIElementsApi(req: IncomingMessage, res: ServerRespo
   const method = req.method?.toUpperCase();
 
   try {
+    const forceCloud = parsedUrl.searchParams.get('force') === 'true';
+
     if (url.startsWith('/api/ui-elements')) {
       // 1. GET /api/ui-elements
       if (method === 'GET' && (url === '/api/ui-elements' || url === '/api/ui-elements/')) {
-        const elements = readUIElementsFromDisk(tenantId);
+        const elements = await reconcileUIElementsFromCloudFirestore(tenantId, forceCloud);
         return sendJson(res, 200, {
           success: true,
           tenantId,
@@ -183,7 +311,7 @@ export async function handleUIElementsApi(req: IncomingMessage, res: ServerRespo
           ...el,
           updatedAt: new Date().toISOString(),
         }));
-        writeUIElementsToDisk(defaults, targetTenant);
+        await persistUIElementsAndCloud(defaults, targetTenant);
         return sendJson(res, 200, {
           success: true,
           tenantId: targetTenant,
@@ -198,7 +326,7 @@ export async function handleUIElementsApi(req: IncomingMessage, res: ServerRespo
         const elementId = decodeURIComponent(toggleMatch[1]).trim();
         const body = await readLargeJsonBody(req).catch(() => ({}));
         const targetTenant = normalizeTenantId(body?.tenantId || tenantId);
-        const current = readUIElementsFromDisk(targetTenant);
+        const current = await reconcileUIElementsFromCloudFirestore(targetTenant, true);
         const idx = current.findIndex((e) => e.id === elementId);
         if (idx === -1) {
           return sendJson(res, 404, { success: false, error: 'العنصر غير موجود.' });
@@ -209,7 +337,7 @@ export async function handleUIElementsApi(req: IncomingMessage, res: ServerRespo
           enabled: nextEnabled,
           updatedAt: new Date().toISOString(),
         };
-        writeUIElementsToDisk(current, targetTenant);
+        await persistUIElementsAndCloud(current, targetTenant);
         return sendJson(res, 200, {
           success: true,
           tenantId: targetTenant,
@@ -225,7 +353,7 @@ export async function handleUIElementsApi(req: IncomingMessage, res: ServerRespo
         const elementId = decodeURIComponent(visMatch[1]).trim();
         const body = await readLargeJsonBody(req).catch(() => ({}));
         const targetTenant = normalizeTenantId(body?.tenantId || tenantId);
-        const current = readUIElementsFromDisk(targetTenant);
+        const current = await reconcileUIElementsFromCloudFirestore(targetTenant, true);
         const idx = current.findIndex((e) => e.id === elementId);
         if (idx === -1) {
           return sendJson(res, 404, { success: false, error: 'العنصر غير موجود.' });
@@ -239,7 +367,7 @@ export async function handleUIElementsApi(req: IncomingMessage, res: ServerRespo
           visibleToNonMembers: nextVisible,
           updatedAt: new Date().toISOString(),
         };
-        writeUIElementsToDisk(current, targetTenant);
+        await persistUIElementsAndCloud(current, targetTenant);
         return sendJson(res, 200, {
           success: true,
           tenantId: targetTenant,
@@ -255,9 +383,9 @@ export async function handleUIElementsApi(req: IncomingMessage, res: ServerRespo
         const elementId = decodeURIComponent(idMatch[1]).trim();
 
         if (method === 'DELETE') {
-          const current = readUIElementsFromDisk(tenantId);
+          const current = await reconcileUIElementsFromCloudFirestore(tenantId, true);
           const updatedList = current.filter((e) => e.id !== elementId);
-          writeUIElementsToDisk(updatedList, tenantId);
+          await persistUIElementsAndCloud(updatedList, tenantId);
           return sendJson(res, 200, {
             success: true,
             tenantId,
@@ -270,7 +398,7 @@ export async function handleUIElementsApi(req: IncomingMessage, res: ServerRespo
           const body = await readLargeJsonBody(req).catch(() => ({}));
           const targetTenant = normalizeTenantId(body?.tenantId || tenantId);
           const incoming = body?.element || body || {};
-          const current = readUIElementsFromDisk(targetTenant);
+          const current = await reconcileUIElementsFromCloudFirestore(targetTenant, true);
           const idx = current.findIndex((e) => e.id === elementId);
           let updatedElement: UIElementConfig;
           if (idx >= 0) {
@@ -290,7 +418,7 @@ export async function handleUIElementsApi(req: IncomingMessage, res: ServerRespo
             } as UIElementConfig;
             current.push(updatedElement);
           }
-          writeUIElementsToDisk(current, targetTenant);
+          await persistUIElementsAndCloud(current, targetTenant);
           return sendJson(res, 200, {
             success: true,
             tenantId: targetTenant,
@@ -305,7 +433,7 @@ export async function handleUIElementsApi(req: IncomingMessage, res: ServerRespo
       if ((method === 'POST' || method === 'PUT') && (url === '/api/ui-elements' || url === '/api/ui-elements/')) {
         const body = await readLargeJsonBody(req);
         const targetTenant = normalizeTenantId(body?.tenantId || tenantId);
-        const current = readUIElementsFromDisk(targetTenant);
+        const current = await reconcileUIElementsFromCloudFirestore(targetTenant, true);
 
         if (Array.isArray(body?.elements)) {
           const map = new Map<string, UIElementConfig>();
@@ -323,7 +451,7 @@ export async function handleUIElementsApi(req: IncomingMessage, res: ServerRespo
             }
           }
           const updatedList = Array.from(map.values()).sort((a, b) => (a.order || 0) - (b.order || 0));
-          writeUIElementsToDisk(updatedList, targetTenant);
+          await persistUIElementsAndCloud(updatedList, targetTenant);
           return sendJson(res, 200, {
             success: true,
             tenantId: targetTenant,
@@ -361,7 +489,7 @@ export async function handleUIElementsApi(req: IncomingMessage, res: ServerRespo
             };
             current.push(savedEl);
           }
-          writeUIElementsToDisk(current, targetTenant);
+          await persistUIElementsAndCloud(current, targetTenant);
           return sendJson(res, 200, {
             success: true,
             tenantId: targetTenant,
@@ -377,7 +505,7 @@ export async function handleUIElementsApi(req: IncomingMessage, res: ServerRespo
 
     if (url.startsWith('/api/visibility-settings')) {
       if (method === 'GET') {
-        const settings = readVisibilitySettingsFromDisk(tenantId);
+        const settings = await reconcileVisibilityFromCloudFirestore(tenantId, forceCloud);
         return sendJson(res, 200, {
           success: true,
           tenantId,
@@ -388,13 +516,13 @@ export async function handleUIElementsApi(req: IncomingMessage, res: ServerRespo
       if (method === 'POST' || method === 'PUT') {
         const body = await readLargeJsonBody(req);
         const targetTenant = normalizeTenantId(body?.tenantId || tenantId);
-        const current = readVisibilitySettingsFromDisk(targetTenant);
+        const current = await reconcileVisibilityFromCloudFirestore(targetTenant, true);
         const next = {
           ...current,
           ...(body?.settings || body),
           updatedAt: new Date().toISOString(),
         };
-        writeVisibilitySettingsToDisk(next, targetTenant);
+        await persistVisibilityAndCloud(next, targetTenant);
         return sendJson(res, 200, {
           success: true,
           tenantId: targetTenant,

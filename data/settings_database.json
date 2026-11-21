@@ -12,9 +12,9 @@
     "bankName": "التجاري وفا بنك / Attijariwafa Bank",
     "phone": "0661000001",
     "whatsapp": "0661998877",
-    "email": "contact@association-nour.ma",
+    "email": "",
     "address": "شارع الجيش الملكي، وسط المدينة، الدار البيضاء",
-    "licenseNumber": "W/2024/8492-MA",
+    "licenseNumber": "",
     "foundingYear": "2024",
     "adminPin": "2025",
     "currency": "درهم",
@@ -27,19 +27,28 @@
     "heroBadgeTextFr": "",
     "heroBadgeTextEn": "",
     "themeColors": {
-      "primaryColor": "#047857",
-      "secondaryColor": "#0f172a",
       "buttonColor": "#059669",
+      "primaryColor": "#047857",
       "headingColor": "#0f172a",
-      "textColor": "#334155",
-      "backgroundColor": "#f8fafc",
-      "linkColor": "#047857",
-      "bannerOverlayColor": "#000000",
       "navbarColor": "#ffffff",
-      "cardColor": "#ffffff"
+      "cardColor": "#ffffff",
+      "bannerOverlayColor": "#000000",
+      "textColor": "#334155",
+      "linkColor": "#047857",
+      "backgroundColor": "#f8fafc",
+      "secondaryColor": "#0f172a"
     },
-    "enablePublicDonations": true,
-    "description": "جمعية تنموية رائدة تهدف إلى ترسيخ قيم التضامن الاجتماعي والتنمية المستدامة وتمكين الفئات الهشة."
+    "enablePublicDonations": false,
+    "description": "جمعية تنموية رائدة تهدف إلى ترسيخ قيم التضامن الاجتماعي والتنمية المستدامة وتمكين الفئات الهشة.",
+    "heroTitle": "معًا لخدمة وتنمية المجتمع مع جمعية البر والتقوى",
+    "heroTitleEn": "Together for community development with Bir watakwa",
+    "aboutText": "تأسست جمعية البر والتقوى لتكون نموذجًا للعمل الجمعوي المؤسساتي القائم على الشفافية المالية الكاملة وتوثيق الأنشطة الميدانية.",
+    "descriptionEn": "Non-profit association dedicated to public benefit and community solidarity in مكناس.",
+    "addressFr": "مكناس - المغرب",
+    "addressEn": "مكناس - المغرب",
+    "heroTitleFr": "Ensemble pour le développement solidaire avec Bir watakwa",
+    "descriptionFr": "Association à but non lucratif œuvrant pour l'intérêt général et le développement solidaire à مكناس.",
+    "heroSubtitle": "منصة رقمية شفافة تتيح لكل منخرط ومتبرع الاطلاع اللحظي على المداخيل، المصاريف، والأنشطة الميدانية الخاصة بـ جمعية البر والتقوى."
   },
-  "lastUpdated": "2026-10-30T08:59:07.027Z"
+  "lastUpdated": "2026-11-20T15:23:13.208Z"
 }

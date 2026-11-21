@@ -3,7 +3,7 @@ import path from 'path';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getFirestore, setLogLevel, doc, getDoc, setDoc, deleteDoc, collection, getDocs, query, where } from 'firebase/firestore';
 import firebaseConfigData from '../../firebase-applet-config.json';
-import { IMAGES_DIR, VIDEOS_DIR, ensureStorageDirectories } from './storageEngine';
+import { IMAGES_DIR, VIDEOS_DIR, ensureStorageDirectories, registerOffloadCloudBackupHook } from './storageEngine';
 
 try {
   setLogLevel('silent');
@@ -276,7 +276,8 @@ export async function saveDocToFirebaseServer(
   data: Record<string, any>
 ): Promise<boolean> {
   try {
-    await setDoc(doc(serverDb, collectionName, docId), data, { merge: true });
+    const sanitized = JSON.parse(JSON.stringify(data || {}));
+    await setDoc(doc(serverDb, collectionName, docId), sanitized, { merge: true });
     return true;
   } catch (err) {
     console.warn(`[FirebaseServerStorage] saveDoc (${collectionName}/${docId}) notice:`, err);
@@ -333,16 +334,19 @@ export async function syncTenantCollectionToFirebaseServer(
   collectionName: string,
   tenantId: string,
   items: any[],
-  removedItemIds: string[] = []
+  removedItemIds: string[] = [],
+  options?: { reconcileDeletions?: boolean }
 ): Promise<void> {
   try {
     const cleanTenant = !tenantId || tenantId === 'portal' ? 'tenant_nour' : tenantId;
     const nowIso = new Date().toISOString();
     const promises: Promise<any>[] = [];
+    const activeDocIds = new Set<string>();
 
     for (const item of items || []) {
       if (!item || !item.id) continue;
       const docId = `${cleanTenant}_${item.id}`.replace(/[^a-zA-Z0-9_.-]/g, '_');
+      activeDocIds.add(docId);
       const rawPayload: Record<string, any> = {
         ...item,
         tenantId: item.tenantId && item.tenantId !== 'portal' ? item.tenantId : cleanTenant,
@@ -367,6 +371,21 @@ export async function syncTenantCollectionToFirebaseServer(
       if (cleanTenant === 'tenant_nour') {
         const portalDocId = `portal_${remId}`.replace(/[^a-zA-Z0-9_.-]/g, '_');
         promises.push(deleteDoc(doc(serverDb, collectionName, portalDocId)).catch(() => {}));
+      }
+    }
+
+    // Reconcile deletions when syncing an authoritative full list so deleted items never resurrect in Firestore
+    if (options?.reconcileDeletions) {
+      try {
+        const q = query(collection(serverDb, collectionName), where('tenantId', '==', cleanTenant));
+        const existingSnap = await getDocs(q);
+        existingSnap.forEach((d) => {
+          if (!activeDocIds.has(d.id)) {
+            promises.push(deleteDoc(doc(serverDb, collectionName, d.id)).catch(() => {}));
+          }
+        });
+      } catch (reconcileErr) {
+        console.warn(`[FirebaseServerStorage] reconcileDeletions (${collectionName}/${cleanTenant}) notice:`, reconcileErr);
       }
     }
 
@@ -425,6 +444,46 @@ export async function fetchTenantCollectionFromFirebaseServer<T = any>(
     return [];
   }
 }
+
+// Automatically mirror every file written by offloadBase64ToDisk into Cloud Firestore media_files & storage_chunks
+const backedUpFilenames = new Set<string>();
+const pendingOffloadBackups = new Set<Promise<any>>();
+
+registerOffloadCloudBackupHook(({ filename, buffer, mimeType, url, category }) => {
+  if (!filename || backedUpFilenames.has(filename)) return;
+  backedUpFilenames.add(filename);
+  const task = persistFileToCloudFirestore(buffer, {
+    filename,
+    originalName: filename,
+    mimeType,
+    size: buffer.length,
+    url,
+    category,
+  })
+    .then((ok) => {
+      if (!ok) backedUpFilenames.delete(filename);
+      return ok;
+    })
+    .catch(() => {
+      backedUpFilenames.delete(filename);
+      return false;
+    });
+  pendingOffloadBackups.add(task);
+  task.finally(() => {
+    pendingOffloadBackups.delete(task);
+  });
+});
+
+/**
+ * Awaits all in-flight offloaded image/media uploads to Cloud Firestore so Cloud Run
+ * does not throttle CPU before `media_files` & `storage_chunks` finish persisting.
+ */
+export async function awaitPendingOffloadBackups(): Promise<void> {
+  if (pendingOffloadBackups.size === 0) return;
+  await Promise.allSettled(Array.from(pendingOffloadBackups));
+}
+
+
 
 
 

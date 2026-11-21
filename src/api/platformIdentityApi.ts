@@ -109,6 +109,37 @@ export function syncPlatformIdentityLogoLocally(logoUrl: string, updatedAt?: str
 }
 
 /**
+ * Applies a live Cloud Firestore snapshot update to platform identity cache & UI without write-back loops
+ */
+export function applyRealtimePlatformIdentity(incoming: Partial<PlatformIdentitySettings> & { _updatedAt?: string }): void {
+  if (!incoming || typeof incoming !== 'object') return;
+  const current = getCachedPlatformIdentity();
+  const next: PlatformIdentitySettings = {
+    platformName: normalizeBrandName(incoming.platformName || current.platformName),
+    platformLogo: incoming.platformLogo !== undefined ? (incoming.platformLogo || '') : (current.platformLogo || ''),
+    whatsapp: incoming.whatsapp || current.whatsapp || DEFAULT_PLATFORM_IDENTITY.whatsapp,
+    associationsWhatsapp:
+      incoming.associationsWhatsapp ||
+      incoming.whatsapp ||
+      current.associationsWhatsapp ||
+      DEFAULT_PLATFORM_IDENTITY.associationsWhatsapp,
+    hasCustomPin: incoming.hasCustomPin !== undefined ? Boolean(incoming.hasCustomPin) : current.hasCustomPin,
+    updatedAt: incoming.updatedAt || incoming._updatedAt || current.updatedAt || new Date().toISOString(),
+    updatedBy: incoming.updatedBy || current.updatedBy,
+  };
+  inMemoryIdentity = next;
+  safeSetLocalStorage(next);
+  updateDocumentTitle(next.platformName);
+  if (next.platformLogo) {
+    updateDocumentFavicon(next.platformLogo);
+    syncPortalLogoLocally(next.platformLogo, next.updatedAt);
+  }
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(PLATFORM_IDENTITY_EVENT, { detail: next }));
+  }
+}
+
+/**
  * Fetches fresh identity settings from backend database AND Cloud Firestore (`platform_identity/main`),
  * reconciling by timestamp so the latest saved logo & identity always win across reloads & sessions.
  */

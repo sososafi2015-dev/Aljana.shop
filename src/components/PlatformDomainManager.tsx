@@ -59,12 +59,17 @@ const TTL_PRESETS = [
 
 function getDefaultTargetUrl(): string {
   if (typeof window !== 'undefined' && window.location?.origin) {
-    if (window.location.hostname.endsWith('.ai.studio')) {
-      return 'https://syomax.ai.studio';
+    const host = window.location.hostname.toLowerCase();
+    if (
+      host.endsWith('.ai.studio') ||
+      host === 'www.syomax.com' ||
+      host === 'syomax.com'
+    ) {
+      return 'https://syomax.com';
     }
     return window.location.origin;
   }
-  return 'https://syomax.ai.studio';
+  return 'https://syomax.com';
 }
 
 function getStatusBadgeMeta(status: DomainConnectionStatus): {
@@ -313,11 +318,11 @@ export const PlatformDomainManager: React.FC<PlatformDomainManagerProps> = ({
     const cleanTarget = normalizeTargetUrlClient(targetUrl);
 
     if (!isValidDomainNameClient(cleanDomain)) {
-      onShowToast('يرجى إدخال اسم دومين صحيح (مثال: syomax.ai.studio).', 'error');
+      onShowToast('يرجى إدخال اسم دومين صحيح (مثال: syomax.com).', 'error');
       return null;
     }
     if (!cleanTarget) {
-      onShowToast('يرجى إدخال عنوان الموقع المستهدف بشكل صحيح (مثال: https://syomax.ai.studio).', 'error');
+      onShowToast('يرجى إدخال عنوان الموقع المستهدف بشكل صحيح (مثال: https://syomax.com).', 'error');
       return null;
     }
 
@@ -548,7 +553,7 @@ export const PlatformDomainManager: React.FC<PlatformDomainManagerProps> = ({
   };
 
   const statusMeta = getStatusBadgeMeta(selectedDomain?.status || 'not_linked');
-  const cleanPreviewDomain = normalizeDomainNameClient(domainName) || 'syomax.ai.studio';
+  const cleanPreviewDomain = normalizeDomainNameClient(domainName) || 'syomax.com';
 
   return (
     <div className="space-y-5" dir="rtl">
@@ -609,7 +614,7 @@ export const PlatformDomainManager: React.FC<PlatformDomainManagerProps> = ({
             <div className="text-xs text-slate-400 py-2">جارٍ تحميل الدومينات من Firebase Firestore...</div>
           ) : domains.length === 0 ? (
             <div className="p-3.5 rounded-xl bg-slate-50 border border-dashed border-slate-300 text-xs text-slate-500">
-              لا توجد دومينات محفوظة حالياً. استخدم النموذج أدناه لإضافة أول دومين (مثل <strong dir="ltr">syomax.ai.studio</strong>) وحفظه.
+              لا توجد دومينات محفوظة حالياً. استخدم النموذج أدناه لإضافة أول دومين (مثل <strong dir="ltr">syomax.com</strong>) وحفظه.
             </div>
           ) : (
             <div className="flex items-center gap-2 flex-wrap">
@@ -749,11 +754,11 @@ export const PlatformDomainManager: React.FC<PlatformDomainManagerProps> = ({
               dir="ltr"
               value={domainName}
               onChange={(e) => setDomainName(e.target.value)}
-              placeholder="syomax.ai.studio"
+              placeholder="syomax.com"
               className="w-full px-3.5 py-2.5 text-sm font-mono bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:border-sky-600 outline-none"
             />
             <p className="text-[11px] text-slate-400 mt-1">
-              مثال: <span className="font-mono" dir="ltr">syomax.ai.studio</span> (بدون https:// أو مسارات إضافية)
+              مثال: <span className="font-mono" dir="ltr">syomax.com</span> (بدون https:// أو مسارات إضافية)
             </p>
           </div>
 
@@ -766,7 +771,7 @@ export const PlatformDomainManager: React.FC<PlatformDomainManagerProps> = ({
               dir="ltr"
               value={targetUrl}
               onChange={(e) => setTargetUrl(e.target.value)}
-              placeholder="https://syomax.ai.studio"
+              placeholder="https://syomax.com"
               className="w-full px-3.5 py-2.5 text-sm font-mono bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:border-sky-600 outline-none"
             />
             <p className="text-[11px] text-slate-400 mt-1">

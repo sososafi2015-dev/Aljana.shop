@@ -33,10 +33,12 @@ import {
   defaultPlatformPaymentSettings,
   getAllTenantPayments,
   getPlatformPaymentSettings,
+  getActivationFeeForCountry,
   savePlatformPaymentSettings,
   syncPlatformPaymentSettingsFromBackend,
   verifyTenantPayment,
   confirmPaymentAndActivateTenant,
+  activatePendingTenantPlatform,
   rejectTenantPayment,
   syncPaymentsFromBackend,
 } from '../paymentStorage';
@@ -47,6 +49,38 @@ interface PlatformPaymentsAdminProps {
   onTenantsUpdated?: () => void;
 }
 
+type RequestFilterMode = 'pending_all' | 'pending' | 'verified' | 'awaiting_payment' | 'confirmed' | 'rejected';
+
+interface UnifiedActivationRequest {
+  key: string;
+  tenantId: string;
+  tenant?: AssociationTenant;
+  payment?: TenantPaymentRecord;
+  tenantName: string;
+  ownerName: string;
+  ownerPhone: string;
+  country: string;
+  city: string;
+  registeredAt: string;
+  submittedAt?: string;
+  amount: number;
+  currency: 'MAD' | 'USD';
+  paymentMethod?: string;
+  cardLast4?: string;
+  transactionReference?: string;
+  proofDocumentUrl?: string;
+  proofFileName?: string;
+  type: 'activation' | 'renewal' | 'ad_campaign';
+  tenantStatus: AssociationTenant['status'];
+  paymentStatus: 'unpaid' | PaymentStatus;
+  paymentVerified: boolean;
+  isPendingActivation: boolean;
+  rejectionReason?: string;
+  reviewedBy?: string;
+  adminNotes?: string;
+  statusHistory: Array<{ status?: string; label?: string; timestamp: string; actor?: string; note?: string }>;
+}
+
 export const PlatformPaymentsAdmin: React.FC<PlatformPaymentsAdminProps> = ({
   onShowToast,
   onTenantsUpdated,
@@ -55,16 +89,17 @@ export const PlatformPaymentsAdmin: React.FC<PlatformPaymentsAdminProps> = ({
   const [tenants, setTenants] = useState<AssociationTenant[]>(getAllTenants);
   const [settings, setSettings] = useState<PlatformPaymentSettings>(getPlatformPaymentSettings);
   const [currentSubTab, setCurrentSubTab] = useState<'requests' | 'settings'>('requests');
+  const [isSyncing, setIsSyncing] = useState(false);
 
-  // Filter & Search states
+  // Filter & Search states — default strictly shows pending/unactivated platforms only (excludes already-activated associations)
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | PaymentStatus>('all');
+  const [statusFilter, setStatusFilter] = useState<RequestFilterMode>('pending_all');
 
   // Proof Modal
   const [viewingProof, setViewingProof] = useState<{ url: string; title: string; fileName?: string } | null>(null);
 
-  // Review Subscription Request & Operation Log Modal
-  const [reviewingPayment, setReviewingPayment] = useState<TenantPaymentRecord | null>(null);
+  // Review Activation / Subscription Request & Operation Log Modal
+  const [reviewingRequestKey, setReviewingRequestKey] = useState<string | null>(null);
   const [verificationNote, setVerificationNote] = useState('');
 
   // Reject Modal
@@ -72,7 +107,7 @@ export const PlatformPaymentsAdmin: React.FC<PlatformPaymentsAdminProps> = ({
   const [rejectionReason, setRejectionReason] = useState('');
 
   // Confirm & Activate Modal State
-  const [confirmingPayment, setConfirmingPayment] = useState<TenantPaymentRecord | null>(null);
+  const [confirmingRequest, setConfirmingRequest] = useState<UnifiedActivationRequest | null>(null);
   const [isProcessingAction, setIsProcessingAction] = useState(false);
 
   // Settings form states
@@ -80,29 +115,44 @@ export const PlatformPaymentsAdmin: React.FC<PlatformPaymentsAdminProps> = ({
 
   const refreshData = () => {
     const raw = getAllTenantPayments();
-    // Strictly isolate: platform support payments belong exclusively to the Platform Support Account, not Association Subscriptions
+    // Strictly isolate valid association payments only
     const filtered = (raw || []).filter(
-      (p) => p && (p.type as string) !== 'platform_support' && (p.type as string) !== 'support' && p.tenantId !== 'platform' && p.tenantId !== 'platform_support'
+      (p) =>
+        p &&
+        p.id &&
+        p.tenantId &&
+        (p.type as string) !== 'platform_support' &&
+        (p.type as string) !== 'support' &&
+        p.tenantId !== 'platform' &&
+        p.tenantId !== 'platform_support'
     );
     setPayments(filtered);
     setTenants(getAllTenants());
     setSettings(getPlatformPaymentSettings());
-    if (reviewingPayment) {
-      const updatedReview = filtered.find((p) => p.id === reviewingPayment.id);
-      if (updatedReview) setReviewingPayment(updatedReview);
+  };
+
+  const syncLiveFromDatabase = async (force = true) => {
+    setIsSyncing(true);
+    try {
+      await Promise.all([
+        syncPaymentsFromBackend(force).catch(() => {}),
+        syncTenantsFromBackend(force).catch(() => {}),
+        syncPlatformPaymentSettingsFromBackend()
+          .then((synced) => {
+            setSettings(synced);
+            setFormSettings(synced);
+          })
+          .catch(() => {}),
+      ]);
+      refreshData();
+    } finally {
+      setIsSyncing(false);
     }
   };
 
   useEffect(() => {
     refreshData();
-    syncPaymentsFromBackend().then(() => refreshData()).catch(() => {});
-    syncTenantsFromBackend().then(() => refreshData()).catch(() => {});
-    syncPlatformPaymentSettingsFromBackend()
-      .then((synced) => {
-        setSettings(synced);
-        setFormSettings(synced);
-      })
-      .catch(() => {});
+    syncLiveFromDatabase(true);
 
     const handleUpdate = () => refreshData();
     const handlePaymentSettingsUpdate = () => {
@@ -119,50 +169,309 @@ export const PlatformPaymentsAdmin: React.FC<PlatformPaymentsAdminProps> = ({
     };
   }, []);
 
-  // Filter payments
-  const filteredPayments = payments.filter((p) => {
-    if ((p.type as string) === 'platform_support' || (p.type as string) === 'support' || p.tenantId === 'platform' || p.tenantId === 'platform_support') {
-      return false;
+  // Build unified live list directly from database `tenants` + `tenant_payments`
+  const { pendingActivationRequests, archivedConfirmedRequests, rejectedRequests } = React.useMemo(() => {
+    const tenantById = new Map<string, AssociationTenant>();
+    for (const t of tenants) {
+      if (t && t.id) tenantById.set(t.id, t);
     }
-    if (statusFilter !== 'all' && p.status !== statusFilter) {
-      return false;
-    }
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      const matchName = p.tenantName.toLowerCase().includes(q);
-      const matchOwner = p.ownerName.toLowerCase().includes(q);
-      const matchPhone = p.ownerPhone.toLowerCase().includes(q);
-      const matchRef = (p.transactionReference || '').toLowerCase().includes(q);
-      if (!matchName && !matchOwner && !matchPhone && !matchRef) {
-        return false;
+
+    // Group activation payments by tenantId (sorted newest first)
+    const activationPaymentsByTenant = new Map<string, TenantPaymentRecord[]>();
+    const sortedPayments = [...payments].sort(
+      (a, b) => new Date(b.submittedAt || b.createdAt || 0).getTime() - new Date(a.submittedAt || a.createdAt || 0).getTime()
+    );
+
+    for (const p of sortedPayments) {
+      if (!p.type || p.type === 'activation') {
+        const list = activationPaymentsByTenant.get(p.tenantId) || [];
+        list.push(p);
+        activationPaymentsByTenant.set(p.tenantId, list);
       }
     }
-    return true;
-  });
 
-  // Calculate Metrics
-  const pendingCount = payments.filter((p) => p.status === 'pending').length;
-  const verifiedCount = payments.filter((p) => p.status === 'verified').length;
-  const confirmedCount = payments.filter((p) => p.status === 'confirmed').length;
-  const rejectedCount = payments.filter((p) => p.status === 'rejected').length;
-  const pendingSubscriptionTenants = tenants.filter(
-    (t) => !t.isMasterTemplate && t.status === 'pending_subscription'
-  );
+    const pendingList: UnifiedActivationRequest[] = [];
+    const seenPendingTenantIds = new Set<string>();
+
+    // 1. ALL newly registered / unactivated associations from `tenants` (status !== 'active', excluding master template)
+    for (const t of tenants) {
+      if (!t || !t.id || t.isTemplate || t.id === 'tenant_nour') continue;
+      if (t.status === 'active') continue; // Strictly exclude already-activated associations from pending requests!
+
+      seenPendingTenantIds.add(t.id);
+      const tenantPays = activationPaymentsByTenant.get(t.id) || [];
+      // Prefer active pending/verified payment; fallback to latest payment (e.g., rejected)
+      const latestPay =
+        tenantPays.find((p) => p.status === 'verified' || p.status === 'pending') ||
+        tenantPays[0];
+
+      const feeInfo = getActivationFeeForCountry(t.country || 'المغرب', settings);
+      const effectivePayStatus: 'unpaid' | PaymentStatus = latestPay ? latestPay.status : 'unpaid';
+      const combinedHistory =
+        Array.isArray(t.subscriptionStatusHistory) && t.subscriptionStatusHistory.length > 0
+          ? t.subscriptionStatusHistory
+          : Array.isArray(latestPay?.statusHistory)
+          ? latestPay!.statusHistory!
+          : [];
+
+      pendingList.push({
+        key: `tenant_${t.id}`,
+        tenantId: t.id,
+        tenant: t,
+        payment: latestPay,
+        tenantName: t.name,
+        ownerName: t.ownerName || latestPay?.ownerName || 'مسؤول الجمعية',
+        ownerPhone: t.ownerPhone || latestPay?.ownerPhone || '',
+        country: t.country || latestPay?.country || 'المغرب',
+        city: t.city || '',
+        registeredAt: t.createdAt || latestPay?.createdAt || latestPay?.submittedAt || new Date().toISOString(),
+        submittedAt: latestPay?.submittedAt,
+        amount: latestPay?.amount || feeInfo.amount,
+        currency: (latestPay?.currency as 'MAD' | 'USD') || (feeInfo.currency as 'MAD' | 'USD'),
+        paymentMethod: latestPay?.paymentMethod,
+        cardLast4: latestPay?.cardLast4,
+        transactionReference: latestPay?.transactionReference,
+        proofDocumentUrl: latestPay?.proofDocumentUrl,
+        proofFileName: latestPay?.proofFileName,
+        type: 'activation',
+        tenantStatus: t.status,
+        paymentStatus: effectivePayStatus,
+        paymentVerified: Boolean(t.paymentVerified || latestPay?.paymentVerified || latestPay?.status === 'verified'),
+        isPendingActivation: true,
+        rejectionReason: latestPay?.rejectionReason,
+        reviewedBy: latestPay?.reviewedBy,
+        adminNotes: latestPay?.adminNotes,
+        statusHistory: combinedHistory,
+      });
+    }
+
+    // 2. Any pending/verified activation payments in `tenant_payments` whose tenant record isn't in `tenants` yet
+    // (Skip any whose tenant is ALREADY active!)
+    for (const p of sortedPayments) {
+      const isActivation = !p.type || p.type === 'activation';
+      if (isActivation && (p.status === 'pending' || p.status === 'verified')) {
+        const linkedTenant = tenantById.get(p.tenantId);
+        if (linkedTenant && linkedTenant.status === 'active') {
+          continue; // Never show already-activated associations in pending activation requests!
+        }
+        if (seenPendingTenantIds.has(p.tenantId)) {
+          continue;
+        }
+        seenPendingTenantIds.add(p.tenantId);
+        pendingList.push({
+          key: `payment_${p.id}`,
+          tenantId: p.tenantId,
+          tenant: linkedTenant,
+          payment: p,
+          tenantName: linkedTenant?.name || p.tenantName || 'جمعية مسجلة',
+          ownerName: linkedTenant?.ownerName || p.ownerName || 'مسؤول الجمعية',
+          ownerPhone: linkedTenant?.ownerPhone || p.ownerPhone || '',
+          country: linkedTenant?.country || p.country || 'المغرب',
+          city: linkedTenant?.city || '',
+          registeredAt: linkedTenant?.createdAt || p.createdAt || p.submittedAt,
+          submittedAt: p.submittedAt,
+          amount: p.amount,
+          currency: (p.currency as 'MAD' | 'USD') || 'MAD',
+          paymentMethod: p.paymentMethod,
+          cardLast4: p.cardLast4,
+          transactionReference: p.transactionReference,
+          proofDocumentUrl: p.proofDocumentUrl,
+          proofFileName: p.proofFileName,
+          type: 'activation',
+          tenantStatus: linkedTenant?.status || 'pending_activation',
+          paymentStatus: p.status,
+          paymentVerified: Boolean(p.paymentVerified || p.status === 'verified'),
+          isPendingActivation: true,
+          rejectionReason: p.rejectionReason,
+          reviewedBy: p.reviewedBy,
+          adminNotes: p.adminNotes,
+          statusHistory: Array.isArray(p.statusHistory) ? p.statusHistory : [],
+        });
+      } else if (!isActivation && (p.status === 'pending' || p.status === 'verified')) {
+        // Also keep pending renewal / ad_campaign payments visible for review
+        const linkedTenant = tenantById.get(p.tenantId);
+        pendingList.push({
+          key: `payment_${p.id}`,
+          tenantId: p.tenantId,
+          tenant: linkedTenant,
+          payment: p,
+          tenantName: linkedTenant?.name || p.tenantName || 'جمعية',
+          ownerName: linkedTenant?.ownerName || p.ownerName || '',
+          ownerPhone: linkedTenant?.ownerPhone || p.ownerPhone || '',
+          country: linkedTenant?.country || p.country || 'المغرب',
+          city: linkedTenant?.city || '',
+          registeredAt: linkedTenant?.createdAt || p.createdAt || p.submittedAt,
+          submittedAt: p.submittedAt,
+          amount: p.amount,
+          currency: (p.currency as 'MAD' | 'USD') || 'MAD',
+          paymentMethod: p.paymentMethod,
+          cardLast4: p.cardLast4,
+          transactionReference: p.transactionReference,
+          proofDocumentUrl: p.proofDocumentUrl,
+          proofFileName: p.proofFileName,
+          type: p.type === 'renewal' ? 'renewal' : 'ad_campaign',
+          tenantStatus: linkedTenant?.status || 'active',
+          paymentStatus: p.status,
+          paymentVerified: Boolean(p.paymentVerified || p.status === 'verified'),
+          isPendingActivation: true,
+          rejectionReason: p.rejectionReason,
+          reviewedBy: p.reviewedBy,
+          adminNotes: p.adminNotes,
+          statusHistory: Array.isArray(p.statusHistory) ? p.statusHistory : [],
+        });
+      }
+    }
+
+    pendingList.sort(
+      (a, b) =>
+        new Date(b.submittedAt || b.registeredAt || 0).getTime() -
+        new Date(a.submittedAt || a.registeredAt || 0).getTime()
+    );
+
+    // 3. Archived confirmed payments (only displayed when user explicitly selects 'confirmed' filter)
+    const confirmedList: UnifiedActivationRequest[] = sortedPayments
+      .filter((p) => p.status === 'confirmed')
+      .map((p) => {
+        const linkedTenant = tenantById.get(p.tenantId);
+        return {
+          key: `confirmed_${p.id}`,
+          tenantId: p.tenantId,
+          tenant: linkedTenant,
+          payment: p,
+          tenantName: linkedTenant?.name || p.tenantName || 'جمعية',
+          ownerName: linkedTenant?.ownerName || p.ownerName || '',
+          ownerPhone: linkedTenant?.ownerPhone || p.ownerPhone || '',
+          country: linkedTenant?.country || p.country || 'المغرب',
+          city: linkedTenant?.city || '',
+          registeredAt: linkedTenant?.createdAt || p.createdAt || p.submittedAt,
+          submittedAt: p.submittedAt,
+          amount: p.amount,
+          currency: (p.currency as 'MAD' | 'USD') || 'MAD',
+          paymentMethod: p.paymentMethod,
+          cardLast4: p.cardLast4,
+          transactionReference: p.transactionReference,
+          proofDocumentUrl: p.proofDocumentUrl,
+          proofFileName: p.proofFileName,
+          type: p.type === 'renewal' ? 'renewal' : p.type === 'ad_campaign' ? 'ad_campaign' : 'activation',
+          tenantStatus: linkedTenant?.status || 'active',
+          paymentStatus: 'confirmed',
+          paymentVerified: true,
+          isPendingActivation: false,
+          reviewedBy: p.reviewedBy,
+          adminNotes: p.adminNotes,
+          statusHistory: Array.isArray(p.statusHistory) ? p.statusHistory : [],
+        };
+      });
+
+    // 4. Rejected payment records
+    const rejectedList: UnifiedActivationRequest[] = sortedPayments
+      .filter((p) => p.status === 'rejected')
+      .map((p) => {
+        const linkedTenant = tenantById.get(p.tenantId);
+        return {
+          key: `rejected_${p.id}`,
+          tenantId: p.tenantId,
+          tenant: linkedTenant,
+          payment: p,
+          tenantName: linkedTenant?.name || p.tenantName || 'جمعية',
+          ownerName: linkedTenant?.ownerName || p.ownerName || '',
+          ownerPhone: linkedTenant?.ownerPhone || p.ownerPhone || '',
+          country: linkedTenant?.country || p.country || 'المغرب',
+          city: linkedTenant?.city || '',
+          registeredAt: linkedTenant?.createdAt || p.createdAt || p.submittedAt,
+          submittedAt: p.submittedAt,
+          amount: p.amount,
+          currency: (p.currency as 'MAD' | 'USD') || 'MAD',
+          paymentMethod: p.paymentMethod,
+          cardLast4: p.cardLast4,
+          transactionReference: p.transactionReference,
+          proofDocumentUrl: p.proofDocumentUrl,
+          proofFileName: p.proofFileName,
+          type: p.type === 'renewal' ? 'renewal' : p.type === 'ad_campaign' ? 'ad_campaign' : 'activation',
+          tenantStatus: linkedTenant?.status || 'pending_subscription',
+          paymentStatus: 'rejected',
+          paymentVerified: false,
+          isPendingActivation: linkedTenant ? linkedTenant.status !== 'active' : true,
+          rejectionReason: p.rejectionReason,
+          reviewedBy: p.reviewedBy,
+          adminNotes: p.adminNotes,
+          statusHistory: Array.isArray(p.statusHistory) ? p.statusHistory : [],
+        };
+      });
+
+    return {
+      pendingActivationRequests: pendingList,
+      archivedConfirmedRequests: confirmedList,
+      rejectedRequests: rejectedList,
+    };
+  }, [tenants, payments, settings]);
+
+  const allRequestLookup = React.useMemo(() => {
+    const map = new Map<string, UnifiedActivationRequest>();
+    for (const r of [...pendingActivationRequests, ...archivedConfirmedRequests, ...rejectedRequests]) {
+      map.set(r.key, r);
+    }
+    return map;
+  }, [pendingActivationRequests, archivedConfirmedRequests, rejectedRequests]);
+
+  const reviewingRequest = reviewingRequestKey ? allRequestLookup.get(reviewingRequestKey) || null : null;
+
+  // Select active dataset based on filter (default strictly excludes already-activated associations)
+  const displayedRequests = React.useMemo(() => {
+    let base: UnifiedActivationRequest[];
+    if (statusFilter === 'pending_all') {
+      base = pendingActivationRequests;
+    } else if (statusFilter === 'pending') {
+      base = pendingActivationRequests.filter((r) => r.paymentStatus === 'pending');
+    } else if (statusFilter === 'verified') {
+      base = pendingActivationRequests.filter((r) => r.paymentStatus === 'verified');
+    } else if (statusFilter === 'awaiting_payment') {
+      base = pendingActivationRequests.filter((r) => r.paymentStatus === 'unpaid' || r.paymentStatus === 'rejected');
+    } else if (statusFilter === 'confirmed') {
+      base = archivedConfirmedRequests;
+    } else {
+      base = rejectedRequests;
+    }
+
+    if (!searchQuery.trim()) return base;
+    const q = searchQuery.toLowerCase();
+    return base.filter((r) => {
+      const matchName = r.tenantName.toLowerCase().includes(q);
+      const matchOwner = r.ownerName.toLowerCase().includes(q);
+      const matchPhone = r.ownerPhone.toLowerCase().includes(q);
+      const matchRef = (r.transactionReference || '').toLowerCase().includes(q);
+      const matchCity = (r.city || '').toLowerCase().includes(q);
+      return matchName || matchOwner || matchPhone || matchRef || matchCity;
+    });
+  }, [statusFilter, searchQuery, pendingActivationRequests, archivedConfirmedRequests, rejectedRequests]);
+
+  // Calculate live metrics
+  const totalPendingRequestsCount = pendingActivationRequests.length;
+  const pendingReviewCount = pendingActivationRequests.filter((r) => r.paymentStatus === 'pending').length;
+  const verifiedCount = pendingActivationRequests.filter((r) => r.paymentStatus === 'verified').length;
+  const awaitingPaymentCount = pendingActivationRequests.filter((r) => r.paymentStatus === 'unpaid' || r.paymentStatus === 'rejected').length;
+  const activePlatformsCount = tenants.filter((t) => t && !t.isTemplate && t.id !== 'tenant_nour' && t.status === 'active').length;
+  const confirmedCount = archivedConfirmedRequests.length;
+  const rejectedCount = rejectedRequests.length;
 
   const totalCollectedMad = payments
     .filter((p) => p.status === 'confirmed' && p.currency === 'MAD')
-    .reduce((sum, p) => sum + p.amount, 0);
+    .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
 
   const totalCollectedUsd = payments
     .filter((p) => p.status === 'confirmed' && p.currency === 'USD')
-    .reduce((sum, p) => sum + p.amount, 0);
+    .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
 
   // Actions
-  const handleVerifyPayment = (payment: TenantPaymentRecord, customNote?: string) => {
-    const result = verifyTenantPayment(payment.id, 'الإدارة العامة', customNote);
+  const handleVerifyPayment = (req: UnifiedActivationRequest, customNote?: string) => {
+    if (!req.payment) {
+      onShowToast('لا يوجد وصل دفع مرفق بعد — يمكنك تفعيل المنصة مباشرة عند التأكد من الاستيفاء.', 'info');
+      return;
+    }
+    const result = verifyTenantPayment(req.payment.id, 'الإدارة العامة', customNote);
     if (result.success) {
       onShowToast(
-        `تم التحقق من صحة الدفع لجمعية «${payment.tenantName}» وتوثيق الحالة بنجاح ✓. يمكنك الآن تفعيل المنصة.`,
+        `تم التحقق من صحة الدفع لجمعية «${req.tenantName}» وتوثيق الحالة بنجاح ✓. يمكنك الآن تفعيل المنصة.`,
         'success'
       );
       refreshData();
@@ -172,32 +481,62 @@ export const PlatformPaymentsAdmin: React.FC<PlatformPaymentsAdminProps> = ({
     }
   };
 
-  const handleOpenConfirmModal = (payment: TenantPaymentRecord) => {
-    setConfirmingPayment(payment);
+  const handleOpenConfirmModal = (req: UnifiedActivationRequest) => {
+    setConfirmingRequest(req);
   };
 
-  const handleExecuteConfirmPayment = () => {
-    if (!confirmingPayment) return;
+  const handleExecuteConfirmActivation = async () => {
+    if (!confirmingRequest) return;
     setIsProcessingAction(true);
 
     try {
-      const result = confirmPaymentAndActivateTenant(confirmingPayment.id, 'الإدارة العامة');
-      if (result.success) {
-        onShowToast(
-          `تم تأكيد الدفع وتفعيل منصة «${confirmingPayment.tenantName}» بنجاح! ✅\n«تم تأكيد عملية الدفع وتفعيل منصة جمعيتك بنجاح. يمكنك الآن الدخول إلى منصتك والبدء في استخدامها.»`,
-          'success'
-        );
-        refreshData();
-        if (onTenantsUpdated) onTenantsUpdated();
+      if (confirmingRequest.type === 'ad_campaign' && confirmingRequest.payment) {
+        const result = confirmPaymentAndActivateTenant(confirmingRequest.payment.id, 'الإدارة العامة');
+        if (result.success) {
+          onShowToast(`تم تأكيد دفع الحملة الإعلانية لجمعية «${confirmingRequest.tenantName}» بنجاح! ✅`, 'success');
+          refreshData();
+          if (onTenantsUpdated) onTenantsUpdated();
+        } else {
+          onShowToast(result.error || 'فشلت عملية التأكيد.', 'error');
+        }
       } else {
-        onShowToast(result.error || 'فشلت عملية التأكيد والتفعيل.', 'error');
+        const result = await activatePendingTenantPlatform({
+          tenantId: confirmingRequest.tenantId,
+          tenantSnapshot: confirmingRequest.tenant || {
+            id: confirmingRequest.tenantId,
+            name: confirmingRequest.tenantName,
+            ownerName: confirmingRequest.ownerName,
+            ownerPhone: confirmingRequest.ownerPhone,
+            country: confirmingRequest.country,
+            city: confirmingRequest.city,
+            createdAt: confirmingRequest.registeredAt,
+          },
+          paymentId: confirmingRequest.payment?.id,
+          adminName: 'الإدارة العامة',
+          note: verificationNote.trim() || undefined,
+          amount: confirmingRequest.amount,
+          currency: confirmingRequest.currency,
+        });
+
+        if (result.success) {
+          onShowToast(
+            `تم تفعيل منصة «${confirmingRequest.tenantName}» وحفظ حالتها في قاعدة البيانات بنجاح! ✅ تمت إزالتها تلقائياً من قائمة الطلبات المعلقة.`,
+            'success'
+          );
+          setReviewingRequestKey(null);
+          setVerificationNote('');
+          refreshData();
+          if (onTenantsUpdated) onTenantsUpdated();
+        } else {
+          onShowToast(result.error || 'فشلت عملية التأكيد والتفعيل.', 'error');
+        }
       }
     } catch (err: any) {
-      console.error('Error confirming payment:', err);
+      console.error('Error confirming activation:', err);
       onShowToast(err?.message || 'حدث خطأ أثناء تنفيذ عملية التفعيل.', 'error');
     } finally {
       setIsProcessingAction(false);
-      setConfirmingPayment(null);
+      setConfirmingRequest(null);
     }
   };
 
@@ -289,8 +628,15 @@ export const PlatformPaymentsAdmin: React.FC<PlatformPaymentsAdminProps> = ({
     }
   };
 
-  const getStatusBadge = (status: PaymentStatus) => {
+  const getStatusBadge = (status: 'unpaid' | PaymentStatus) => {
     switch (status) {
+      case 'unpaid':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-700 border border-slate-300">
+            <Clock className="w-3.5 h-3.5 text-slate-500" />
+            لم يتم الدفع بعد
+          </span>
+        );
       case 'pending':
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">
@@ -309,7 +655,7 @@ export const PlatformPaymentsAdmin: React.FC<PlatformPaymentsAdminProps> = ({
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-            تم التفعيل ✅
+            تم الدفع والتفعيل ✅
           </span>
         );
       case 'rejected':
@@ -330,33 +676,31 @@ export const PlatformPaymentsAdmin: React.FC<PlatformPaymentsAdminProps> = ({
     }
   };
 
-  const getTenantPlatformStatusBadge = (tenantId: string) => {
-    const t = tenants.find((x) => x.id === tenantId);
-    if (!t) return null;
-    if (t.status === 'active') {
+  const getTenantPlatformStatusBadge = (status: AssociationTenant['status']) => {
+    if (status === 'active') {
       return (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-          حالة المنصة: مفعّلة
+          حالة التفعيل: مفعّلة
         </span>
       );
     }
-    if (t.status === 'pending_activation') {
+    if (status === 'pending_activation') {
       return (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-          حالة المنصة: في انتظار التفعيل
+          حالة التفعيل: في انتظار التفعيل
         </span>
       );
     }
-    if (t.status === 'pending_subscription') {
+    if (status === 'pending_subscription') {
       return (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
-          حالة المنصة: في انتظار الدفع
+          حالة التفعيل: غير مفعّلة (بانتظار الدفع)
         </span>
       );
     }
     return (
       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
-        حالة المنصة: معطلة
+        حالة التفعيل: غير مفعّلة / معطلة
       </span>
     );
   };
@@ -368,20 +712,20 @@ export const PlatformPaymentsAdmin: React.FC<PlatformPaymentsAdminProps> = ({
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
           <div className="flex items-center justify-between text-xs text-slate-500 mb-1">
-            <span>إجمالي الطلبات</span>
+            <span>طلبات التفعيل المعلقة</span>
             <CreditCard className="w-4 h-4 text-indigo-500" />
           </div>
-          <div className="text-2xl font-black text-slate-900 font-mono">{payments.length}</div>
-          <span className="text-[11px] text-slate-400">كافة العمليات المسجلة</span>
+          <div className="text-2xl font-black text-slate-900 font-mono">{totalPendingRequestsCount}</div>
+          <span className="text-[11px] text-slate-400">جمعيات غير مفعّلة بانتظار التفعيل</span>
         </div>
 
         <div className="bg-white p-4 rounded-2xl border border-amber-200 shadow-sm bg-amber-50/30">
           <div className="flex items-center justify-between text-xs text-amber-700 mb-1 font-bold">
-            <span>في انتظار المراجعة</span>
+            <span>إثباتات دفع قيد المراجعة</span>
             <Clock className="w-4 h-4 text-amber-600" />
           </div>
-          <div className="text-2xl font-black text-amber-900 font-mono">{pendingCount}</div>
-          <span className="text-[11px] text-amber-600">تحتاج فحص وتأكيد</span>
+          <div className="text-2xl font-black text-amber-900 font-mono">{pendingReviewCount + verifiedCount}</div>
+          <span className="text-[11px] text-amber-600">تحتاج فحص وتأكيد التفعيل</span>
         </div>
 
         <div className="bg-white p-4 rounded-2xl border border-emerald-200 shadow-sm bg-emerald-50/30">
@@ -389,8 +733,8 @@ export const PlatformPaymentsAdmin: React.FC<PlatformPaymentsAdminProps> = ({
             <span>تم تفعيلها بنجاح</span>
             <CheckCircle2 className="w-4 h-4 text-emerald-600" />
           </div>
-          <div className="text-2xl font-black text-emerald-900 font-mono">{confirmedCount}</div>
-          <span className="text-[11px] text-emerald-600">منصات نشطة حالياً</span>
+          <div className="text-2xl font-black text-emerald-900 font-mono">{activePlatformsCount}</div>
+          <span className="text-[11px] text-emerald-600">منصات نشطة ومفعّلة حالياً</span>
         </div>
 
         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
@@ -422,10 +766,10 @@ export const PlatformPaymentsAdmin: React.FC<PlatformPaymentsAdminProps> = ({
             }`}
           >
             <CreditCard className="w-4 h-4 text-indigo-400" />
-            <span>طلبات تفعيل المنصات ({payments.length})</span>
-            {pendingCount > 0 && (
+            <span>طلبات تفعيل المنصات ({totalPendingRequestsCount})</span>
+            {totalPendingRequestsCount > 0 && (
               <span className="px-2 py-0.5 rounded-full text-[10px] bg-amber-500 text-white font-bold animate-pulse">
-                {pendingCount} قيد المراجعة
+                {totalPendingRequestsCount} بانتظار التفعيل
               </span>
             )}
           </button>
@@ -446,55 +790,18 @@ export const PlatformPaymentsAdmin: React.FC<PlatformPaymentsAdminProps> = ({
 
         <button
           type="button"
-          onClick={refreshData}
-          className="p-2 rounded-xl text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors"
-          title="تحديث البيانات"
+          onClick={() => syncLiveFromDatabase(true)}
+          disabled={isSyncing}
+          className="p-2 rounded-xl text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors cursor-pointer disabled:opacity-50"
+          title="مزامنة وتحديث الطلبات من قاعدة البيانات"
         >
-          <RefreshCw className="w-4 h-4" />
+          <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin text-indigo-600' : ''}`} />
         </button>
       </div>
 
       {/* SUB-TAB 1: REQUESTS */}
       {currentSubTab === 'requests' && (
         <div className="space-y-4">
-          
-          {/* Platforms Currently in 'pending_subscription' (Awaiting Subscription Payment) */}
-          {pendingSubscriptionTenants.length > 0 && (
-            <div className="bg-amber-50/90 border border-amber-200 rounded-2xl p-4 space-y-3">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center gap-2 text-amber-900 font-black text-xs">
-                  <Clock className="w-4 h-4 text-amber-600 shrink-0" />
-                  <span>منصات حديثة التسجيل بحالة «في انتظار الدفع» ({pendingSubscriptionTenants.length}):</span>
-                </div>
-                <span className="text-[11px] text-amber-800 font-semibold">
-                  ممنوعة من الدخول للوحة الإدارة حتى تسديد الاشتراك وتأكيد الدفع والتفعيل الإداري
-                </span>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                {pendingSubscriptionTenants.map((t) => (
-                  <div
-                    key={t.id}
-                    className="bg-white rounded-xl p-3 border border-amber-200/80 flex items-center justify-between gap-3 text-xs shadow-2xs"
-                  >
-                    <div>
-                      <div className="font-bold text-slate-900 flex items-center gap-1.5">
-                        <span>{t.name}</span>
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
-                          في انتظار الدفع
-                        </span>
-                      </div>
-                      <div className="text-[11px] text-slate-500 mt-0.5">
-                        المسؤول: {t.ownerName} • <span dir="ltr">{t.ownerPhone}</span> • {t.country} ({t.city})
-                      </div>
-                    </div>
-                    <span className="text-[10px] text-amber-700 font-bold bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200 shrink-0">
-                      بانتظار تسديد الاشتراك
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
 
           {/* Filters Bar */}
           <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row items-center gap-3">
@@ -506,7 +813,7 @@ export const PlatformPaymentsAdmin: React.FC<PlatformPaymentsAdminProps> = ({
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="البحث باسم الجمعية، اسم صاحب المنصة، رقم الهاتف، أو رقم المعاملة..."
+                placeholder="البحث باسم الجمعية، اسم المسؤول، رقم الهاتف، المدينة، أو رقم المرجع..."
                 className="w-full pl-4 pr-10 py-2.5 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
             </div>
@@ -514,27 +821,32 @@ export const PlatformPaymentsAdmin: React.FC<PlatformPaymentsAdminProps> = ({
             <div className="flex items-center gap-2 w-full md:w-auto">
               <select
                 value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value as any)}
+                onChange={(e) => setStatusFilter(e.target.value as RequestFilterMode)}
                 className="text-xs py-2.5 px-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-700 font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500"
               >
-                <option value="all">جميع طلبات الاشتراك ({payments.length})</option>
-                <option value="pending">بانتظار التحقق من الدفع ({pendingCount})</option>
+                <option value="pending_all">الطلبات المعلقة (في انتظار التفعيل) ({totalPendingRequestsCount})</option>
+                <option value="pending">بانتظار التحقق من الدفع ({pendingReviewCount})</option>
                 <option value="verified">تم التحقق من الدفع • بانتظار التفعيل ({verifiedCount})</option>
-                <option value="confirmed">تم التفعيل ({confirmedCount})</option>
-                <option value="rejected">مرفوضة ({rejectedCount})</option>
+                <option value="awaiting_payment">جمعيات مسجلة لم تدفع بعد ({awaitingPaymentCount})</option>
+                <option value="confirmed">أرشيف المدفوعات والمنصات المفعّلة ({confirmedCount})</option>
+                <option value="rejected">الطلبات المرفوضة ({rejectedCount})</option>
               </select>
             </div>
           </div>
 
-          {/* Payments Table */}
-          {filteredPayments.length === 0 ? (
+          {/* Unified Activation Requests Table */}
+          {displayedRequests.length === 0 ? (
             <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-500">
               <CreditCard className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-              <p className="font-bold text-slate-700">لا توجد طلبات دفع مطابقة</p>
+              <p className="font-bold text-slate-700">
+                {statusFilter === 'pending_all'
+                  ? 'لا توجد طلبات تفعيل معلقة حالياً'
+                  : 'لا توجد طلبات مطابقة لخيارات البحث'}
+              </p>
               <p className="text-xs text-slate-400 mt-1">
-                {searchQuery || statusFilter !== 'all'
-                  ? 'جرب تعديل خيارات البحث أو تصفية الحالة.'
-                  : 'لم يتم تسجيل أي طلبات تفعيل منصات جديدة حتى الآن.'}
+                {searchQuery || statusFilter !== 'pending_all'
+                  ? 'جرب تعديل نص البحث أو اختيار حالة أخرى من القائمة.'
+                  : 'جميع الجمعيات المسجلة مفعّلة حالياً، وستظهر أي جمعية جديدة هنا تلقائياً فور تسجيلها.'}
               </p>
             </div>
           ) : (
@@ -544,219 +856,210 @@ export const PlatformPaymentsAdmin: React.FC<PlatformPaymentsAdminProps> = ({
                   <thead className="bg-slate-50 text-slate-700 border-b border-slate-200 font-bold">
                     <tr>
                       <th className="py-3.5 px-4">الجمعية والمسؤول</th>
-                      <th className="py-3.5 px-4">المبلغ والعملة</th>
-                      <th className="py-3.5 px-4">طريقة الدفع</th>
-                      <th className="py-3.5 px-4">إثبات الدفع</th>
-                      <th className="py-3.5 px-4">تاريخ الطلب</th>
-                      <th className="py-3.5 px-4">حالة الدفع</th>
+                      <th className="py-3.5 px-4">تاريخ التسجيل</th>
+                      <th className="py-3.5 px-4">مبلغ التفعيل</th>
+                      <th className="py-3.5 px-4">طريقة وإثبات الدفع</th>
+                      <th className="py-3.5 px-4">حالة الدفع والتفعيل</th>
                       <th className="py-3.5 px-4 text-center">الإجراءات</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {filteredPayments.map((p) => {
+                    {displayedRequests.map((req) => {
+                      const regDate = new Date(req.registeredAt);
+                      const hasValidRegDate = !isNaN(regDate.getTime());
+                      const subDate = req.submittedAt ? new Date(req.submittedAt) : null;
+                      const hasValidSubDate = subDate && !isNaN(subDate.getTime());
+
                       return (
-                        <tr key={p.id} className="hover:bg-slate-50/70 transition-colors">
-                          
+                        <tr key={req.key} className="hover:bg-slate-50/70 transition-colors">
+
                           {/* Association & Owner */}
                           <td className="py-3.5 px-4">
-                            <div className="flex items-center gap-2">
-                              <span className="font-bold text-slate-900 text-sm">{p.tenantName}</span>
-                              {p.type === 'renewal' ? (
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-bold text-slate-900 text-sm">{req.tenantName}</span>
+                              {req.type === 'renewal' ? (
                                 <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200">
                                   تجديد سنوي
                                 </span>
-                              ) : p.type === 'ad_campaign' ? (
+                              ) : req.type === 'ad_campaign' ? (
                                 <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
                                   حملة إعلانية
                                 </span>
                               ) : (
                                 <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">
-                                  تفعيل أولي
+                                  تفعيل منصة جديدة
                                 </span>
                               )}
                             </div>
                             <div className="text-slate-500 flex items-center gap-2 mt-0.5 text-[11px]">
-                              <span>{p.ownerName}</span>
-                              <span>•</span>
-                              <span dir="ltr" className="font-mono">{p.ownerPhone}</span>
+                              <span>{req.ownerName}</span>
+                              {req.ownerPhone && (
+                                <>
+                                  <span>•</span>
+                                  <span dir="ltr" className="font-mono">{req.ownerPhone}</span>
+                                </>
+                              )}
                             </div>
                             <div className="text-[10px] text-slate-400 mt-0.5">
-                              الدولة: {p.country}
+                              {req.country}{req.city ? ` • ${req.city}` : ''}
                             </div>
                           </td>
 
-                          {/* Amount */}
+                          {/* Registration Date */}
+                          <td className="py-3.5 px-4">
+                            <div className="text-slate-700 font-mono font-semibold">
+                              {hasValidRegDate ? regDate.toLocaleDateString('ar-MA') : '-'}
+                            </div>
+                            <div className="text-[10px] text-slate-400 font-mono">
+                              {hasValidRegDate
+                                ? regDate.toLocaleTimeString('ar-MA', { hour: '2-digit', minute: '2-digit' })
+                                : ''}
+                            </div>
+                            {hasValidSubDate && req.payment && (
+                              <div className="text-[10px] text-indigo-600 mt-0.5">
+                                إرسال الإثبات: {subDate!.toLocaleDateString('ar-MA')}
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Activation Fee Amount */}
                           <td className="py-3.5 px-4">
                             <div className="font-mono font-bold text-indigo-900 text-sm">
-                              {p.amount} {p.currency}
+                              {req.amount} {req.currency}
                             </div>
                             <div className="text-[10px] text-slate-400 font-mono">
-                              المرجع: {p.transactionReference || '-'}
+                              {req.transactionReference
+                                ? `المرجع: ${req.transactionReference}`
+                                : 'رسوم التفعيل المستحقة'}
                             </div>
                           </td>
 
-                          {/* Method */}
-                          <td className="py-3.5 px-4">
-                            {getMethodBadge(p.paymentMethod)}
-                            {p.cardLast4 && (
-                              <div className="text-[10px] text-slate-500 font-mono mt-0.5">
-                                •••• {p.cardLast4}
-                              </div>
-                            )}
-                          </td>
-
-                          {/* Proof */}
-                          <td className="py-3.5 px-4">
-                            {p.proofDocumentUrl ? (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setViewingProof({
-                                    url: p.proofDocumentUrl!,
-                                    title: `إثبات دفع جمعية «${p.tenantName}»`,
-                                    fileName: p.proofFileName,
-                                  })
-                                }
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold transition-colors"
-                              >
-                                <Eye className="w-3.5 h-3.5" />
-                                <span>معاينة الإثبات</span>
-                              </button>
-                            ) : p.paymentMethod === 'credit_card' ? (
-                              <span className="text-[11px] text-emerald-700 font-semibold">
-                                دفع إلكتروني مباشر
-                              </span>
-                            ) : (
-                              <span className="text-[11px] text-slate-400">لا يوجد إثبات</span>
-                            )}
-                          </td>
-
-                          {/* Date */}
-                          <td className="py-3.5 px-4">
-                            <div className="text-slate-700 font-mono">
-                              {new Date(p.submittedAt).toLocaleDateString('ar-MA')}
-                            </div>
-                            <div className="text-[10px] text-slate-400 font-mono">
-                              {new Date(p.submittedAt).toLocaleTimeString('ar-MA', {
-                                hour: '2-digit',
-                                minute: '2-digit',
-                              })}
-                            </div>
-                          </td>
-
-                          {/* Status & Platform Lifecycle */}
+                          {/* Method & Proof */}
                           <td className="py-3.5 px-4 space-y-1.5">
-                            <div>{getStatusBadge(p.status)}</div>
-                            <div>{getTenantPlatformStatusBadge(p.tenantId)}</div>
-                            {p.status === 'rejected' && p.rejectionReason && (
-                              <div className="text-[10px] text-rose-600 mt-1 max-w-xs truncate" title={p.rejectionReason}>
-                                السبب: {p.rejectionReason}
+                            <div>
+                              {req.paymentMethod ? (
+                                getMethodBadge(req.paymentMethod)
+                              ) : (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-500 border border-slate-200">
+                                  بانتظار اختيار وسيلة الدفع
+                                </span>
+                              )}
+                              {req.cardLast4 && (
+                                <div className="text-[10px] text-slate-500 font-mono mt-0.5">
+                                  •••• {req.cardLast4}
+                                </div>
+                              )}
+                            </div>
+                            <div>
+                              {req.proofDocumentUrl ? (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setViewingProof({
+                                      url: req.proofDocumentUrl!,
+                                      title: `إثبات دفع جمعية «${req.tenantName}»`,
+                                      fileName: req.proofFileName,
+                                    })
+                                  }
+                                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-[11px] transition-colors cursor-pointer"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                  <span>معاينة الإثبات</span>
+                                </button>
+                              ) : req.paymentMethod === 'credit_card' ? (
+                                <span className="text-[11px] text-emerald-700 font-semibold">
+                                  دفع إلكتروني مباشر
+                                </span>
+                              ) : (
+                                <span className="text-[11px] text-slate-400">لم يُرفع إثبات دفع بعد</span>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Payment Status & Activation Status */}
+                          <td className="py-3.5 px-4 space-y-1.5">
+                            <div>{getStatusBadge(req.paymentStatus)}</div>
+                            <div>{getTenantPlatformStatusBadge(req.tenantStatus)}</div>
+                            {req.paymentStatus === 'rejected' && req.rejectionReason && (
+                              <div className="text-[10px] text-rose-600 mt-1 max-w-xs truncate" title={req.rejectionReason}>
+                                السبب: {req.rejectionReason}
                               </div>
                             )}
-                            {Array.isArray(p.statusHistory) && p.statusHistory.length > 0 && (
+                            {req.statusHistory.length > 0 && (
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setReviewingPayment(p);
-                                  setVerificationNote(p.adminNotes || '');
+                                  setReviewingRequestKey(req.key);
+                                  setVerificationNote(req.adminNotes || '');
                                 }}
                                 className="inline-flex items-center gap-1 text-[10px] text-indigo-700 hover:text-indigo-900 font-bold underline cursor-pointer"
                               >
                                 <History className="w-3 h-3" />
-                                <span>سجل العمليات ({p.statusHistory.length})</span>
+                                <span>سجل العمليات ({req.statusHistory.length})</span>
                               </button>
                             )}
                           </td>
 
-                          {/* Actions: Review Request, Verify Payment, Activate Platform, Reject Request */}
+                          {/* Actions */}
                           <td className="py-3.5 px-4 text-center">
                             <div className="flex flex-wrap items-center justify-center gap-1.5">
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setReviewingPayment(p);
-                                  setVerificationNote(p.adminNotes || '');
+                                  setReviewingRequestKey(req.key);
+                                  setVerificationNote(req.adminNotes || '');
                                 }}
                                 className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs border border-slate-200 transition-colors flex items-center gap-1 cursor-pointer"
-                                title="مراجعة طلب الاشتراك وسجل العمليات"
+                                title="مراجعة طلب التفعيل وسجل العمليات"
                               >
                                 <FileText className="w-3.5 h-3.5 text-indigo-600" />
                                 <span>مراجعة الطلب</span>
                               </button>
 
-                              {p.status === 'pending' && (
+                              {req.isPendingActivation && (
                                 <>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleVerifyPayment(p)}
-                                    className="px-2.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-sm transition-all flex items-center gap-1 cursor-pointer active:scale-95"
-                                    title="الخطوة 1: التحقق من صحة الدفع"
-                                  >
-                                    <ShieldCheck className="w-3.5 h-3.5" />
-                                    <span>التحقق من الدفع</span>
-                                  </button>
+                                  {req.payment && req.paymentStatus === 'pending' && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleVerifyPayment(req)}
+                                      className="px-2.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-sm transition-all flex items-center gap-1 cursor-pointer active:scale-95"
+                                      title="التحقق من صحة الدفع"
+                                    >
+                                      <ShieldCheck className="w-3.5 h-3.5" />
+                                      <span>التحقق من الدفع</span>
+                                    </button>
+                                  )}
 
                                   <button
                                     type="button"
-                                    onClick={() => handleOpenConfirmModal(p)}
-                                    className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm transition-all flex items-center gap-1 cursor-pointer active:scale-95"
-                                    title="الخطوة 2: تفعيل المنصة والموافقة الإدارية"
+                                    onClick={() => handleOpenConfirmModal(req)}
+                                    className={`px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm transition-all flex items-center gap-1 cursor-pointer active:scale-95 ${
+                                      req.paymentStatus === 'verified' ? 'animate-pulse' : ''
+                                    }`}
+                                    title="قبول الطلب وتفعيل منصة الجمعية فوراً"
                                   >
                                     <Check className="w-3.5 h-3.5" />
-                                    <span>تفعيل المنصة</span>
+                                    <span>{req.paymentStatus === 'verified' ? 'تفعيل المنصة الآن' : 'تفعيل المنصة'}</span>
                                   </button>
 
-                                  <button
-                                    type="button"
-                                    onClick={() => handleOpenReject(p.id)}
-                                    className="px-2.5 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs border border-rose-200 transition-colors flex items-center gap-1 cursor-pointer"
-                                    title="رفض طلب الاشتراك"
-                                  >
-                                    <X className="w-3.5 h-3.5" />
-                                    <span>رفض الطلب</span>
-                                  </button>
+                                  {req.payment && (req.paymentStatus === 'pending' || req.paymentStatus === 'verified') && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenReject(req.payment!.id)}
+                                      className="px-2.5 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs border border-rose-200 transition-colors flex items-center gap-1 cursor-pointer"
+                                      title="رفض إثبات الدفع"
+                                    >
+                                      <X className="w-3.5 h-3.5" />
+                                      <span>رفض</span>
+                                    </button>
+                                  )}
                                 </>
                               )}
 
-                              {p.status === 'verified' && (
-                                <>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleOpenConfirmModal(p)}
-                                    className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm transition-all flex items-center gap-1 cursor-pointer active:scale-95 animate-pulse"
-                                    title="تفعيل المنصة بعد أن تم التحقق من الدفع"
-                                  >
-                                    <Check className="w-3.5 h-3.5" />
-                                    <span>تفعيل المنصة الآن</span>
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => handleOpenReject(p.id)}
-                                    className="px-2.5 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs border border-rose-200 transition-colors flex items-center gap-1 cursor-pointer"
-                                    title="رفض الطلب"
-                                  >
-                                    <X className="w-3.5 h-3.5" />
-                                    <span>رفض</span>
-                                  </button>
-                                </>
-                              )}
-
-                              {p.status === 'confirmed' && (
+                              {!req.isPendingActivation && req.paymentStatus === 'confirmed' && (
                                 <span className="text-[11px] text-emerald-700 font-bold px-2">
-                                  مفعلة بواسطة {p.reviewedBy || 'الإدارة'}
+                                  مفعّلة بواسطة {req.reviewedBy || 'الإدارة'}
                                 </span>
-                              )}
-
-                              {p.status === 'rejected' && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenConfirmModal(p)}
-                                  className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition-colors cursor-pointer"
-                                  title="إعادة التفعيل"
-                                >
-                                  إعادة التفعيل
-                                </button>
                               )}
                             </div>
                           </td>
@@ -1273,7 +1576,7 @@ export const PlatformPaymentsAdmin: React.FC<PlatformPaymentsAdminProps> = ({
       )}
 
       {/* Confirm & Activate Modal */}
-      {confirmingPayment && (
+      {confirmingRequest && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in" dir="rtl">
           <div className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl border border-slate-100 p-6 space-y-5">
             <div className="flex items-center gap-3">
@@ -1282,7 +1585,7 @@ export const PlatformPaymentsAdmin: React.FC<PlatformPaymentsAdminProps> = ({
               </div>
               <div>
                 <h3 className="text-base font-black text-slate-900">
-                  {confirmingPayment.type === 'platform_support' ? 'تأكيد استلام وتوثيق دعم المنصة' : 'تأكيد عملية الدفع وتفعيل المنصة'}
+                  تأكيد قبول الطلب وتفعيل منصة الجمعية
                 </h3>
                 <p className="text-xs text-slate-500">الإدارة العامة للمنصة</p>
               </div>
@@ -1290,28 +1593,28 @@ export const PlatformPaymentsAdmin: React.FC<PlatformPaymentsAdminProps> = ({
 
             <div className="bg-emerald-50/70 border border-emerald-100 rounded-2xl p-4 space-y-2 text-xs text-slate-700">
               <div className="flex justify-between items-center py-1 border-b border-emerald-100/60">
-                <span className="text-slate-500 font-medium">
-                  {confirmingPayment.type === 'platform_support' ? 'الجهة المستفيدة:' : 'اسم الجمعية:'}
-                </span>
-                <span className="font-bold text-slate-900">{confirmingPayment.tenantName}</span>
+                <span className="text-slate-500 font-medium">اسم الجمعية:</span>
+                <span className="font-bold text-slate-900">{confirmingRequest.tenantName}</span>
               </div>
               <div className="flex justify-between items-center py-1 border-b border-emerald-100/60">
-                <span className="text-slate-500 font-medium">
-                  {confirmingPayment.type === 'platform_support' ? 'اسم الداعم / المساهم:' : 'المسؤول / الممثل:'}
-                </span>
-                <span className="font-bold text-slate-900">{confirmingPayment.ownerName}</span>
+                <span className="text-slate-500 font-medium">المسؤول / الممثل:</span>
+                <span className="font-bold text-slate-900">{confirmingRequest.ownerName}</span>
               </div>
               <div className="flex justify-between items-center py-1 border-b border-emerald-100/60">
-                <span className="text-slate-500 font-medium">
-                  {confirmingPayment.type === 'platform_support' ? 'مبلغ الدعم والمساهمة:' : 'قيمة الاشتراك / التفعيل:'}
+                <span className="text-slate-500 font-medium">تاريخ التسجيل:</span>
+                <span className="font-mono font-bold text-slate-800">
+                  {new Date(confirmingRequest.registeredAt).toLocaleDateString('ar-MA')}
                 </span>
-                <span className="font-black text-emerald-800">
-                  {confirmingPayment.amount.toLocaleString()} {confirmingPayment.currency} {confirmingPayment.planName ? `(${confirmingPayment.planName})` : ''}
+              </div>
+              <div className="flex justify-between items-center py-1 border-b border-emerald-100/60">
+                <span className="text-slate-500 font-medium">مبلغ التفعيل:</span>
+                <span className="font-black text-emerald-800 font-mono">
+                  {confirmingRequest.amount.toLocaleString()} {confirmingRequest.currency}
                 </span>
               </div>
               <div className="flex justify-between items-center py-1">
-                <span className="text-slate-500 font-medium">طريقة الدفع:</span>
-                <span className="font-bold text-slate-900">{(confirmingPayment as any).paymentMethodName || confirmingPayment.paymentMethod}</span>
+                <span className="text-slate-500 font-medium">حالة الدفع:</span>
+                {getStatusBadge(confirmingRequest.paymentStatus)}
               </div>
             </div>
 
@@ -1320,26 +1623,18 @@ export const PlatformPaymentsAdmin: React.FC<PlatformPaymentsAdminProps> = ({
                 <ShieldCheck className="w-4 h-4 text-emerald-600" />
                 <span>الإجراءات التي ستتم تلقائياً:</span>
               </div>
-              {confirmingPayment.type === 'platform_support' ? (
-                <ul className="list-disc list-inside space-y-1 text-slate-600 pr-1 text-[11px]">
-                  <li>تأكيد استلام وتوثيق مساهمة دعم المنصة في سجل المدفوعات الدائم.</li>
-                  <li>تحديث حالة طلب الدفع إلى <strong>«مؤكد»</strong> وتوثيق اسم المسؤول والتاريخ.</li>
-                  <li>إدراج مبلغ الدعم ضمن إجمالي المداخيل والمساهمات المحققة للمنصة.</li>
-                </ul>
-              ) : (
-                <ul className="list-disc list-inside space-y-1 text-slate-600 pr-1 text-[11px]">
-                  <li>تغيير حالة الجمعية في قاعدة البيانات من <strong>«في انتظار التفعيل»</strong> إلى <strong>«مفعلة»</strong> فوراً.</li>
-                  <li>تحديث حالة طلب الدفع إلى <strong>«مؤكد»</strong> وتوثيق اسم المسؤول والتاريخ.</li>
-                  <li>إتاحة الدخول الكامل لصاحب الجمعية للوحة تحكم منصته والبدء بالعمل.</li>
-                </ul>
-              )}
+              <ul className="list-disc list-inside space-y-1 text-slate-600 pr-1 text-[11px]">
+                <li>تحديث حالة الجمعية مباشرة في قاعدة البيانات إلى <strong>«مفعّلة»</strong> وإزالتها تلقائياً من قائمة الطلبات المعلقة.</li>
+                <li>توثيق وتأكيد عملية التفعيل والدفع بشكل دائم في قاعدة البيانات السحابية.</li>
+                <li>إتاحة الدخول الكامل لصاحب الجمعية إلى لوحة تحكم منصته والبدء في استخدامها فوراً.</li>
+              </ul>
             </div>
 
             <div className="flex items-center justify-end gap-3 pt-2">
               <button
                 type="button"
                 disabled={isProcessingAction}
-                onClick={() => setConfirmingPayment(null)}
+                onClick={() => setConfirmingRequest(null)}
                 className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 text-xs font-bold hover:bg-slate-50 transition-colors cursor-pointer disabled:opacity-50"
               >
                 إلغاء
@@ -1347,7 +1642,7 @@ export const PlatformPaymentsAdmin: React.FC<PlatformPaymentsAdminProps> = ({
               <button
                 type="button"
                 disabled={isProcessingAction}
-                onClick={handleExecuteConfirmPayment}
+                onClick={handleExecuteConfirmActivation}
                 className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs font-bold shadow-md shadow-emerald-600/20 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
               >
                 {isProcessingAction ? (
@@ -1358,7 +1653,7 @@ export const PlatformPaymentsAdmin: React.FC<PlatformPaymentsAdminProps> = ({
                 ) : (
                   <>
                     <Check className="w-4 h-4" />
-                    <span>نعم، تأكيد وتفعيل المنصة الآن</span>
+                    <span>نعم، قبول الطلب وتفعيل المنصة الآن</span>
                   </>
                 )}
               </button>
@@ -1367,13 +1662,10 @@ export const PlatformPaymentsAdmin: React.FC<PlatformPaymentsAdminProps> = ({
         </div>
       )}
 
-      {/* Comprehensive Subscription Request Review & Operation Status Log Modal */}
-      {reviewingPayment && (() => {
-        const targetTenant = tenants.find((t) => t.id === reviewingPayment.tenantId);
-        const payHistory = Array.isArray(reviewingPayment.statusHistory) ? reviewingPayment.statusHistory : [];
-        const tenantHistory = Array.isArray(targetTenant?.subscriptionStatusHistory)
-          ? targetTenant!.subscriptionStatusHistory!
-          : [];
+      {/* Comprehensive Activation Request Review & Operation Status Log Modal */}
+      {reviewingRequest && (() => {
+        const targetTenant = reviewingRequest.tenant || tenants.find((t) => t.id === reviewingRequest.tenantId);
+        const historyItems = reviewingRequest.statusHistory || [];
 
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in" dir="rtl">
@@ -1385,16 +1677,16 @@ export const PlatformPaymentsAdmin: React.FC<PlatformPaymentsAdminProps> = ({
                   </div>
                   <div>
                     <h3 className="text-base font-black text-slate-900">
-                      مراجعة طلب الاشتراك والتفعيل الإداري — «{reviewingPayment.tenantName}»
+                      مراجعة طلب التفعيل — «{reviewingRequest.tenantName}»
                     </h3>
                     <p className="text-xs text-slate-500">
-                      التحقق من الدفع • تفعيل المنصة أو رفض الطلب • سجل حالة كل عملية
+                      بيانات الجمعية • التحقق من الدفع وإثباته • قبول التفعيل أو الرفض
                     </p>
                   </div>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setReviewingPayment(null)}
+                  onClick={() => setReviewingRequestKey(null)}
                   className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
                 >
                   <X className="w-5 h-5" />
@@ -1407,65 +1699,85 @@ export const PlatformPaymentsAdmin: React.FC<PlatformPaymentsAdminProps> = ({
                   <div className="font-black text-slate-800 border-b border-slate-200 pb-1">بيانات الجمعية والمسؤول</div>
                   <div className="flex justify-between">
                     <span className="text-slate-500">اسم الجمعية:</span>
-                    <span className="font-bold text-slate-900">{reviewingPayment.tenantName}</span>
+                    <span className="font-bold text-slate-900">{reviewingRequest.tenantName}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-500">صاحب الجمعية:</span>
-                    <span className="font-bold text-slate-900">{reviewingPayment.ownerName}</span>
+                    <span className="text-slate-500">اسم المسؤول:</span>
+                    <span className="font-bold text-slate-900">{reviewingRequest.ownerName}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-500">رقم الهاتف:</span>
-                    <span className="font-mono font-bold text-slate-900" dir="ltr">{reviewingPayment.ownerPhone}</span>
+                    <span className="font-mono font-bold text-slate-900" dir="ltr">{reviewingRequest.ownerPhone || '-'}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-500">الدولة والمدينة:</span>
                     <span className="font-bold text-slate-900">
-                      {targetTenant?.country || reviewingPayment.country} {targetTenant?.city ? `• ${targetTenant.city}` : ''}
+                      {reviewingRequest.country}{reviewingRequest.city ? ` • ${reviewingRequest.city}` : ''}
                     </span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-slate-500">حالة المنصة الحالية:</span>
-                    {getTenantPlatformStatusBadge(reviewingPayment.tenantId)}
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="font-black text-slate-800 border-b border-slate-200 pb-1">بيانات الدفع والاشتراك</div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">المبلغ المسدد:</span>
-                    <span className="font-mono font-black text-indigo-900 text-sm">
-                      {reviewingPayment.amount} {reviewingPayment.currency}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-slate-500">طريقة الدفع:</span>
-                    {getMethodBadge(reviewingPayment.paymentMethod)}
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-500">رقم المرجع:</span>
-                    <span className="font-mono font-bold text-slate-800">{reviewingPayment.transactionReference || '-'}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-slate-500">حالة التحقق من الدفع:</span>
-                    <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
-                      reviewingPayment.paymentVerified || reviewingPayment.status === 'verified' || reviewingPayment.status === 'confirmed'
-                        ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                        : 'bg-amber-100 text-amber-800 border border-amber-300'
-                    }`}>
-                      {reviewingPayment.paymentVerified || reviewingPayment.status === 'verified' || reviewingPayment.status === 'confirmed'
-                        ? '✓ تم التحقق من الدفع'
-                        : '⏳ بانتظار التحقق من الدفع'}
+                    <span className="text-slate-500">تاريخ التسجيل:</span>
+                    <span className="font-mono font-bold text-slate-800">
+                      {new Date(reviewingRequest.registeredAt).toLocaleString('ar-MA')}
                     </span>
                   </div>
-                  {reviewingPayment.proofDocumentUrl && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500">حالة التفعيل:</span>
+                    {getTenantPlatformStatusBadge(reviewingRequest.tenantStatus)}
+                  </div>
+                  {targetTenant?.legalDocument?.fileUrl && (
                     <div className="pt-1">
                       <button
                         type="button"
                         onClick={() =>
                           setViewingProof({
-                            url: reviewingPayment.proofDocumentUrl!,
-                            title: `إثبات دفع جمعية «${reviewingPayment.tenantName}»`,
-                            fileName: reviewingPayment.proofFileName,
+                            url: targetTenant.legalDocument!.fileUrl,
+                            title: `الوثيقة القانونية لجمعية «${reviewingRequest.tenantName}»`,
+                            fileName: targetTenant.legalDocument!.fileName,
+                          })
+                        }
+                        className="w-full py-1.5 px-3 rounded-xl bg-white hover:bg-slate-100 text-slate-700 font-bold text-xs flex items-center justify-center gap-1.5 border border-slate-200 cursor-pointer"
+                      >
+                        <FileText className="w-3.5 h-3.5 text-indigo-600" />
+                        <span>معاينة الوثيقة القانونية للجمعية</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <div className="font-black text-slate-800 border-b border-slate-200 pb-1">بيانات الدفع ومبلغ التفعيل</div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">مبلغ التفعيل:</span>
+                    <span className="font-mono font-black text-indigo-900 text-sm">
+                      {reviewingRequest.amount} {reviewingRequest.currency}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500">طريقة الدفع:</span>
+                    {reviewingRequest.paymentMethod ? (
+                      getMethodBadge(reviewingRequest.paymentMethod)
+                    ) : (
+                      <span className="text-slate-400 font-semibold">لم تُحدد بعد</span>
+                    )}
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">رقم المرجع:</span>
+                    <span className="font-mono font-bold text-slate-800">{reviewingRequest.transactionReference || '-'}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500">حالة الدفع:</span>
+                    {getStatusBadge(reviewingRequest.paymentStatus)}
+                  </div>
+                  {reviewingRequest.proofDocumentUrl ? (
+                    <div className="pt-1">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setViewingProof({
+                            url: reviewingRequest.proofDocumentUrl!,
+                            title: `إثبات دفع جمعية «${reviewingRequest.tenantName}»`,
+                            fileName: reviewingRequest.proofFileName,
                           })
                         }
                         className="w-full py-1.5 px-3 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-xs flex items-center justify-center gap-1.5 border border-indigo-200 cursor-pointer"
@@ -1474,12 +1786,16 @@ export const PlatformPaymentsAdmin: React.FC<PlatformPaymentsAdminProps> = ({
                         <span>معاينة وثيقة إثبات الدفع المرفقة</span>
                       </button>
                     </div>
+                  ) : (
+                    <div className="pt-1 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-2 text-center">
+                      لم تقم الجمعية برفع إثبات دفع إلكتروني بعد — يمكن تفعيلها إدارياً مباشرة عند التحقق.
+                    </div>
                   )}
                 </div>
               </div>
 
               {/* Administrative Review Note Input & Decision Controls */}
-              {(reviewingPayment.status === 'pending' || reviewingPayment.status === 'verified') && (
+              {reviewingRequest.isPendingActivation && (
                 <div className="bg-indigo-50/60 border border-indigo-200 rounded-2xl p-4 space-y-3">
                   <div className="font-black text-xs text-indigo-950 flex items-center gap-1.5">
                     <ShieldCheck className="w-4 h-4 text-indigo-600" />
@@ -1487,21 +1803,21 @@ export const PlatformPaymentsAdmin: React.FC<PlatformPaymentsAdminProps> = ({
                   </div>
                   <div>
                     <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                      ملاحظة التحقق الإداري (تُسجّل في سجل العمليات):
+                      ملاحظة إدارية (تُسجّل في سجل العمليات):
                     </label>
                     <input
                       type="text"
                       value={verificationNote}
                       onChange={(e) => setVerificationNote(e.target.value)}
-                      placeholder="مثال: تم التحقق من الوصل البنكي ومطابقة مبلغ الاشتراك..."
+                      placeholder="مثال: تم التحقق من الوصل البنكي ومطابقة مبلغ التفعيل..."
                       className="w-full p-2.5 rounded-xl border border-slate-300 bg-white text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     />
                   </div>
                   <div className="flex flex-wrap items-center gap-2 pt-1">
-                    {reviewingPayment.status === 'pending' && (
+                    {reviewingRequest.payment && reviewingRequest.paymentStatus === 'pending' && (
                       <button
                         type="button"
-                        onClick={() => handleVerifyPayment(reviewingPayment, verificationNote)}
+                        onClick={() => handleVerifyPayment(reviewingRequest, verificationNote)}
                         className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 cursor-pointer"
                       >
                         <ShieldCheck className="w-4 h-4" />
@@ -1511,46 +1827,52 @@ export const PlatformPaymentsAdmin: React.FC<PlatformPaymentsAdminProps> = ({
                     <button
                       type="button"
                       onClick={() => {
-                        const toConfirm = reviewingPayment;
-                        setReviewingPayment(null);
+                        const toConfirm = reviewingRequest;
+                        setReviewingRequestKey(null);
                         handleOpenConfirmModal(toConfirm);
                       }}
                       className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 cursor-pointer"
                     >
                       <CheckCircle2 className="w-4 h-4" />
-                      <span>{reviewingPayment.status === 'verified' ? 'تفعيل المنصة الآن (تم التحقق مسبقاً)' : '2. تأكيد الدفع وتفعيل المنصة'}</span>
+                      <span>
+                        {reviewingRequest.paymentStatus === 'verified'
+                          ? 'تفعيل المنصة الآن (تم التحقق مسبقاً)'
+                          : 'قبول الطلب وتفعيل المنصة'}
+                      </span>
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const toRejectId = reviewingPayment.id;
-                        setReviewingPayment(null);
-                        handleOpenReject(toRejectId);
-                      }}
-                      className="px-4 py-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs border border-rose-200 flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <XCircle className="w-4 h-4" />
-                      <span>رفض الطلب</span>
-                    </button>
+                    {reviewingRequest.payment && (reviewingRequest.paymentStatus === 'pending' || reviewingRequest.paymentStatus === 'verified') && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const toRejectId = reviewingRequest.payment!.id;
+                          setReviewingRequestKey(null);
+                          handleOpenReject(toRejectId);
+                        }}
+                        className="px-4 py-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs border border-rose-200 flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <XCircle className="w-4 h-4" />
+                        <span>رفض الطلب</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               )}
 
-              {/* Chronological Operation Log (تسجيل حالة كل عملية) */}
+              {/* Chronological Operation Log */}
               <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <h4 className="text-xs font-black text-slate-800 flex items-center gap-1.5">
                     <History className="w-4 h-4 text-indigo-600" />
-                    <span>سجل حالة العمليات ومراحل الاشتراك والتفعيل ({payHistory.length || tenantHistory.length})</span>
+                    <span>سجل حالة العمليات ومراحل التسجيل والتفعيل ({historyItems.length})</span>
                   </h4>
                   <span className="text-[10px] text-slate-500">توثيق زمني لكل عملية</span>
                 </div>
 
-                {payHistory.length === 0 && tenantHistory.length === 0 ? (
+                {historyItems.length === 0 ? (
                   <p className="text-xs text-slate-400 py-2">لا توجد عمليات مسجلة إضافية.</p>
                 ) : (
                   <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                    {(tenantHistory.length > 0 ? tenantHistory : payHistory).map((item, idx) => (
+                    {historyItems.map((item, idx) => (
                       <div
                         key={idx}
                         className="bg-white p-3 rounded-xl border border-slate-200/90 text-xs flex items-start justify-between gap-3"
@@ -1577,7 +1899,7 @@ export const PlatformPaymentsAdmin: React.FC<PlatformPaymentsAdminProps> = ({
               <div className="flex justify-end pt-2">
                 <button
                   type="button"
-                  onClick={() => setReviewingPayment(null)}
+                  onClick={() => setReviewingRequestKey(null)}
                   className="px-5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold cursor-pointer"
                 >
                   إغلاق

@@ -22,7 +22,42 @@ import {
 import {
   syncTenantCollectionToFirebaseServer,
   saveDocToFirebaseServer,
+  getDocFromFirebaseServer,
+  fetchTenantCollectionFromFirebaseServer,
+  awaitPendingOffloadBackups,
 } from './firebaseServerStorage';
+
+const tenantRecordsCloudReconcileCache = new Map<string, number>();
+const TENANT_RECORDS_RECONCILE_TTL_MS = 2000;
+const COLD_SEED_EPOCH = '1970-01-01T00:00:00.000Z';
+
+const MEMBER_SELF_EDITABLE_FIELDS = new Set<string>([
+  'fullName',
+  'phone',
+  'email',
+  'cin',
+  'city',
+  'address',
+  'profession',
+  'avatarUrl',
+  'photoUrl',
+  'bio',
+  'customFields',
+  'passwordHash',
+  'passwordSalt',
+  'lastLoginDate',
+  'updatedAt',
+]);
+
+function pickMemberSelfEditableFields(incoming: Record<string, any>): Record<string, any> {
+  const safe: Record<string, any> = {};
+  for (const key of Object.keys(incoming || {})) {
+    if (MEMBER_SELF_EDITABLE_FIELDS.has(key)) {
+      safe[key] = incoming[key];
+    }
+  }
+  return safe;
+}
 
 export interface TenantRecordsDatabase {
   tenantId: string;
@@ -220,7 +255,7 @@ function createInitialTenantRecords(tenantId: string): TenantRecordsDatabase {
     auditLogs: isMaster ? [...initialAuditLogs] : [],
     subAdmins: isMaster ? [...initialSubAdmins] : [],
     adCampaigns: [],
-    updatedAt: new Date().toISOString(),
+    updatedAt: COLD_SEED_EPOCH,
   };
 }
 
@@ -582,24 +617,25 @@ export function readTenantRecordsFromDisk(tenantId?: string | null): TenantRecor
         adCampaigns: Array.isArray(parsed.adCampaigns) ? parsed.adCampaigns : [],
         deletedOperationIds,
         deletedContributionIds,
-        updatedAt: parsed.updatedAt || new Date().toISOString(),
+        updatedAt: parsed.updatedAt || COLD_SEED_EPOCH,
       };
       if (reconciled.didChange || didSubAdminsChange) {
-        writeTenantRecordsToDisk(dbObj, cleanTenant);
+        writeTenantRecordsToDisk(dbObj, cleanTenant, false, true);
       }
       return dbObj;
     }
   }
 
   const seeded = createInitialTenantRecords(cleanTenant);
-  writeTenantRecordsToDisk(seeded, cleanTenant);
+  writeTenantRecordsToDisk(seeded, cleanTenant, false, true);
   return seeded;
 }
 
 export function writeTenantRecordsToDisk(
   db: TenantRecordsDatabase,
   tenantId?: string | null,
-  syncFirestore: boolean = false
+  syncFirestore: boolean = false,
+  preserveTimestamp: boolean = false
 ): TenantRecordsDatabase {
   ensureStorageDirectories();
   const cleanTenant = normalizeTenantId(tenantId || db.tenantId);
@@ -616,6 +652,8 @@ export function writeTenantRecordsToDisk(
     deletedContributionIds
   );
 
+  const nextUpdatedAt = preserveTimestamp && db.updatedAt ? db.updatedAt : new Date().toISOString();
+
   const sanitizedDb = offloadEmbeddedMediaDeep(
     {
       ...db,
@@ -626,38 +664,303 @@ export function writeTenantRecordsToDisk(
       deletedOperationIds,
       deletedContributionIds,
       tenantId: cleanTenant,
-      updatedAt: new Date().toISOString(),
+      updatedAt: nextUpdatedAt,
     },
     `record_${cleanTenant}`
   );
 
   writeJsonFileAtomicSync(filePath, sanitizedDb, `record_${cleanTenant}`);
+  if (nextUpdatedAt !== COLD_SEED_EPOCH) {
+    tenantRecordsCloudReconcileCache.set(cleanTenant, Date.now());
+  }
 
   if (syncFirestore) {
-    syncTenantCollectionToFirebaseServer('members', cleanTenant, sanitizedDb.members).catch(() => {});
+    syncTenantCollectionToFirebaseServer('members', cleanTenant, sanitizedDb.members, [], {
+      reconcileDeletions: true,
+    }).catch(() => {});
+    syncTenantCollectionToFirebaseServer('board_members', cleanTenant, sanitizedDb.boardMembers || [], [], {
+      reconcileDeletions: true,
+    }).catch(() => {});
     syncTenantCollectionToFirebaseServer(
       'contributions',
       cleanTenant,
       sanitizedDb.contributions,
-      deletedContributionIds
+      deletedContributionIds,
+      { reconcileDeletions: true }
     ).catch(() => {});
     syncTenantCollectionToFirebaseServer(
       'operations',
       cleanTenant,
       sanitizedDb.operations,
-      Array.from(new Set([...reconciled.removedOperationIds, ...deletedOperationIds]))
+      Array.from(new Set([...reconciled.removedOperationIds, ...deletedOperationIds])),
+      { reconcileDeletions: true }
     ).catch(() => {});
-    if (Array.isArray(sanitizedDb.subAdmins) && sanitizedDb.subAdmins.length > 0) {
-      syncTenantCollectionToFirebaseServer('sub_admins', cleanTenant, sanitizedDb.subAdmins).catch(() => {});
+    if (Array.isArray(sanitizedDb.subAdmins)) {
+      syncTenantCollectionToFirebaseServer('sub_admins', cleanTenant, sanitizedDb.subAdmins, [], {
+        reconcileDeletions: sanitizedDb.subAdmins.length > 0,
+      }).catch(() => {});
     }
     saveDocToFirebaseServer('settings', `${cleanTenant}_registration_fields`, {
       tenantId: cleanTenant,
       registrationFields: sanitizedDb.registrationFields,
       _updatedAt: sanitizedDb.updatedAt,
     }).catch(() => {});
+    saveDocToFirebaseServer('settings', `${cleanTenant}_records_meta`, {
+      tenantId: cleanTenant,
+      updatedAt: sanitizedDb.updatedAt,
+      _updatedAt: sanitizedDb.updatedAt,
+      deletedOperationIds,
+      deletedContributionIds,
+    }).catch(() => {});
   }
 
   return sanitizedDb;
+}
+
+export async function writeTenantRecordsToDiskAndCloud(
+  db: TenantRecordsDatabase,
+  tenantId?: string | null,
+  touchedCollections?: Set<string>
+): Promise<TenantRecordsDatabase> {
+  const cleanTenant = normalizeTenantId(tenantId || db.tenantId);
+  const saved = writeTenantRecordsToDisk(db, cleanTenant, false, false);
+  const deletedOperationIds = Array.isArray(saved.deletedOperationIds) ? saved.deletedOperationIds : [];
+  const deletedContributionIds = Array.isArray(saved.deletedContributionIds) ? saved.deletedContributionIds : [];
+
+  const syncAll = !touchedCollections || touchedCollections.size === 0;
+  const tasks: Promise<any>[] = [awaitPendingOffloadBackups()];
+
+  if (syncAll || touchedCollections.has('members')) {
+    tasks.push(
+      syncTenantCollectionToFirebaseServer('members', cleanTenant, saved.members || [], [], {
+        reconcileDeletions: true,
+      })
+    );
+  }
+  if (syncAll || touchedCollections.has('boardMembers')) {
+    tasks.push(
+      syncTenantCollectionToFirebaseServer('board_members', cleanTenant, saved.boardMembers || [], [], {
+        reconcileDeletions: true,
+      })
+    );
+  }
+  if (syncAll || touchedCollections.has('contributions') || touchedCollections.has('operations')) {
+    tasks.push(
+      syncTenantCollectionToFirebaseServer(
+        'contributions',
+        cleanTenant,
+        saved.contributions || [],
+        deletedContributionIds,
+        { reconcileDeletions: true }
+      )
+    );
+    tasks.push(
+      syncTenantCollectionToFirebaseServer(
+        'operations',
+        cleanTenant,
+        saved.operations || [],
+        deletedOperationIds,
+        { reconcileDeletions: true }
+      )
+    );
+  }
+  if ((syncAll || touchedCollections.has('subAdmins')) && Array.isArray(saved.subAdmins)) {
+    tasks.push(
+      syncTenantCollectionToFirebaseServer('sub_admins', cleanTenant, saved.subAdmins, [], {
+        reconcileDeletions: saved.subAdmins.length > 0,
+      })
+    );
+  }
+  if (syncAll || touchedCollections.has('registrationFields')) {
+    tasks.push(
+      saveDocToFirebaseServer('settings', `${cleanTenant}_registration_fields`, {
+        tenantId: cleanTenant,
+        registrationFields: saved.registrationFields,
+        _updatedAt: saved.updatedAt,
+      })
+    );
+  }
+
+  tasks.push(
+    saveDocToFirebaseServer('settings', `${cleanTenant}_records_meta`, {
+      tenantId: cleanTenant,
+      updatedAt: saved.updatedAt,
+      _updatedAt: saved.updatedAt,
+      deletedOperationIds,
+      deletedContributionIds,
+    })
+  );
+
+  await Promise.all(tasks);
+  return saved;
+}
+
+export async function reconcileTenantRecordsFromCloudFirestore(
+  tenantId: string,
+  force = false
+): Promise<TenantRecordsDatabase> {
+  const cleanTenant = normalizeTenantId(tenantId);
+  const localDb = readTenantRecordsFromDisk(cleanTenant);
+  const isColdLocal = localDb.updatedAt === COLD_SEED_EPOCH;
+  const lastCheck = tenantRecordsCloudReconcileCache.get(cleanTenant) || 0;
+  if (!force && !isColdLocal && Date.now() - lastCheck < TENANT_RECORDS_RECONCILE_TTL_MS) {
+    return localDb;
+  }
+  tenantRecordsCloudReconcileCache.set(cleanTenant, Date.now());
+
+  try {
+    const [
+      cloudMembers,
+      cloudBoard,
+      cloudOps,
+      cloudContribs,
+      cloudSubAdmins,
+      cloudGlobalFields,
+      cloudTenantFields,
+      cloudMeta,
+    ] = await Promise.all([
+      fetchTenantCollectionFromFirebaseServer<any>('members', cleanTenant),
+      fetchTenantCollectionFromFirebaseServer<any>('board_members', cleanTenant),
+      fetchTenantCollectionFromFirebaseServer<any>('operations', cleanTenant),
+      fetchTenantCollectionFromFirebaseServer<any>('contributions', cleanTenant),
+      fetchTenantCollectionFromFirebaseServer<any>('sub_admins', cleanTenant),
+      getDocFromFirebaseServer<any>('settings', 'global_registration_fields'),
+      getDocFromFirebaseServer<any>('settings', `${cleanTenant}_registration_fields`),
+      getDocFromFirebaseServer<any>('settings', `${cleanTenant}_records_meta`),
+    ]);
+
+    const localTs = isColdLocal ? 0 : new Date(localDb.updatedAt || 0).getTime();
+    const metaTs = cloudMeta ? new Date(cloudMeta._updatedAt || cloudMeta.updatedAt || 0).getTime() : 0;
+    const isMetaNewer = metaTs > localTs;
+
+    let changed = false;
+    const nextDb: TenantRecordsDatabase = { ...localDb };
+    let newestTs = localTs;
+
+    if (cloudMeta && Array.isArray(cloudMeta.deletedOperationIds)) {
+      const mergedDelOps = Array.from(
+        new Set([...(nextDb.deletedOperationIds || []), ...cloudMeta.deletedOperationIds])
+      );
+      if (mergedDelOps.length !== (nextDb.deletedOperationIds || []).length) {
+        nextDb.deletedOperationIds = mergedDelOps;
+        changed = true;
+      }
+    }
+    if (cloudMeta && Array.isArray(cloudMeta.deletedContributionIds)) {
+      const mergedDelContribs = Array.from(
+        new Set([...(nextDb.deletedContributionIds || []), ...cloudMeta.deletedContributionIds])
+      );
+      if (mergedDelContribs.length !== (nextDb.deletedContributionIds || []).length) {
+        nextDb.deletedContributionIds = mergedDelContribs;
+        changed = true;
+      }
+    }
+
+    const getMaxTs = (arr: any[]) => {
+      let max = 0;
+      for (const item of arr || []) {
+        const ts = new Date(item?._updatedAt || item?.updatedAt || item?.createdAt || 0).getTime();
+        if (ts > max) max = ts;
+      }
+      return max;
+    };
+
+    const membersMax = getMaxTs(cloudMembers);
+    if (
+      Array.isArray(cloudMembers) &&
+      (cloudMembers.length > 0 || isMetaNewer) &&
+      (isColdLocal || membersMax > localTs || isMetaNewer)
+    ) {
+      if (cloudMembers.length > 0 || isMetaNewer) {
+        nextDb.members = sanitizeMembersArray(cloudMembers);
+        if (membersMax > newestTs) newestTs = membersMax;
+        changed = true;
+      }
+    }
+
+    const boardMax = getMaxTs(cloudBoard);
+    if (
+      Array.isArray(cloudBoard) &&
+      (cloudBoard.length > 0 || isMetaNewer) &&
+      (isColdLocal || boardMax > localTs || isMetaNewer)
+    ) {
+      if (cloudBoard.length > 0 || isMetaNewer) {
+        nextDb.boardMembers = cloudBoard;
+        if (boardMax > newestTs) newestTs = boardMax;
+        changed = true;
+      }
+    }
+
+    const opsMax = getMaxTs(cloudOps);
+    if (
+      Array.isArray(cloudOps) &&
+      (cloudOps.length > 0 || isMetaNewer) &&
+      (isColdLocal || opsMax > localTs || isMetaNewer)
+    ) {
+      if (cloudOps.length > 0 || isMetaNewer) {
+        nextDb.operations = cloudOps;
+        if (opsMax > newestTs) newestTs = opsMax;
+        changed = true;
+      }
+    }
+
+    const contribsMax = getMaxTs(cloudContribs);
+    if (
+      Array.isArray(cloudContribs) &&
+      (cloudContribs.length > 0 || isMetaNewer) &&
+      (isColdLocal || contribsMax > localTs || isMetaNewer)
+    ) {
+      if (cloudContribs.length > 0 || isMetaNewer) {
+        nextDb.contributions = cloudContribs;
+        if (contribsMax > newestTs) newestTs = contribsMax;
+        changed = true;
+      }
+    }
+
+    const subsMax = getMaxTs(cloudSubAdmins);
+    if (
+      Array.isArray(cloudSubAdmins) &&
+      cloudSubAdmins.length > 0 &&
+      (isColdLocal || subsMax > localTs || isMetaNewer)
+    ) {
+      nextDb.subAdmins = cloudSubAdmins;
+      if (subsMax > newestTs) newestTs = subsMax;
+      changed = true;
+    }
+
+    const tenantFieldsTs = cloudTenantFields ? new Date(cloudTenantFields._updatedAt || 0).getTime() : 0;
+    const globalFieldsTs = cloudGlobalFields ? new Date(cloudGlobalFields._updatedAt || 0).getTime() : 0;
+    if (
+      cloudTenantFields &&
+      Array.isArray(cloudTenantFields.registrationFields) &&
+      cloudTenantFields.registrationFields.length > 0 &&
+      (isColdLocal || tenantFieldsTs > localTs) &&
+      tenantFieldsTs >= globalFieldsTs
+    ) {
+      nextDb.registrationFields = ensureMandatoryRegistrationPasswordFields(cloudTenantFields.registrationFields);
+      if (tenantFieldsTs > newestTs) newestTs = tenantFieldsTs;
+      changed = true;
+    } else if (
+      cloudGlobalFields &&
+      Array.isArray(cloudGlobalFields.registrationFields) &&
+      cloudGlobalFields.registrationFields.length > 0 &&
+      (isColdLocal || globalFieldsTs > localTs)
+    ) {
+      nextDb.registrationFields = ensureMandatoryRegistrationPasswordFields(cloudGlobalFields.registrationFields);
+      writeGlobalRegistrationFieldsToDisk(nextDb.registrationFields, false);
+      if (globalFieldsTs > newestTs) newestTs = globalFieldsTs;
+      changed = true;
+    }
+
+    if (metaTs > newestTs) newestTs = metaTs;
+
+    if (changed) {
+      nextDb.updatedAt = newestTs > 0 ? new Date(newestTs).toISOString() : new Date().toISOString();
+      return writeTenantRecordsToDisk(nextDb, cleanTenant, false, true);
+    }
+  } catch {}
+
+  return localDb;
 }
 
 export function propagateRegistrationFieldsToAllTenantsOnDisk(fields: any[]): any[] {
@@ -753,9 +1056,11 @@ export async function handleTenantRecordsApi(req: IncomingMessage, res: ServerRe
   const method = req.method?.toUpperCase();
 
   try {
-    // 1. GET /api/tenant-records -> Fetch all persistent records for the tenant
+    const forceCloud = parsedUrl.searchParams.get('force') === 'true';
+
+    // 1. GET /api/tenant-records -> Fetch all persistent records for the tenant (reconciled with Cloud Firestore)
     if (method === 'GET' && url === '/api/tenant-records') {
-      const db = readTenantRecordsFromDisk(tenantId);
+      const db = await reconcileTenantRecordsFromCloudFirestore(tenantId, forceCloud);
       const globalRegistrationFields = readGlobalRegistrationFieldsFromDisk();
       return sendJson(res, 200, {
         success: true,
@@ -770,7 +1075,7 @@ export async function handleTenantRecordsApi(req: IncomingMessage, res: ServerRe
     if ((method === 'POST' || method === 'PUT') && url === '/api/tenant-records') {
       const body = await readLargeJsonBody(req);
       const targetTenant = normalizeTenantId(body.tenantId || tenantId);
-      const current = readTenantRecordsFromDisk(targetTenant);
+      const current = await reconcileTenantRecordsFromCloudFirestore(targetTenant, true);
 
       // Database-level Role & Authorization Check
       const callerRole = ((req.headers['x-user-role'] as string | undefined) || body.callerRole || '').trim();
@@ -805,6 +1110,18 @@ export async function handleTenantRecordsApi(req: IncomingMessage, res: ServerRe
             parsedAdmin.role !== 'secondary_admin'
           ) {
             isSuperAdminCaller = true;
+          }
+          // Strict tenant isolation for non-master association admins
+          const isPlatformMaster =
+            parsedAdmin?.isMaster === true ||
+            parsedAdmin?.isMasterPlatformAdmin === true ||
+            parsedAdmin?.role === 'master_super_admin';
+          const sessionTenant = parsedAdmin?.tenantId ? normalizeTenantId(parsedAdmin.tenantId) : '';
+          if (!isPlatformMaster && sessionTenant && sessionTenant !== targetTenant) {
+            return sendJson(res, 403, {
+              success: false,
+              error: 'Access Denied (403 Forbidden): غير مصرح لمدير جمعية بتعديل بيانات جمعية أخرى.',
+            });
           }
         } catch {}
       }
@@ -876,16 +1193,28 @@ export async function handleTenantRecordsApi(req: IncomingMessage, res: ServerRe
             for (const inc of incomingData) {
               if (!inc || !inc.id) continue;
               if (!existingMap.has(inc.id)) {
-                // Allow self-registration of a new member
-                existingMap.set(inc.id, inc);
-              } else if (!callerMemberId || inc.id === callerMemberId) {
-                // Allow a member to update their own profile / password / lastLoginDate while preserving admin-managed status & code
+                // Allow self-registration of a new member (default status enforced)
+                existingMap.set(inc.id, {
+                  ...inc,
+                  tenantId: targetTenant,
+                  associationId: targetTenant,
+                  updatedAt: new Date().toISOString(),
+                });
+              } else if (callerMemberId && inc.id === callerMemberId) {
+                // Strict Member Self-Edit Whitelist: ONLY permitted personal fields may be modified by the member themselves
                 const prev = existingMap.get(inc.id);
+                const safePersonalFields = pickMemberSelfEditableFields(inc);
                 existingMap.set(inc.id, {
                   ...prev,
-                  ...inc,
+                  ...safePersonalFields,
+                  id: prev.id,
+                  username: prev.username,
+                  memberCode: prev.memberCode,
                   status: prev.status,
-                  memberCode: prev.memberCode || inc.memberCode,
+                  joinDate: prev.joinDate,
+                  tenantId: prev.tenantId || targetTenant,
+                  associationId: prev.associationId || targetTenant,
+                  updatedAt: new Date().toISOString(),
                 });
               }
             }
@@ -976,6 +1305,8 @@ export async function handleTenantRecordsApi(req: IncomingMessage, res: ServerRe
         (current as any)[col] = incomingData;
       };
 
+      const touchedCollections = new Set<string>();
+
       // 1. Support single collection update via `{ collection: 'members', data: [...] }` or `{ key: 'members', data: [...] }`
       const targetCollection = (body.collection || body.key) as keyof TenantRecordsDatabase | undefined;
       if (targetCollection && validCollections.includes(targetCollection) && Array.isArray(body.data)) {
@@ -986,6 +1317,7 @@ export async function handleTenantRecordsApi(req: IncomingMessage, res: ServerRe
           });
         }
         applyCollectionUpdateSafely(targetCollection, body.data);
+        touchedCollections.add(String(targetCollection));
       }
 
       // 2. Support nested `{ records: { members: [...], ... } }`
@@ -993,6 +1325,7 @@ export async function handleTenantRecordsApi(req: IncomingMessage, res: ServerRe
       for (const col of validCollections) {
         if (Array.isArray(sourceObj[col])) {
           applyCollectionUpdateSafely(col, sourceObj[col]);
+          touchedCollections.add(String(col));
         }
       }
 
@@ -1006,7 +1339,7 @@ export async function handleTenantRecordsApi(req: IncomingMessage, res: ServerRe
         writeGlobalRegistrationFieldsToDisk(current.registrationFields, true);
       }
 
-      const saved = writeTenantRecordsToDisk(current, targetTenant, true);
+      const saved = await writeTenantRecordsToDiskAndCloud(current, targetTenant, touchedCollections);
       return sendJson(res, 200, {
         success: true,
         tenantId: targetTenant,

@@ -1,15 +1,159 @@
 [
   {
-    "id": "support_failed_1792968539351",
+    "statusHistory": [
+      {
+        "status": "pending",
+        "label": "قيد مراجعة الدفع (في انتظار التفعيل)",
+        "timestamp": "2026-11-21T10:52:49.173Z",
+        "actor": "محمد الإدريسي",
+        "note": "تم إرسال وصل وتسديد مبلغ الاشتراك (180 MAD) عبر تحويل بنكي - رقم المرجع: DEP-369170. انتقلت حالة الطلب إلى «قيد مراجعة الدفع» بانتظار التحقق من صحة الوصل وموافقة الإدارة العامة."
+      }
+    ],
+    "amount": 180,
+    "_updatedAt": "2026-11-21T10:52:49.365Z",
     "type": "activation",
-    "donorName": "مساهم كريم",
-    "donorPhone": "",
+    "id": "pay_1795258369173_x3j3y",
+    "ownerId": "owner_1795258190139_5jr9",
+    "proofDocumentUrl": "/api/images/img-709989248012dbae.png",
+    "ownerName": "محمد الإدريسي",
+    "status": "pending",
+    "tenantId": "tenant_1795258190139_2bwc",
+    "createdAt": "2026-11-21T10:52:49.173Z",
+    "tenantName": "جمعية الأمل",
+    "country": "المغرب",
+    "proofFileName": "file_000000007ad081f4aad6a16c03afd211.png",
+    "ownerPhone": "+212 6 89 56 32 48",
+    "paymentVerified": false,
+    "transactionReference": "DEP-369170",
+    "tenantSlug": "assoc-1795258190139",
+    "submittedAt": "2026-11-21T10:52:49.173Z",
     "currency": "MAD",
-    "paymentMethod": "PayPal",
-    "paypalOrderId": "5TJ59833F15344546",
-    "status": "failed",
-    "mode": "sandbox",
-    "createdAt": "2026-10-25T22:48:59.351Z",
-    "notes": "The requested action could not be performed, semantically incorrect, or failed business validation."
+    "paymentMethod": "bank_transfer"
+  },
+  {
+    "id": "pay_1793192149195_r8iot",
+    "proofDocumentUrl": "/api/images/img-dcc774ec6b4ac850.jpg",
+    "country": "المغرب",
+    "type": "activation",
+    "_updatedAt": "2026-10-28T12:55:49.358Z",
+    "createdAt": "2026-10-28T12:55:49.195Z",
+    "statusHistory": [
+      {
+        "timestamp": "2026-10-28T12:55:49.195Z",
+        "label": "قيد مراجعة الدفع (في انتظار التفعيل)",
+        "note": "تم إرسال وصل وتسديد مبلغ الاشتراك (199 MAD) عبر Cash Plus - رقم المرجع: DEP-149194. انتقلت حالة الطلب إلى «قيد مراجعة الدفع» بانتظار التحقق من صحة الوصل وموافقة الإدارة العامة.",
+        "status": "pending",
+        "actor": "يوسف الادرييسي"
+      }
+    ],
+    "amount": 199,
+    "tenantId": "tenant_1793192092092_o1a7",
+    "submittedAt": "2026-10-28T12:55:49.195Z",
+    "status": "pending",
+    "ownerName": "يوسف الادرييسي",
+    "paymentVerified": false,
+    "paymentMethod": "cash_plus",
+    "proofFileName": "Create_Arabic_cover_image_20261024121150.jpg",
+    "transactionReference": "DEP-149194",
+    "ownerId": "owner_1793192092092_ca46",
+    "tenantSlug": "assoc-1793192092092",
+    "ownerPhone": "+212 6 53 42 15 45",
+    "tenantName": "جمعية النور",
+    "currency": "MAD"
+  },
+  {
+    "paymentMethod": "cash_plus",
+    "createdAt": "2026-10-27T17:36:04.114Z",
+    "submittedAt": "2026-10-27T17:36:04.114Z",
+    "tenantId": "tenant_1793118307992_urt8",
+    "transactionReference": "DEP-564113",
+    "paymentVerified": true,
+    "tenantSlug": "assoc-1793118307992",
+    "currency": "MAD",
+    "proofFileName": "Arabic_image_prompt_translation_20261024120800.jpg",
+    "tenantName": "جمعية الأفق",
+    "country": "المغرب",
+    "ownerPhone": "+212 6 53 26 45 78",
+    "proofDocumentUrl": "/api/images/img-bfee69a15841b23f.jpg",
+    "id": "pay_1793122564114_7srnq",
+    "status": "confirmed",
+    "type": "activation",
+    "ownerId": "owner_1793118307992_9sn4",
+    "_updatedAt": "2026-11-21T12:26:11.975Z",
+    "amount": 199,
+    "statusHistory": [
+      {
+        "note": "تم إرسال وصل وتسديد مبلغ الاشتراك (199 MAD) عبر Cash Plus - رقم المرجع: DEP-564113. انتقلت حالة الطلب إلى «قيد مراجعة الدفع» بانتظار التحقق من صحة الوصل وموافقة الإدارة العامة.",
+        "status": "pending",
+        "timestamp": "2026-10-27T17:36:04.114Z",
+        "label": "قيد مراجعة الدفع (في انتظار التفعيل)",
+        "actor": "يوسف علي"
+      }
+    ],
+    "ownerName": "يوسف علي",
+    "reviewedAt": "2026-10-28T12:21:18.357Z",
+    "reviewedBy": "الإدارة العامة"
+  },
+  {
+    "proofFileName": "Arabic_image_prompt_translation_20261024120800.jpg",
+    "tenantId": "tenant_1793094581292_fxxr",
+    "proofDocumentUrl": "/api/images/img-bfee69a15841b23f.jpg",
+    "ownerId": "owner_1793094581292_9zzz",
+    "tenantSlug": "assoc-1793094581292",
+    "ownerName": "علي طالب",
+    "currency": "MAD",
+    "status": "pending",
+    "paymentMethod": "cash_plus",
+    "ownerPhone": "+212 6 98 65 48 75",
+    "type": "activation",
+    "amount": 199,
+    "id": "pay_1793095155691_u08en",
+    "tenantName": "جمعية علي طالب",
+    "transactionReference": "DEP-155685",
+    "statusHistory": [
+      {
+        "status": "pending",
+        "label": "قيد مراجعة الدفع (في انتظار التفعيل)",
+        "actor": "علي طالب",
+        "timestamp": "2026-10-27T09:59:15.691Z",
+        "note": "تم إرسال وصل وتسديد مبلغ الاشتراك (199 MAD) عبر Cash Plus - رقم المرجع: DEP-155685. انتقلت حالة الطلب إلى «قيد مراجعة الدفع» بانتظار التحقق من صحة الوصل وموافقة الإدارة العامة."
+      }
+    ],
+    "paymentVerified": false,
+    "createdAt": "2026-10-27T09:59:15.691Z",
+    "_updatedAt": "2026-10-27T09:59:15.856Z",
+    "country": "المغرب",
+    "submittedAt": "2026-10-27T09:59:15.691Z"
+  },
+  {
+    "ownerId": "owner_1793010003772_bo2u",
+    "type": "activation",
+    "transactionReference": "DEP-119403",
+    "statusHistory": [
+      {
+        "note": "تم إرسال وصل وتسديد مبلغ الاشتراك (199 MAD) عبر Cash Plus - رقم المرجع: DEP-119403. انتقلت حالة الطلب إلى «قيد مراجعة الدفع» بانتظار التحقق من صحة الوصل وموافقة الإدارة العامة.",
+        "timestamp": "2026-10-26T12:01:59.405Z",
+        "label": "قيد مراجعة الدفع (في انتظار التفعيل)",
+        "status": "pending",
+        "actor": "يوسف"
+      }
+    ],
+    "amount": 199,
+    "status": "pending",
+    "createdAt": "2026-10-26T12:01:59.405Z",
+    "_updatedAt": "2026-10-26T12:01:59.623Z",
+    "currency": "MAD",
+    "proofFileName": "Creating_donation_campaigns_cove…_20261024120317.jpg",
+    "ownerName": "يوسف",
+    "tenantSlug": "assoc-1793010003772",
+    "tenantName": "جمعية يوسف",
+    "paymentVerified": false,
+    "proofDocumentUrl": "/api/images/img-a075cf4a8412288f.jpg",
+    "ownerPhone": "+212 6 89 56 24 78",
+    "submittedAt": "2026-10-26T12:01:59.405Z",
+    "country": "المغرب",
+    "id": "pay_1793016119405_87dt9",
+    "tenantId": "tenant_1793010003772_oec5",
+    "paymentMethod": "cash_plus"
   }
 ]

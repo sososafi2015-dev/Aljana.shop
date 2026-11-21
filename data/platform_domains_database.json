@@ -1,47 +1,111 @@
 {
   "domains": [
     {
-      "createdAt": "2026-11-14T22:50:32.658Z",
       "status": "connected",
-      "updatedAt": "2026-11-15T18:31:08.265Z",
-      "providerPreset": "hostinger",
       "createdBy": "الأدمين الرئيسي (Super Admin)",
-      "domainName": "syomax.ai.studio",
-      "targetUrl": "https://syomax.ai.studio",
-      "auditLogs": [
-        {
-          "timestamp": "2026-11-15T18:31:08.265Z",
-          "domainId": "dom_1794696632659_df7637",
-          "action": "update",
-          "details": "تم تحديث النطاق الرسمي للمنصة إلى (syomax.ai.studio) وربطه بالعنوان الرسمي (https://syomax.ai.studio).",
-          "domainName": "syomax.ai.studio",
-          "id": "domlog_1794696632659_8cbc3c",
-          "actionLabelAr": "تحديث إعدادات الدومين و DNS",
-          "performedBy": "الأدمين الرئيسي (Super Admin)"
-        }
-      ],
-      "id": "dom_1794696632659_df7637",
-      "dnsRecords": [],
+      "providerPreset": "hostinger",
+      "lastVerification": {
+        "checkedAt": "2026-11-21T18:54:50.083Z",
+        "status": "connected",
+        "sslEnabled": true,
+        "sslIssuer": "Google Trust Services",
+        "sslSubject": "syomax.com",
+        "sslValidTo": "Feb 16 20:03:21 2027 GMT",
+        "sslAuthorized": true,
+        "httpStatus": 200,
+        "targetReachable": true,
+        "nameserversMatch": true,
+        "resolvedNameservers": [
+          "ns-cloud-d3.googledomains.com",
+          "ns-cloud-d4.googledomains.com",
+          "ns-cloud-d2.googledomains.com",
+          "ns-cloud-d1.googledomains.com"
+        ],
+        "resolvedARecords": [
+          "216.239.36.21",
+          "216.239.32.21",
+          "216.239.34.21",
+          "216.239.38.21"
+        ],
+        "resolvedAaaaRecords": [
+          "2001:4860:4802:34::15",
+          "2001:4860:4802:32::15",
+          "2001:4860:4802:38::15",
+          "2001:4860:4802:36::15"
+        ],
+        "resolvedCnameRecords": [],
+        "resolvedTxtRecords": [],
+        "resolvedMxRecords": [],
+        "targetResolvedARecords": [
+          "216.239.36.21",
+          "216.239.32.21",
+          "216.239.34.21",
+          "216.239.38.21"
+        ],
+        "summaryAr": "تم التحقق الفعلي من سجلات DNS واستجابة الموقع وشهادة SSL بنجاح — الدومين syomax.com متصل ويعمل بشكل سليم.",
+        "issuesAr": [
+          "النطاق الفرعي www.syomax.com غير مربوط بعد بسجل CNAME (موصى بإضافة CNAME: www -> ghs.googlehosted.com)."
+        ]
+      },
       "updatedBy": "الأدمين الرئيسي (Super Admin)",
       "sslEnabled": true,
-      "lastVerification": null,
+      "id": "dom_1794696632659_df7637",
+      "dnsRecords": [],
+      "updatedAt": "2026-11-21T18:54:50.083Z",
+      "domainName": "syomax.com",
+      "targetUrl": "https://syomax.com",
+      "createdAt": "2026-11-14T22:50:32.658Z",
+      "auditLogs": [
+        {
+          "id": "domlog_1795287290682_syomax",
+          "domainId": "dom_1794696632659_df7637",
+          "domainName": "syomax.com",
+          "action": "update",
+          "actionLabelAr": "اعتماد الدومين الرسمي للمنصة",
+          "details": "تم اعتماد النطاق الرسمي للمنصة (syomax.com) كدومين افتراضي ورئيسي (https://syomax.com) مع التحقق الفعلي من DNS وشهادة SSL.",
+          "performedBy": "الأدمين الرئيسي (Super Admin)",
+          "timestamp": "2026-11-21T18:54:50.083Z"
+        },
+        {
+          "timestamp": "2026-11-15T18:31:08.265Z",
+          "details": "تم تحديث النطاق الرسمي للمنصة إلى (syomax.ai.studio) وربطه بالعنوان الرسمي (https://syomax.ai.studio).",
+          "actionLabelAr": "تحديث إعدادات الدومين و DNS",
+          "domainName": "syomax.ai.studio",
+          "performedBy": "الأدمين الرئيسي (Super Admin)",
+          "domainId": "dom_1794696632659_df7637",
+          "action": "update",
+          "id": "domlog_1794696632659_8cbc3c"
+        }
+      ],
       "nameservers": [
-        "ns1.dns-parking.com",
-        "ns2.dns-parking.com"
+        "ns-cloud-d3.googledomains.com",
+        "ns-cloud-d4.googledomains.com",
+        "ns-cloud-d2.googledomains.com",
+        "ns-cloud-d1.googledomains.com"
       ]
     }
   ],
   "auditLogs": [
     {
+      "id": "domlog_1795287290682_syomax",
+      "domainId": "dom_1794696632659_df7637",
+      "domainName": "syomax.com",
+      "action": "update",
+      "actionLabelAr": "اعتماد الدومين الرسمي للمنصة",
+      "details": "تم اعتماد النطاق الرسمي للمنصة (syomax.com) كدومين افتراضي ورئيسي (https://syomax.com) مع التحقق الفعلي من DNS وشهادة SSL.",
+      "performedBy": "الأدمين الرئيسي (Super Admin)",
+      "timestamp": "2026-11-21T18:54:50.083Z"
+    },
+    {
+      "timestamp": "2026-11-15T18:31:08.265Z",
       "details": "تم تحديث النطاق الرسمي للمنصة إلى (syomax.ai.studio) وربطه بالعنوان الرسمي (https://syomax.ai.studio).",
       "actionLabelAr": "تحديث إعدادات الدومين و DNS",
       "domainName": "syomax.ai.studio",
-      "timestamp": "2026-11-15T18:31:08.265Z",
+      "performedBy": "الأدمين الرئيسي (Super Admin)",
       "domainId": "dom_1794696632659_df7637",
-      "id": "domlog_1794696632659_8cbc3c",
       "action": "update",
-      "performedBy": "الأدمين الرئيسي (Super Admin)"
+      "id": "domlog_1794696632659_8cbc3c"
     }
   ],
-  "updatedAt": "2026-11-16T17:11:19.429Z"
+  "updatedAt": "2026-11-21T18:54:50.083Z"
 }

@@ -321,26 +321,6 @@ export async function persistTenantCollectionToBackend(
   const target = tenantId || getActiveTenantIdFromStorage();
   const cleanTenant = !target || target === 'portal' ? 'tenant_nour' : target;
 
-  // Mirror to Cloud Firestore
-  try {
-    if (key === 'members' && Array.isArray(data)) {
-      firestoreSyncService.syncMembersToFirestore(cleanTenant, data).catch(() => {});
-    } else if (key === 'boardMembers' && Array.isArray(data)) {
-      firestoreSyncService.syncBoardMembersToFirestore(cleanTenant, data).catch(() => {});
-    } else if (key === 'contributions' && Array.isArray(data)) {
-      firestoreSyncService.syncContributionsToFirestore(cleanTenant, data).catch(() => {});
-    } else if (key === 'operations' && Array.isArray(data)) {
-      firestoreSyncService.syncOperationsToFirestore(cleanTenant, data).catch(() => {});
-    } else if (key === 'subAdmins' && Array.isArray(data)) {
-      firestoreSyncService.syncSubAdminsToFirestore(cleanTenant, data).catch(() => {});
-    } else if (key === 'registrationFields' && Array.isArray(data)) {
-      const isMaster = cleanTenant === 'tenant_nour';
-      firestoreSyncService.saveRegistrationFieldsToFirestore(cleanTenant, data, isMaster).catch(() => {});
-    }
-  } catch (syncErr) {
-    console.warn('[Storage] Firestore background sync notice:', syncErr);
-  }
-
   try {
     const currentRole = loadData<string>(KEYS.ROLE, 'member');
     let adminSession: any = getStoredCurrentAdminSession(cleanTenant);
@@ -363,6 +343,45 @@ export async function persistTenantCollectionToBackend(
     const isEffectiveAdmin = Boolean(adminSession) || currentRole === 'admin';
     const loggedInMemberId = getStoredLoggedInMemberId(cleanTenant);
 
+    // Mirror to Cloud Firestore in parallel with backend API persistence and AWAIT completion
+    let firestoreMirrorPromise: Promise<any> = Promise.resolve(true);
+    try {
+      if (key === 'members' && Array.isArray(data)) {
+        const membersToSync =
+          !isEffectiveAdmin && loggedInMemberId
+            ? data.filter((m: any) => m && m.id === loggedInMemberId)
+            : data;
+        if (membersToSync.length > 0) {
+          firestoreMirrorPromise = firestoreSyncService
+            .syncMembersToFirestore(cleanTenant, membersToSync)
+            .catch(() => false);
+        }
+      } else if (key === 'boardMembers' && Array.isArray(data)) {
+        firestoreMirrorPromise = firestoreSyncService
+          .syncBoardMembersToFirestore(cleanTenant, data)
+          .catch(() => false);
+      } else if (key === 'contributions' && Array.isArray(data)) {
+        firestoreMirrorPromise = firestoreSyncService
+          .syncContributionsToFirestore(cleanTenant, data)
+          .catch(() => false);
+      } else if (key === 'operations' && Array.isArray(data)) {
+        firestoreMirrorPromise = firestoreSyncService
+          .syncOperationsToFirestore(cleanTenant, data)
+          .catch(() => false);
+      } else if (key === 'subAdmins' && Array.isArray(data)) {
+        firestoreMirrorPromise = firestoreSyncService
+          .syncSubAdminsToFirestore(cleanTenant, data)
+          .catch(() => false);
+      } else if (key === 'registrationFields' && Array.isArray(data)) {
+        const isMaster = cleanTenant === 'tenant_nour';
+        firestoreMirrorPromise = firestoreSyncService
+          .saveRegistrationFieldsToFirestore(cleanTenant, data, isMaster)
+          .catch(() => false);
+      }
+    } catch (syncErr) {
+      console.warn('[Storage] Firestore sync notice:', syncErr);
+    }
+
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'x-tenant-id': cleanTenant,
@@ -384,19 +403,23 @@ export async function persistTenantCollectionToBackend(
       headers['x-member-id'] = loggedInMemberId;
     }
 
-    const res = await fetch(`/api/tenant-records?tenantId=${encodeURIComponent(cleanTenant)}`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        tenantId: cleanTenant,
-        collection: key,
-        key,
-        data,
-        callerRole: isEffectiveAdmin ? 'admin' : (currentRole || 'member'),
-        callerMemberId: loggedInMemberId || undefined,
-      }),
-    });
-    if (!res.ok) return false;
+    const [res, firestoreOk] = await Promise.all([
+      fetch(`/api/tenant-records?tenantId=${encodeURIComponent(cleanTenant)}`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          tenantId: cleanTenant,
+          collection: key,
+          key,
+          data,
+          callerRole: isEffectiveAdmin ? 'admin' : (currentRole || 'member'),
+          callerMemberId: loggedInMemberId || undefined,
+        }),
+      }).catch(() => null),
+      firestoreMirrorPromise,
+    ]);
+
+    if (!res || !res.ok) return Boolean(firestoreOk);
     const json = await res.json().catch(() => null);
     if (json?.success && json.records && Array.isArray(json.records[key])) {
       const storageKey = COLLECTION_KEY_TO_STORAGE_KEY[key];
@@ -404,7 +427,7 @@ export async function persistTenantCollectionToBackend(
         saveData(getScopedKey(storageKey, cleanTenant), json.records[key]);
       }
     }
-    return Boolean(json?.success);
+    return Boolean(json?.success || firestoreOk);
   } catch (err) {
     console.warn(`[Storage] Background sync warning for ${key}:`, err);
     return false;
@@ -1966,23 +1989,61 @@ export const syncTenantRecordsFromBackend = async (tenantId?: string): Promise<{
   } = {};
 
   try {
-    const [recordsRes, cardRes] = await Promise.all([
-      fetch(`/api/tenant-records?tenantId=${encodeURIComponent(cleanTenant)}`, {
+    const cacheBuster = Date.now();
+    const [
+      recordsRes,
+      cardRes,
+      fbMembers,
+      fbOps,
+      fbSubs,
+      fbCard,
+      fbFields,
+    ] = await Promise.all([
+      fetch(`/api/tenant-records?tenantId=${encodeURIComponent(cleanTenant)}&force=true&ts=${cacheBuster}`, {
         headers: { 'x-tenant-id': cleanTenant },
         cache: 'no-store',
       }).catch(() => null),
-      fetch(`/api/card-settings?tenantId=${encodeURIComponent(cleanTenant)}`, {
+      fetch(`/api/card-settings?tenantId=${encodeURIComponent(cleanTenant)}&force=true&ts=${cacheBuster}`, {
         headers: { 'x-tenant-id': cleanTenant },
         cache: 'no-store',
       }).catch(() => null),
+      firestoreSyncService.fetchMembersFromFirestore(cleanTenant).catch(() => []),
+      firestoreSyncService.fetchOperationsFromFirestore(cleanTenant).catch(() => []),
+      firestoreSyncService.fetchSubAdminsFromFirestore(cleanTenant).catch(() => []),
+      firestoreSyncService.fetchMemberCardSettingsFromFirestore(cleanTenant).catch(() => null),
+      firestoreSyncService.fetchRegistrationFieldsFromFirestore(cleanTenant).catch(() => null),
     ]);
+
+    const mergeByLatestTimestamp = <T extends { id: string; updatedAt?: string; _updatedAt?: string; createdAt?: string }>(
+      primary: T[],
+      secondary: T[]
+    ): T[] => {
+      const map = new Map<string, T>();
+      for (const item of primary || []) {
+        if (item && item.id) map.set(item.id, item);
+      }
+      for (const item of secondary || []) {
+        if (!item || !item.id) continue;
+        const prev = map.get(item.id);
+        if (!prev) {
+          map.set(item.id, item);
+        } else {
+          const prevTs = new Date((prev as any)._updatedAt || prev.updatedAt || prev.createdAt || 0).getTime();
+          const incTs = new Date((item as any)._updatedAt || item.updatedAt || item.createdAt || 0).getTime();
+          if (incTs > prevTs) {
+            map.set(item.id, { ...prev, ...item });
+          }
+        }
+      }
+      return Array.from(map.values());
+    };
 
     if (recordsRes && recordsRes.ok) {
       const data = await recordsRes.json();
       if (data?.success && data.records) {
         const rec = data.records;
-        if (rec.updatedBy === 'System Init') {
-          // If server DB was just initialized with defaults, push existing local records if any
+        if (rec.updatedBy === 'System Init' && (!Array.isArray(fbMembers) || fbMembers.length === 0)) {
+          // If server DB & Firestore have no cloud records yet, push existing local records if any
           const localMembers = getStoredMembers(cleanTenant);
           const localBoard = getStoredBoardMembers(cleanTenant);
           const localContribs = getStoredContributions(cleanTenant);
@@ -2007,26 +2068,25 @@ export const syncTenantRecordsFromBackend = async (tenantId?: string): Promise<{
             }),
           }).catch(() => {});
         } else {
-          if (Array.isArray(rec.members)) {
-            const localMembersTs = getMembersTimestamp(cleanTenant);
-            const remoteMembersTs = rec.updatedAt ? new Date(rec.updatedAt).getTime() : 0;
-            if (localMembersTs > remoteMembersTs + 2000) {
-              const localMembers = getStoredMembers(cleanTenant);
-              result.members = localMembers;
-              persistTenantCollectionToBackend('members', localMembers, cleanTenant).catch(() => {});
-            } else {
-              saveMembers(rec.members, cleanTenant, false);
-              if (remoteMembersTs > 0) {
-                setMembersTimestamp(remoteMembersTs, cleanTenant);
-              }
-              result.members = rec.members;
+          const serverMembers: Member[] = Array.isArray(rec.members) ? rec.members : [];
+          const authoritativeMembers =
+            Array.isArray(fbMembers) && fbMembers.length > 0
+              ? mergeByLatestTimestamp(serverMembers as any[], fbMembers as any[]) as Member[]
+              : serverMembers;
+
+          if (authoritativeMembers.length > 0 || Array.isArray(rec.members)) {
+            const remoteMembersTs = rec.updatedAt ? new Date(rec.updatedAt).getTime() : Date.now();
+            saveMembers(authoritativeMembers, cleanTenant, false);
+            if (remoteMembersTs > 0) {
+              setMembersTimestamp(remoteMembersTs, cleanTenant);
             }
+            result.members = authoritativeMembers;
           }
           if (Array.isArray(rec.boardMembers)) {
             saveBoardMembers(rec.boardMembers, cleanTenant, false);
             result.boardMembers = rec.boardMembers;
           }
-          if (Array.isArray(rec.contributions) || Array.isArray(rec.operations)) {
+          if (Array.isArray(rec.contributions) || Array.isArray(rec.operations) || (Array.isArray(fbOps) && fbOps.length > 0)) {
             // Sync server-tracked deleted IDs first
             if (Array.isArray(rec.deletedOperationIds)) {
               for (const delOpId of rec.deletedOperationIds) {
@@ -2059,7 +2119,6 @@ export const syncTenantRecordsFromBackend = async (tenantId?: string): Promise<{
                 mergedContribsMap.set(c.id, prev ? { ...prev, ...c } : c);
               }
             }
-            // Place local-only (newly added) items first, followed by remote items in order
             const localOnlyContribs = localContribs.filter(
               (c) => c && c.id && !deletedContribSet.has(c.id) && !remoteContribIds.has(c.id)
             );
@@ -2071,7 +2130,11 @@ export const syncTenantRecordsFromBackend = async (tenantId?: string): Promise<{
             ];
 
             const localOps = getStoredOperations(cleanTenant);
-            const remoteOps: FinancialOperation[] = Array.isArray(rec.operations) ? rec.operations : [];
+            const serverOps: FinancialOperation[] = Array.isArray(rec.operations) ? rec.operations : [];
+            const remoteOps: FinancialOperation[] =
+              Array.isArray(fbOps) && fbOps.length > 0
+                ? mergeByLatestTimestamp(serverOps as any[], fbOps as any[]) as FinancialOperation[]
+                : serverOps;
             const remoteOpIds = new Set(remoteOps.map((o) => o?.id).filter(Boolean));
 
             const mergedOpsMap = new Map<string, FinancialOperation>();
@@ -2108,7 +2171,6 @@ export const syncTenantRecordsFromBackend = async (tenantId?: string): Promise<{
             result.contributions = reconciled.reconciledContributions;
             result.operations = reconciled.reconciledOperations;
 
-            // If local had unsynced items or reconciliation created missing links, persist back to backend & Firestore
             if (localOnlyContribs.length > 0 || localOnlyOps.length > 0 || reconciled.didChange) {
               saveContributionsAndOperations(
                 reconciled.reconciledContributions,
@@ -2117,37 +2179,32 @@ export const syncTenantRecordsFromBackend = async (tenantId?: string): Promise<{
               ).catch(() => {});
             }
           }
-          if (Array.isArray(rec.registrationFields)) {
-            const localFieldsTs = getRegistrationFieldsTimestamp(cleanTenant);
-            const remoteFieldsTs = rec.updatedAt ? new Date(rec.updatedAt).getTime() : 0;
-            if (localFieldsTs > remoteFieldsTs + 2000) {
-              const localFields = getStoredRegistrationFields(cleanTenant);
-              result.registrationFields = localFields;
-              persistTenantCollectionToBackend('registrationFields', localFields, cleanTenant).catch(() => {});
-            } else {
-              const normalizedRemoteFields = ensureMandatoryPasswordFields(rec.registrationFields);
-              saveRegistrationFields(normalizedRemoteFields, cleanTenant, false);
-              if (remoteFieldsTs > 0) {
-                setRegistrationFieldsTimestamp(remoteFieldsTs, cleanTenant);
-              }
-              result.registrationFields = normalizedRemoteFields;
+          const incomingFields =
+            Array.isArray(fbFields) && fbFields.length > 0
+              ? fbFields
+              : Array.isArray(rec.registrationFields)
+              ? rec.registrationFields
+              : null;
+          if (incomingFields) {
+            const normalizedRemoteFields = ensureMandatoryPasswordFields(incomingFields);
+            saveRegistrationFields(normalizedRemoteFields, cleanTenant, false);
+            const remoteFieldsTs = rec.updatedAt ? new Date(rec.updatedAt).getTime() : Date.now();
+            if (remoteFieldsTs > 0) {
+              setRegistrationFieldsTimestamp(remoteFieldsTs, cleanTenant);
             }
+            result.registrationFields = normalizedRemoteFields;
           }
           if (Array.isArray(data.globalRegistrationFields)) {
-            const localMasterTs = getRegistrationFieldsTimestamp('tenant_nour');
-            const remoteTs = rec.updatedAt ? new Date(rec.updatedAt).getTime() : 0;
-            if (localMasterTs <= remoteTs + 2000) {
-              saveData(GLOBAL_REGISTRATION_FIELDS_KEY, ensureMandatoryPasswordFields(data.globalRegistrationFields));
-            }
+            saveData(GLOBAL_REGISTRATION_FIELDS_KEY, ensureMandatoryPasswordFields(data.globalRegistrationFields));
           }
           if (Array.isArray(rec.auditLogs)) {
             saveAuditLogs(rec.auditLogs, cleanTenant, false);
             result.auditLogs = rec.auditLogs;
           }
-          if (Array.isArray(rec.subAdmins)) {
+          if (Array.isArray(rec.subAdmins) || (Array.isArray(fbSubs) && fbSubs.length > 0)) {
             const localSubs = getStoredSubAdmins(cleanTenant);
             const subMap = new Map<string, SubAdmin>();
-            for (const s of [...localSubs, ...rec.subAdmins]) {
+            for (const s of [...localSubs, ...(Array.isArray(rec.subAdmins) ? rec.subAdmins : []), ...(Array.isArray(fbSubs) ? fbSubs : [])]) {
               if (s && s.id) {
                 const prev = subMap.get(s.id);
                 subMap.set(s.id, prev ? { ...prev, ...s } : s);
@@ -2159,18 +2216,41 @@ export const syncTenantRecordsFromBackend = async (tenantId?: string): Promise<{
           }
         }
       }
+    } else if (Array.isArray(fbMembers) && fbMembers.length > 0) {
+      // Fallback: if API server is temporarily unreachable, hydrate directly from Cloud Firestore
+      saveMembers(fbMembers, cleanTenant, false);
+      result.members = fbMembers;
+      if (Array.isArray(fbOps) && fbOps.length > 0) {
+        saveOperations(fbOps, cleanTenant, false);
+        result.operations = fbOps;
+      }
+      if (Array.isArray(fbSubs) && fbSubs.length > 0) {
+        saveSubAdmins(fbSubs, false, cleanTenant);
+        (result as any).subAdmins = fbSubs;
+      }
     }
 
+    let serverCardSettings: any = null;
     if (cardRes && cardRes.ok) {
       const cardData = await cardRes.json();
       if (cardData?.success && cardData.settings) {
-        const mergedCard: MemberCardSettings = {
-          ...getStoredMemberCardSettings(cleanTenant),
-          ...cardData.settings,
-        };
-        saveMemberCardSettings(mergedCard, cleanTenant, false);
-        result.memberCardSettings = mergedCard;
+        serverCardSettings = cardData.settings;
       }
+    }
+    if (serverCardSettings || fbCard) {
+      const serverCardTs = serverCardSettings?.updatedAt ? new Date(serverCardSettings.updatedAt).getTime() : 0;
+      const fbCardTs = (fbCard as any)?._updatedAt || (fbCard as any)?.updatedAt
+        ? new Date((fbCard as any)._updatedAt || (fbCard as any).updatedAt).getTime()
+        : 0;
+      const winningCard = fbCard && fbCardTs > serverCardTs
+        ? { ...(serverCardSettings || {}), ...fbCard }
+        : { ...(fbCard || {}), ...(serverCardSettings || {}) };
+      const mergedCard: MemberCardSettings = {
+        ...getStoredMemberCardSettings(cleanTenant),
+        ...winningCard,
+      };
+      saveMemberCardSettings(mergedCard, cleanTenant, false);
+      result.memberCardSettings = mergedCard;
     }
   } catch (err) {
     console.warn('[Storage] syncTenantRecordsFromBackend warning:', err);

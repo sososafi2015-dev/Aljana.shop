@@ -34,8 +34,23 @@ function getAuthHeaders(session?: MasterAdminSession | null): Record<string, str
   return headers;
 }
 
-export const OFFICIAL_PLATFORM_DOMAIN = 'syomax.ai.studio';
-export const OFFICIAL_PLATFORM_URL = 'https://syomax.ai.studio';
+export const OFFICIAL_PLATFORM_DOMAIN = 'syomax.com';
+export const OFFICIAL_PLATFORM_URL = 'https://syomax.com';
+export const LEGACY_PLATFORM_DOMAINS = [
+  'youx.ai.studio',
+  'syomax.ai.studio',
+  'al-shaif-association.ai.studio',
+  'www.syomax.com',
+];
+
+export function getOfficialPlatformUrl(pathOrQuery: string = ''): string {
+  if (!pathOrQuery) return OFFICIAL_PLATFORM_URL;
+  if (pathOrQuery.startsWith('http://') || pathOrQuery.startsWith('https://')) {
+    return normalizeTargetUrlClient(pathOrQuery) || OFFICIAL_PLATFORM_URL;
+  }
+  const suffix = pathOrQuery.startsWith('/') || pathOrQuery.startsWith('?') ? pathOrQuery : `/${pathOrQuery}`;
+  return `${OFFICIAL_PLATFORM_URL}${suffix}`;
+}
 
 export function normalizeDomainNameClient(raw: string): string {
   if (!raw || typeof raw !== 'string') return '';
@@ -44,7 +59,7 @@ export function normalizeDomainNameClient(raw: string): string {
   clean = clean.split('/')[0].split('?')[0].split('#')[0];
   clean = clean.split(':')[0];
   clean = clean.replace(/\.+$/, '');
-  if (clean.endsWith('.ai.studio') && clean !== OFFICIAL_PLATFORM_DOMAIN) {
+  if (clean.endsWith('.ai.studio') || clean === 'www.syomax.com') {
     return OFFICIAL_PLATFORM_DOMAIN;
   }
   return clean;
@@ -62,11 +77,10 @@ export function normalizeTargetUrlClient(raw: string): string {
   try {
     const parsed = new URL(withScheme);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
-    if (
-      parsed.hostname.toLowerCase().endsWith('.ai.studio') &&
-      parsed.hostname.toLowerCase() !== OFFICIAL_PLATFORM_DOMAIN
-    ) {
-      return OFFICIAL_PLATFORM_URL;
+    const host = parsed.hostname.toLowerCase();
+    if (host.endsWith('.ai.studio') || host === 'www.syomax.com') {
+      const pathAndQuery = `${parsed.pathname === '/' ? '' : parsed.pathname}${parsed.search}${parsed.hash}`;
+      return `${OFFICIAL_PLATFORM_URL}${pathAndQuery}`.replace(/\/+$/, '');
     }
     return parsed.toString().replace(/\/+$/, '');
   } catch {

@@ -3,6 +3,19 @@ import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 import { testFirestoreConnection } from './firebase';
+import { LEGACY_PLATFORM_DOMAINS, OFFICIAL_PLATFORM_URL } from './api/domainsApi';
+
+// Automatic canonical redirect from legacy domains (e.g., youx.ai.studio, www.syomax.com) to https://syomax.com
+if (typeof window !== 'undefined' && window.location?.hostname) {
+  const currentHost = window.location.hostname.toLowerCase();
+  if (
+    LEGACY_PLATFORM_DOMAINS.includes(currentHost) ||
+    currentHost.endsWith('.ai.studio')
+  ) {
+    const target = `${OFFICIAL_PLATFORM_URL}${window.location.pathname}${window.location.search}${window.location.hash}`;
+    window.location.replace(target);
+  }
+}
 
 // Validate Firestore & Storage connectivity on boot without blocking UI render
 try {

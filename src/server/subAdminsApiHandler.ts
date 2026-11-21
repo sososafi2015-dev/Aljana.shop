@@ -206,6 +206,9 @@ function readBody(req: IncomingMessage): Promise<any> {
 function sendJson(res: ServerResponse, statusCode: number, data: any) {
   res.statusCode = statusCode;
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-admin-session, x-tenant-id');
@@ -311,7 +314,7 @@ export async function handleSubAdminsApi(req: IncomingMessage, res: ServerRespon
       db.lastUpdated = new Date().toISOString();
       saveSubAdminsDatabase(db);
       syncSubAdminsToTenantRecordOnDisk(db.subAdmins, reqTenantId, db.deletedSubAdminIds || []);
-      syncTenantCollectionToFirebaseServer('sub_admins', reqTenantId, db.subAdmins).catch(() => {});
+      await syncTenantCollectionToFirebaseServer('sub_admins', reqTenantId, db.subAdmins).catch(() => {});
 
       sendJson(res, 200, {
         success: true,
@@ -361,7 +364,7 @@ export async function handleSubAdminsApi(req: IncomingMessage, res: ServerRespon
     db.lastUpdated = new Date().toISOString();
     saveSubAdminsDatabase(db);
     syncSubAdminsToTenantRecordOnDisk(db.subAdmins, targetTenant, db.deletedSubAdminIds);
-    deleteDocFromFirebaseServer('sub_admins', `${targetTenant}_${adminId}`.replace(/[^a-zA-Z0-9_.-]/g, '_')).catch(() => {});
+    await deleteDocFromFirebaseServer('sub_admins', `${targetTenant}_${adminId}`.replace(/[^a-zA-Z0-9_.-]/g, '_')).catch(() => {});
 
     sendJson(res, 200, {
       success: true,
@@ -410,7 +413,7 @@ export async function handleSubAdminsApi(req: IncomingMessage, res: ServerRespon
       db.lastUpdated = new Date().toISOString();
       saveSubAdminsDatabase(db);
       syncSubAdminsToTenantRecordOnDisk(db.subAdmins, reqTenantId, db.deletedSubAdminIds || []);
-      syncTenantCollectionToFirebaseServer('sub_admins', reqTenantId, db.subAdmins).catch(() => {});
+      await syncTenantCollectionToFirebaseServer('sub_admins', reqTenantId, db.subAdmins).catch(() => {});
 
       sendJson(res, 200, {
         success: true,
@@ -488,7 +491,7 @@ export async function handleSubAdminsApi(req: IncomingMessage, res: ServerRespon
       db.lastUpdated = new Date().toISOString();
       saveSubAdminsDatabase(db);
       syncSubAdminsToTenantRecordOnDisk(db.subAdmins, tenantId, db.deletedSubAdminIds || []);
-      syncTenantCollectionToFirebaseServer('sub_admins', tenantId, db.subAdmins).catch(() => {});
+      await syncTenantCollectionToFirebaseServer('sub_admins', tenantId, db.subAdmins).catch(() => {});
 
       sendJson(res, 201, {
         success: true,
@@ -562,7 +565,7 @@ export async function handleSubAdminsApi(req: IncomingMessage, res: ServerRespon
       db.lastUpdated = new Date().toISOString();
       saveSubAdminsDatabase(db);
       syncSubAdminsToTenantRecordOnDisk(db.subAdmins, tenantId, db.deletedSubAdminIds || []);
-      syncTenantCollectionToFirebaseServer('sub_admins', tenantId, db.subAdmins).catch(() => {});
+      await syncTenantCollectionToFirebaseServer('sub_admins', tenantId, db.subAdmins).catch(() => {});
 
       sendJson(res, 200, {
         success: true,

@@ -17,7 +17,7 @@ export async function apiFetchSettingsWithMeta(tenantId?: string): Promise<Setti
   const activeTenant = tenantId || 'tenant_nour';
   try {
     const [res, firestoreSettings] = await Promise.all([
-      fetch(`/api/settings?tenantId=${encodeURIComponent(activeTenant)}&ts=${Date.now()}`, {
+      fetch(`/api/settings?tenantId=${encodeURIComponent(activeTenant)}&force=true&ts=${Date.now()}`, {
         headers: {
           'Accept': 'application/json',
           'x-tenant-id': activeTenant,
@@ -98,8 +98,7 @@ export async function apiSyncSettings(
   tenantId?: string
 ): Promise<SettingsApiResponse> {
   const activeTenant = tenantId || 'tenant_nour';
-  // Mirror permanently to Cloud Firestore
-  firestoreSyncService.saveSettingsToFirestore(activeTenant, settings).catch(() => {});
+  const firestorePromise = firestoreSyncService.saveSettingsToFirestore(activeTenant, settings).catch(() => false);
 
   try {
     const headers: Record<string, string> = {
@@ -114,11 +113,14 @@ export async function apiSyncSettings(
       }
     }
 
-    const res = await fetch(`/api/settings?tenantId=${encodeURIComponent(activeTenant)}`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ settings, adminSession, tenantId: activeTenant }),
-    });
+    const [res] = await Promise.all([
+      fetch(`/api/settings?tenantId=${encodeURIComponent(activeTenant)}`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ settings, adminSession, tenantId: activeTenant }),
+      }),
+      firestorePromise,
+    ]);
 
     const data = await res.json();
     return data;

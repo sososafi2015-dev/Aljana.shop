@@ -19,7 +19,7 @@
     "monthlyFee": 399,
     "isTemplate": true,
     "isVisibleOnPublicPortal": true,
-    "enablePublicDonations": true,
+    "enablePublicDonations": false,
     "tagline": "الشفافية والتكافل والتنمية المجتمعية المستدامة",
     "stats": {
       "membersCount": 14,
@@ -32,12 +32,15 @@
     "activationFeePaid": 199,
     "activationFeeCurrency": "MAD",
     "activationFeeDate": "2026-01-01T00:00:00.000Z",
-    "updatedAt": "2026-10-30T08:59:07.028Z",
+    "updatedAt": "2026-11-20T15:23:13.208Z",
     "description": "جمعية تنموية رائدة تهدف إلى ترسيخ قيم التضامن الاجتماعي والتنمية المستدامة وتمكين الفئات الهشة.",
     "address": "شارع الجيش الملكي، وسط المدينة، الدار البيضاء",
     "ownerUsername": "nour2024",
     "whatsapp": "0661998877",
-    "phone": "0661000001"
+    "phone": "0661000001",
+    "rib": "011 780 0000 123456789012 45",
+    "ribBank": "011 780 0000 123456789012 45",
+    "bankName": "التجاري وفا بنك / Attijariwafa Bank"
   },
   {
     "id": "tenant_amal",
@@ -426,5 +429,170 @@
     "rib": "011 780 0000 123456789012 45",
     "ribBank": "011 780 0000 123456789012 45",
     "bankName": "التجاري وفا بنك / Attijariwafa Bank"
+  },
+  {
+    "id": "tenant_borj_nador",
+    "name": "جمعية برج الناضور",
+    "nameFr": "Association Borj Nador",
+    "nameEn": "Borj Nador Association",
+    "country": "المغرب",
+    "city": "الناظور",
+    "slug": "borj-nador",
+    "logoUrl": "https://images.unsplash.com/photo-1582213782179-e0d53f98f2ca?auto=format&fit=crop&w=300&q=80",
+    "bannerImageUrl": "https://images.unsplash.com/photo-1593113598332-cd288d649433?auto=format&fit=crop&w=1600&q=80",
+    "ownerId": "owner_borj_nador",
+    "ownerName": "مسؤول جمعية برج الناضور",
+    "ownerPhone": "0661000101",
+    "status": "active",
+    "paymentVerified": true,
+    "createdAt": "2026-10-19T18:00:00.000Z",
+    "tier": "pro",
+    "monthlyFee": 299,
+    "isTemplate": false,
+    "isVisibleOnPublicPortal": false,
+    "enablePublicDonations": true,
+    "tagline": "العمل الجمعوي التنموي والتكافل الاجتماعي بخدمة ساكنة برج الناضور",
+    "stats": {
+      "membersCount": 1,
+      "activitiesCount": 8,
+      "totalBalance": 0,
+      "campaignsCount": 3
+    },
+    "ownerUsername": "admin2024"
+  },
+  {
+    "subscriptionStatusHistory": [
+      {
+        "note": "تم إنشاء المنصة بحالة «في انتظار الدفع» وبانتظار تسديد مبلغ الاشتراك المطلوب وتأكيد التفعيل من الإدارة العامة.",
+        "status": "pending_subscription",
+        "actor": "يوسف علي",
+        "timestamp": "2026-10-27T16:25:07.996Z",
+        "label": "في انتظار الدفع"
+      },
+      {
+        "status": "pending_activation",
+        "label": "قيد مراجعة الدفع",
+        "note": "تم تسديد الاشتراك وإرسال وصل الدفع (199 MAD - Cash Plus - مرجع: DEP-564113). حالة الطلب الآن «قيد مراجعة الدفع» بانتظار تدقيق الوصل وموافقة الإدارة العامة.",
+        "actor": "يوسف علي",
+        "timestamp": "2026-10-27T17:36:04.114Z"
+      },
+      {
+        "status": "pending_activation",
+        "label": "في انتظار التفعيل",
+        "actor": "يوسف علي",
+        "note": "تم إرسال تأكيد تسديد الاشتراك (199 MAD) وبانتظار التحقق من الدفع والتفعيل الإداري من الإدارة العامة.",
+        "timestamp": "2026-10-27T18:36:22.909Z"
+      },
+      {
+        "actor": "الإدارة العامة",
+        "timestamp": "2026-10-27T18:36:50.859Z",
+        "status": "active",
+        "note": "تم التحقق من صحة الدفع والموافقة الإدارية وتفعيل المنصة رسمياً.",
+        "label": "مفعّلة"
+      }
+    ],
+    "ownerName": "يوسف علي",
+    "updatedAt": "2026-10-28T12:21:18.357Z",
+    "lastRenewalDate": "2026-10-27T18:36:50.859Z",
+    "paymentVerifiedBy": "الإدارة العامة",
+    "lastRenewalPaymentId": "pay_1793122564114_7srnq",
+    "stats": {
+      "totalBalance": 0,
+      "membersCount": 1,
+      "activitiesCount": 3,
+      "campaignsCount": 3
+    },
+    "status": "active",
+    "enablePublicDonations": true,
+    "ownerPhone": "+212 6 53 26 45 78",
+    "nameFr": "Jam3it ofok",
+    "country": "المغرب",
+    "legalDocument": {
+      "fileName": "23754.jpg",
+      "fileType": "image/jpeg",
+      "status": "pending",
+      "fileSizeFormatted": "622 كيلوبايت",
+      "fileSize": 636972,
+      "uploadedAt": "2026-10-27T16:24:54.413Z",
+      "fileUrl": "/api/images/img-a075cf4a8412288f.jpg"
+    },
+    "monthlyFee": 299,
+    "tier": "pro",
+    "activationFeeDate": "2026-10-27T17:36:04.114Z",
+    "createdAt": "2026-10-27T16:25:07.996Z",
+    "nameEn": "Jam3it ofok",
+    "hasCustomPassword": true,
+    "isVisibleOnPublicPortal": false,
+    "ownerPasswordHash": "00000000000000000000000020c0d68f",
+    "paymentVerifiedAt": "2026-10-27T18:36:50.859Z",
+    "tagline": "الشفافية والتكافل والتنمية المجتمعية المستدامة وحملات تمويل المشاريع الخيرية",
+    "paymentVerified": true,
+    "ownerPasswordSalt": "6fb12a1a449c77267a6745c0fb14b5f1",
+    "_updatedAt": "2026-10-28T11:20:59.886Z",
+    "ownerId": "owner_1793118307992_9sn4",
+    "subscriptionStartedAt": "2026-10-27T17:36:31.588Z",
+    "city": "آسفي",
+    "isTemplate": false,
+    "bannerImageUrl": "/api/images/img-cae62e6c9611e9d9.jpg",
+    "ownerUsername": "youssef77",
+    "name": "جمعية الأفق",
+    "activationFeePaid": 199,
+    "id": "tenant_1793118307992_urt8",
+    "logoUrl": "/api/images/img-75f9560a84b1d500.png",
+    "slug": "assoc-1793118307992",
+    "subscriptionExpiresAt": "2027-10-27T17:36:31.588Z"
+  },
+  {
+    "stats": {
+      "membersCount": 1,
+      "totalBalance": 0,
+      "activitiesCount": 3,
+      "campaignsCount": 3
+    },
+    "bannerImageUrl": "https://images.unsplash.com/photo-1593113598332-cd288d649433?auto=format&fit=crop&w=1600&q=80",
+    "monthlyFee": 180,
+    "country": "المغرب",
+    "city": "الدار البيضاء",
+    "isVisibleOnPublicPortal": false,
+    "nameEn": "Association Al Amal",
+    "ownerPhone": "+212 6 89 56 32 48",
+    "subscriptionStatusHistory": [
+      {
+        "actor": "محمد الإدريسي",
+        "label": "في انتظار الدفع",
+        "timestamp": "2026-11-21T10:49:50.144Z",
+        "note": "تم إنشاء المنصة بحالة «في انتظار الدفع» وبانتظار تسديد مبلغ الاشتراك المطلوب وتأكيد التفعيل من الإدارة العامة.",
+        "status": "pending_subscription"
+      }
+    ],
+    "ownerUsername": "mohamed446677",
+    "id": "tenant_1795258190139_2bwc",
+    "slug": "assoc-1795258190139",
+    "enablePublicDonations": true,
+    "name": "جمعية الأمل",
+    "paymentVerified": false,
+    "ownerPasswordSalt": "c388cd858d62310bae37bf85d55d2ab2",
+    "legalDocument": {
+      "fileName": "31264.png",
+      "fileType": "image/png",
+      "status": "pending",
+      "fileSize": 1401396,
+      "uploadedAt": "2026-11-21T10:49:17.993Z",
+      "fileSizeFormatted": "1.3 ميجابايت",
+      "fileUrl": "/api/images/img-709989248012dbae.png"
+    },
+    "logoUrl": "https://images.unsplash.com/photo-1582213782179-e0d53f98f2ca?auto=format&fit=crop&w=300&q=80",
+    "createdAt": "2026-11-21T10:49:50.144Z",
+    "ownerPasswordHash": "0000000000000000000000005de86d6b",
+    "hasCustomPassword": true,
+    "_updatedAt": "2026-11-21T10:49:50.219Z",
+    "ownerName": "محمد الإدريسي",
+    "nameFr": "Association Al Amal",
+    "tier": "pro",
+    "tagline": "منصة العمل الجمعوي الشفاف والتنمية المستدامة - الدار البيضاء",
+    "isTemplate": false,
+    "status": "pending_activation",
+    "updatedAt": "2026-11-21T10:52:49.619Z",
+    "ownerId": "owner_1795258190139_5jr9"
   }
 ]
