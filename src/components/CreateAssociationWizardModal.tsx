@@ -1250,7 +1250,7 @@ export const CreateAssociationWizardModal: React.FC<CreateAssociationWizardModal
               {/* Association Name (French) */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  اسم الجمعية بالفرنسية <span className="text-rose-500">*</span>
+                  اسم الجمعية بالفرنسية او بالانجليزية <span className="text-rose-500">*</span>
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 right-0 pr-3.5 flex items-center pointer-events-none text-slate-400">

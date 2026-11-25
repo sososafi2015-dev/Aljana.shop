@@ -36,6 +36,7 @@ import {
   PRIMARY_TRANSPARENCY_SECTION_IDS,
   getNonMemberVisibilityMap,
 } from '../utils/visibilityRules';
+import { getEffectiveAuthTokenForTenant } from '../authSessionClient';
 
 interface ManageNonMemberVisibilityProps {
   elements: UIElementConfig[];
@@ -108,6 +109,10 @@ export const ManageNonMemberVisibility: React.FC<ManageNonMemberVisibilityProps>
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
       };
+      const authToken = getEffectiveAuthTokenForTenant(currentSession?.tenantId);
+      if (authToken) {
+        headers['Authorization'] = `Bearer ${authToken}`;
+      }
       if (currentSession) {
         headers['x-admin-session'] = encodeURIComponent(JSON.stringify(currentSession));
       }

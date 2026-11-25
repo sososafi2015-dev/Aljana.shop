@@ -77,6 +77,13 @@ export function readUIElementsFromDisk(tenantId?: string | null): UIElementConfi
           (merged as any)._gatewayMembersDefaultHiddenV1 = true;
           didMigrateGatewayMembers = true;
         }
+        if (
+          merged.id === 'gateway_ledger' &&
+          merged.descriptionAr === 'زر وبطاقة الدخول إلى سجل الشفافية المباشر الموثق بالفواتير والوصولات'
+        ) {
+          merged.descriptionAr = 'سجل الشفافية والحكامة المالية — تعرف على المداخيل والمصاريف';
+          didMigrateGatewayMembers = true;
+        }
         map.set(item.id, merged);
       }
     }

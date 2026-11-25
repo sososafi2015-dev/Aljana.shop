@@ -240,18 +240,55 @@ export function reconcileDeletedContributionTypesAcrossAllTenants(
               linkedMc.isNegative === true ||
               linkedMc.amountSign === '-');
 
+          const isCcMarkedUnpaidStatus =
+            cc.status === 'unpaid' ||
+            cc.status === 'approved' ||
+            cc.isNegative === true ||
+            cc.amountSign === '-';
           if (
-            (cc.status === 'pending' || cc.status === 'unpaid') &&
-            (isTypeDeleted || isLinkedMcUnpaid)
+            isLinkedMcUnpaid ||
+            isCcMarkedUnpaidStatus ||
+            ((cc.status === 'pending' || cc.status === 'unpaid') && isTypeDeleted)
           ) {
             if (cc.status !== 'unpaid' || cc.isNegative !== true || cc.amountSign !== '-') {
               campChanged = true;
-              return {
+              cc = {
                 ...cc,
                 status: 'unpaid',
                 isNegative: true,
                 amountSign: '-',
+                paymentStatus: 'unpaid',
+                isPaid: false,
               };
+            }
+            if (
+              linkedMc &&
+              (linkedMc.status !== 'unpaid' ||
+                linkedMc.isNegative !== true ||
+                linkedMc.amountSign !== '-')
+            ) {
+              Object.assign(linkedMc, {
+                status: 'unpaid',
+                isNegative: true,
+                amountSign: '-',
+                paymentStatus: 'unpaid',
+                isPaid: false,
+              });
+              recordsChanged = true;
+            }
+          } else if (linkedMc) {
+            const ccTs = new Date(cc.updatedAt || cc._updatedAt || cc.createdAt || 0).getTime() || 0;
+            const mcTs = new Date(linkedMc.updatedAt || linkedMc._updatedAt || linkedMc.createdAt || 0).getTime() || 0;
+            if (cc.status === 'pending' && linkedMc.status === 'completed' && ccTs > mcTs) {
+              Object.assign(linkedMc, {
+                status: 'pending',
+                isNegative: false,
+                amountSign: '+',
+                paymentStatus: 'pending',
+                isPaid: false,
+                updatedAt: cc.updatedAt || cc._updatedAt,
+              });
+              recordsChanged = true;
             }
           }
 
@@ -441,9 +478,9 @@ function recalculateCampaignTotals(
       (c) =>
         c.campaignId === camp.id &&
         c.isFinancial !== false &&
-        c.status !== 'pending' &&
-        c.status !== 'unpaid' &&
-        c.status !== 'rejected' &&
+        c.status === 'completed' &&
+        (c as any).isPaid !== false &&
+        (c as any).paymentStatus !== 'unpaid' &&
         !c.isNegative &&
         c.amountSign !== '-'
     );

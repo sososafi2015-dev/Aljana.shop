@@ -182,7 +182,7 @@ export const AVAILABLE_PLATFORM_TARGETS: PlatformTargetDefinition[] = [
     nameAr: 'بوابة سجل الشفافية المباشر',
     nameFr: 'Accès au Registre de transparence en direct',
     nameEn: 'Live Transparency Ledger Gateway',
-    descriptionAr: 'زر وبطاقة الدخول إلى سجل الشفافية المباشر الموثق بالفواتير والوصولات',
+    descriptionAr: 'سجل الشفافية والحكامة المالية — تعرف على المداخيل والمصاريف',
     descriptionFr: 'Accès direct au grand livre des opérations et reçus',
     descriptionEn: 'Access card and gateway to the Live Transparency Ledger',
     category: 'records_and_ledgers',

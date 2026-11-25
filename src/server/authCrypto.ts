@@ -236,3 +236,105 @@ export function sanitizePublicOwner<T extends Record<string, any>>(owner: T): T 
   delete clone.password;
   return clone as T;
 }
+
+export type AuthTokenRole = 'member' | 'admin' | 'sub_admin' | 'master_super_admin';
+
+export interface AuthSessionPayload {
+  role: AuthTokenRole;
+  tenantId: string;
+  subjectId: string;
+  iat: number;
+  exp: number;
+}
+
+function getServerTokenSecret(): string {
+  const envSecret = process.env.SESSION_SECRET;
+  if (envSecret && envSecret.trim().length >= 16) {
+    return envSecret.trim();
+  }
+  const g = globalThis as Record<string, any>;
+  if (!g.__chayefSessionSecret || typeof g.__chayefSessionSecret !== 'string') {
+    g.__chayefSessionSecret = crypto.randomBytes(32).toString('hex');
+  }
+  return g.__chayefSessionSecret;
+}
+
+function toBase64Url(input: string | Buffer): string {
+  const buf = typeof input === 'string' ? Buffer.from(input, 'utf8') : input;
+  return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function fromBase64Url(b64u: string): Buffer {
+  const padded = b64u.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((b64u.length + 3) % 4);
+  return Buffer.from(padded, 'base64');
+}
+
+export function signAuthSessionToken(
+  claims: { role: AuthTokenRole; tenantId: string; subjectId: string },
+  ttlMs: number = 7 * 24 * 60 * 60 * 1000
+): string {
+  const now = Date.now();
+  const payload: AuthSessionPayload = {
+    role: claims.role,
+    tenantId: String(claims.tenantId || '*').trim() || '*',
+    subjectId: String(claims.subjectId || '').trim(),
+    iat: now,
+    exp: now + ttlMs,
+  };
+  const encodedPayload = toBase64Url(JSON.stringify(payload));
+  const sig = crypto
+    .createHmac('sha256', getServerTokenSecret())
+    .update(encodedPayload)
+    .digest();
+  return `${encodedPayload}.${toBase64Url(sig)}`;
+}
+
+export function verifyAuthSessionToken(token?: string | null): AuthSessionPayload | null {
+  if (!token || typeof token !== 'string') return null;
+  const trimmed = token.trim();
+  const dotIdx = trimmed.indexOf('.');
+  if (dotIdx <= 0) return null;
+
+  const encodedPayload = trimmed.slice(0, dotIdx);
+  const providedSig = trimmed.slice(dotIdx + 1);
+  if (!encodedPayload || !providedSig) return null;
+
+  try {
+    const expectedSig = toBase64Url(
+      crypto.createHmac('sha256', getServerTokenSecret()).update(encodedPayload).digest()
+    );
+    const bufA = Buffer.from(providedSig, 'utf8');
+    const bufB = Buffer.from(expectedSig, 'utf8');
+    if (bufA.length !== bufB.length || !crypto.timingSafeEqual(bufA, bufB)) {
+      return null;
+    }
+
+    const decoded = JSON.parse(fromBase64Url(encodedPayload).toString('utf8')) as AuthSessionPayload;
+    if (!decoded || typeof decoded !== 'object') return null;
+    if (typeof decoded.exp !== 'number' || decoded.exp <= Date.now()) return null;
+    if (
+      decoded.role !== 'member' &&
+      decoded.role !== 'admin' &&
+      decoded.role !== 'sub_admin' &&
+      decoded.role !== 'master_super_admin'
+    ) {
+      return null;
+    }
+    return decoded;
+  } catch {
+    return null;
+  }
+}
+
+export function extractBearerTokenFromHeaders(headers: Record<string, any>): string | null {
+  const authHeader = headers?.authorization || headers?.Authorization;
+  if (typeof authHeader === 'string' && authHeader.toLowerCase().startsWith('bearer ')) {
+    const t = authHeader.slice(7).trim();
+    if (t) return t;
+  }
+  const alt = headers?.['x-auth-token'];
+  if (typeof alt === 'string' && alt.trim()) {
+    return alt.trim();
+  }
+  return null;
+}

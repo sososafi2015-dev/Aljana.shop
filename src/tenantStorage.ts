@@ -38,12 +38,14 @@ import {
   defaultStoreThemeColors
 } from './initialData';
 import { hashPasswordSync, generateSalt, verifyPasswordAnyFormat, authenticateMember } from './security';
-import { loadData, saveData, saveActivities, saveSettings, getStoredContributionTypes, getStoredUIElements, KEYS, saveCurrentAdminSession, clearCurrentAdminSession, getStoredMembers, saveMembers, saveBoardMembers, getStoredSubAdmins, saveSubAdmins, saveRegistrationFields, saveUIElements, saveAuditLogs, saveLoggedInMemberId, clearLoggedInMemberId, clonePollsFromMasterForTenant, savePolls } from './storage';
+import { loadData, saveData, saveActivities, saveSettings, getStoredContributionTypes, getStoredUIElements, KEYS, saveCurrentAdminSession, clearCurrentAdminSession, getStoredMembers, saveMembers, saveBoardMembers, getStoredSubAdmins, saveSubAdmins, saveRegistrationFields, saveUIElements, saveAuditLogs, saveLoggedInMemberId, clearLoggedInMemberId, clonePollsFromMasterForTenant, savePolls, getStoredActivities, getStoredOperations, getStoredContributions, getStoredCampaignContributions, getStoredCampaigns } from './storage';
 import { cloneReferenceActivitiesForNewTenant } from './utils/referenceContentVersioning';
+import { calculateUnifiedAssociationFinancials } from './utils/transparencyUtils';
 import { firestoreSyncService } from './services/firestoreSyncService';
 import { db } from './firebase';
 import { doc, setDoc } from 'firebase/firestore';
 import { ensurePermanentImageUrl } from './api/imageApi';
+import { setTenantAuthToken, clearMasterAuthToken } from './authSessionClient';
 
 export const MASTER_TEMPLATE_TENANT_ID = 'tenant_nour';
 
@@ -1045,6 +1047,8 @@ export function setMasterAdminSession(session: MasterAdminSession | null): void 
   saveData(TENANT_STORAGE_KEYS.MASTER_ADMIN_SESSION, session);
   if (session) {
     saveData(KEYS.ROLE, 'admin');
+  } else {
+    clearMasterAuthToken();
   }
 }
 
@@ -1206,7 +1210,7 @@ export function createAssociationPlatform(input: CreateAssociationInput): { tena
     },
   ];
   saveData(`chayef_tenant_${newTenantId}_board_members`, initialBoard);
-  saveBoardMembers(initialBoard, newTenantId);
+  saveBoardMembers(initialBoard, newTenantId, false);
   saveData(`chayef_tenant_${newTenantId}_sub_admins`, []);
   saveSubAdmins([], false, newTenantId);
 
@@ -1315,8 +1319,13 @@ export function createAssociationPlatform(input: CreateAssociationInput): { tena
         hasCustomPassword: true,
       }),
     })
-      .then(() =>
-        fetch(`/api/settings?tenantId=${encodeURIComponent(newTenantId)}`, {
+      .then(async (tenantRes) => {
+        const createdJson = await tenantRes.json().catch(() => null);
+        if (createdJson?.authToken) {
+          setTenantAuthToken(newTenantId, createdJson.authToken);
+        }
+        saveBoardMembers(initialBoard, newTenantId, true).catch(() => {});
+        return fetch(`/api/settings?tenantId=${encodeURIComponent(newTenantId)}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -1326,8 +1335,8 @@ export function createAssociationPlatform(input: CreateAssociationInput): { tena
             settings: freshSettings,
             lastUpdated: new Date().toISOString(),
           }),
-        })
-      )
+        });
+      })
       .catch(() => {});
   } catch {}
 
@@ -1455,34 +1464,30 @@ export function calculatePlatformMasterStats(): PlatformMasterStats {
 }
 
 // Get real-time live statistics for an association
-export function getTenantLiveStats(tenantId: string, isTemplate?: boolean) {
+export function getTenantLiveStats(tenantId: string, _isTemplate?: boolean) {
   try {
-    const isMaster = isTemplate || tenantId === MASTER_TEMPLATE_TENANT_ID;
-    const members = loadTenantData<Member[]>('members', isMaster ? initialMembers : [], tenantId);
-    const activities = loadTenantData<ActivityItem[]>('activities', isMaster ? initialActivities : [], tenantId);
-    const operations = loadTenantData<FinancialOperation[]>('operations', isMaster ? initialOperations : [], tenantId);
-    const campaigns = loadTenantData<DonationCampaign[]>('campaigns', isMaster ? initialCampaigns : [], tenantId);
+    const cleanTenant = !tenantId || tenantId === 'portal' ? MASTER_TEMPLATE_TENANT_ID : tenantId;
+    const members = getStoredMembers(cleanTenant);
+    const activities = getStoredActivities(cleanTenant);
+    const operations = getStoredOperations(cleanTenant);
+    const contributions = getStoredContributions(cleanTenant);
+    const campaignContributions = getStoredCampaignContributions(cleanTenant);
+    const contributionTypes = getStoredContributionTypes(cleanTenant);
+    const campaigns = getStoredCampaigns(cleanTenant);
 
-    let totalBalance = 0;
-    if (Array.isArray(operations)) {
-      totalBalance = operations
-        .filter((op) => {
-          if (!op) return false;
-          if ((op as any).category === 'platform_support' || (op as any).category === 'support') return false;
-          if ((op as any).type === 'platform_support' || (op as any).type === 'support') return false;
-          if (op.title && (op.title.includes('دعم المنصة') || op.title.includes('دعم وتطوير المنصة'))) return false;
-          return true;
-        })
-        .reduce((acc, op) => {
-          const amount = Number(op.amount) || 0;
-          return op.type === 'income' ? acc + amount : acc - amount;
-        }, 0);
-    }
+    const unified = calculateUnifiedAssociationFinancials({
+      operations,
+      contributions,
+      campaignContributions,
+      contributionTypes,
+      campaigns,
+      tenantId: cleanTenant,
+    });
 
     return {
       membersCount: members?.length || 0,
       activitiesCount: activities?.length || 0,
-      totalBalance: Math.max(0, totalBalance),
+      totalBalance: unified.currentBalance,
       campaignsCount: campaigns?.length || 0,
     };
   } catch {
@@ -2058,6 +2063,11 @@ export async function authenticatePlatformAccount(
         // Keep local owner cache synchronized with authoritative username (without storing password hashes locally)
         if (data.owner && data.tenant.ownerUsername) {
           updateLocalOwnerUsername(data.tenant.id, data.tenant.ownerUsername);
+        }
+
+        const resolvedAuthToken = data.authToken || data.session?.token;
+        if (resolvedAuthToken) {
+          setTenantAuthToken(data.tenant.id, resolvedAuthToken);
         }
 
         // Case A: Authenticated as a Member (منخرط) -> strictly role: 'member', NO admin session!

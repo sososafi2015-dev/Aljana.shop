@@ -24,6 +24,8 @@ import { FinancialOperation, Language, UserRole, AssociationSettings, UIElementC
 import { translations } from '../translations';
 import { BackToHomeButton } from './BackToHomeButton';
 import { isCurrentBalanceVisibleForUser } from '../utils/visibilityRules';
+import { calculateFinancials } from '../storage';
+import { calculateApprovedExpenses, UnifiedAssociationFinancials } from '../utils/transparencyUtils';
 
 interface FinancialDashboardProps {
   operations: FinancialOperation[];
@@ -38,6 +40,8 @@ interface FinancialDashboardProps {
   uiElements?: UIElementConfig[];
   loggedInMember?: Member | null;
   canAdd?: boolean;
+  unifiedCurrentBalance?: number;
+  unifiedFinancials?: UnifiedAssociationFinancials;
 }
 
 export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
@@ -53,6 +57,8 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
   uiElements = [],
   loggedInMember = null,
   canAdd = true,
+  unifiedCurrentBalance,
+  unifiedFinancials,
 }) => {
   const t = translations[lang];
 
@@ -62,25 +68,27 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
     uiElements,
   });
 
-  // Calculate numbers
-  const totalIncomes = operations
-    .filter((op) => op.type === 'income')
-    .reduce((sum, op) => sum + Number(op.amount), 0);
-
-  const totalExpenses = operations
-    .filter((op) => op.type === 'expense')
-    .reduce((sum, op) => sum + Number(op.amount), 0);
-
-  const currentBalance = totalIncomes - totalExpenses;
-
-  // Breakdown by category
+  // Calculate numbers using the single unified financial engine
+  const financials = calculateFinancials(operations);
+  const approvedExpensesInfo = unifiedFinancials
+    ? {
+        approvedCompletedExpenses: unifiedFinancials.approvedCompletedExpenses,
+        totalApprovedExpenses: unifiedFinancials.totalExpenses,
+      }
+    : calculateApprovedExpenses(operations);
+  const totalIncomes = unifiedFinancials ? unifiedFinancials.totalIncomes : financials.totalIncomes;
+  const totalExpenses = approvedExpensesInfo.totalApprovedExpenses;
+  const currentBalance =
+    unifiedCurrentBalance !== undefined
+      ? unifiedCurrentBalance
+      : unifiedFinancials
+      ? unifiedFinancials.currentBalance
+      : financials.currentBalance;
   const categoryTotals: Record<string, number> = {};
-  operations
-    .filter((op) => op.type === 'expense')
-    .forEach((op) => {
-      const cat = op.category || 'other';
-      categoryTotals[cat] = (categoryTotals[cat] || 0) + Number(op.amount);
-    });
+  approvedExpensesInfo.approvedCompletedExpenses.forEach((op) => {
+    const cat = op.category || 'other';
+    categoryTotals[cat] = (categoryTotals[cat] || 0) + (Number(op.amount) || 0);
+  });
 
   const getCategoryName = (key: string) => {
     const map: Record<string, string> = {
@@ -214,7 +222,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
           <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
             <span>مصاريف مشاريع العمل الخيري</span>
             <span className="text-rose-700 font-bold font-mono">
-              {operations.filter((op) => op.type === 'expense').length} عمليات
+              {approvedExpensesInfo.approvedCompletedExpenses.length} عمليات
             </span>
           </div>
         </motion.div>

@@ -4,7 +4,8 @@ import { X, Printer, CheckCircle2, Building2, Phone, Mail, FileCheck, Shield, Qr
 import { Member, FinancialOperation, AssociationSettings, Language, MemberCardSettings, MemberCardField, MemberContribution } from '../types';
 import { translations } from '../translations';
 import { initialMemberCardSettings } from '../initialData';
-import { resolveEffectiveBankSettings } from '../storage';
+import { resolveEffectiveBankSettings, calculateFinancials } from '../storage';
+import { calculateApprovedExpenses, UnifiedAssociationFinancials } from '../utils/transparencyUtils';
 
 interface ReceiptModalProps {
   isOpen: boolean;
@@ -19,6 +20,8 @@ interface ReceiptModalProps {
   cardSettings?: MemberCardSettings;
   lang: Language;
   canViewBalance?: boolean;
+  canPrintFinancialStatement?: boolean;
+  unifiedFinancials?: UnifiedAssociationFinancials;
 }
 
 export const ReceiptModal: React.FC<ReceiptModalProps> = ({
@@ -34,22 +37,24 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   cardSettings = initialMemberCardSettings,
   lang,
   canViewBalance = false,
+  canPrintFinancialStatement = false,
+  unifiedFinancials,
 }) => {
   const t = translations[lang] as any;
 
   if (!isOpen) return null;
+  if (type === 'financial_statement' && !canPrintFinancialStatement) return null;
 
   const handlePrint = () => {
+    if (type === 'financial_statement' && !canPrintFinancialStatement) return;
     window.print();
   };
 
-  const totalIncomes = operations
-    .filter((op) => op.type === 'income')
-    .reduce((sum, op) => sum + Number(op.amount), 0);
-  const totalExpenses = operations
-    .filter((op) => op.type === 'expense')
-    .reduce((sum, op) => sum + Number(op.amount), 0);
-  const balance = totalIncomes - totalExpenses;
+  const fallbackOps = calculateFinancials(operations);
+  const fallbackExpenses = calculateApprovedExpenses(operations);
+  const totalIncomes = unifiedFinancials ? unifiedFinancials.totalIncomes : fallbackOps.totalIncomes;
+  const totalExpenses = unifiedFinancials ? unifiedFinancials.totalExpenses : fallbackExpenses.totalApprovedExpenses;
+  const balance = unifiedFinancials ? unifiedFinancials.currentBalance : fallbackOps.currentBalance;
 
   // Theme styling helpers
   const getThemeClasses = (theme?: string) => {

@@ -98,8 +98,12 @@ export interface MemberContribution {
   contributionTypeName?: string;
   isNegative?: boolean;
   amountSign?: '+' | '-';
+  paymentStatus?: 'paid' | 'completed' | 'confirmed' | 'verified' | 'unpaid' | 'pending' | 'pending_verification' | 'failed' | 'refunded' | (string & {});
+  isPaid?: boolean;
   proofImageUrl?: string; // رابط صورة إثبات الدفع (التحويل البنكي)
   receiptUrl?: string;
+  updatedAt?: string;
+  _updatedAt?: string;
 }
 
 export interface BoardMember {
@@ -180,6 +184,7 @@ export interface FinancialOperation {
   associationId?: string;
   linkedContributionId?: string; // Linked contribution ID when this is an unpaid deduction
   isUnpaidContributionDeduction?: boolean; // True when this operation deducts an unpaid contribution
+  status?: 'completed' | 'approved' | 'pending' | 'rejected' | 'incomplete' | 'cancelled' | (string & {});
 }
 
 export interface ActivityProofAttachment {
@@ -663,8 +668,12 @@ export interface CampaignContribution {
   associationName?: string;
   isNegative?: boolean;
   amountSign?: '+' | '-';
+  paymentStatus?: 'paid' | 'completed' | 'confirmed' | 'verified' | 'unpaid' | 'pending' | 'pending_verification' | 'failed' | 'refunded' | (string & {});
+  isPaid?: boolean;
   proofImageUrl?: string; // رابط صورة إثبات الدفع (التحويل البنكي)
   receiptUrl?: string;
+  updatedAt?: string;
+  _updatedAt?: string;
 }
 
 // ==================== MULTI-ASSOCIATION & MULTI-TENANT TYPES ====================

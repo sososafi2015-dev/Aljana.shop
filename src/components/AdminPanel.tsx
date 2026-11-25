@@ -86,6 +86,10 @@ import { getTenantSubscriptionDetails } from '../paymentStorage';
 import { useAssociationSectionsConfig } from '../associationSectionsStorage';
 import { WhatsAppIcon, validateWhatsAppPhone, buildWhatsAppChatUrl } from '../utils/whatsappUtils';
 import { resolveEffectiveBankSettings } from '../storage';
+import {
+  calculateUnifiedAssociationFinancials,
+  UnifiedAssociationFinancials,
+} from '../utils/transparencyUtils';
 
 interface AdminPanelProps {
   settings: AssociationSettings;
@@ -128,6 +132,7 @@ interface AdminPanelProps {
   totalIncomes?: number;
   totalExpenses?: number;
   currentBalance?: number;
+  unifiedFinancials?: UnifiedAssociationFinancials;
   onOpenAddActivity: () => void;
   onEditActivity: (activity: ActivityItem) => void;
   onDeleteActivity: (id: string) => Promise<boolean> | void;
@@ -217,6 +222,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   totalIncomes: propTotalIncomes,
   totalExpenses: propTotalExpenses,
   currentBalance: propCurrentBalance,
+  unifiedFinancials: propUnifiedFinancials,
   onOpenAddActivity,
   onEditActivity,
   onDeleteActivity,
@@ -596,19 +602,29 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   };
 
-  const totalIncomes = propTotalIncomes !== undefined
-    ? propTotalIncomes
-    : operations
-        .filter((op) => op.type === 'income')
-        .reduce((sum, op) => sum + Number(op.amount), 0);
-  const totalExpenses = propTotalExpenses !== undefined
-    ? propTotalExpenses
-    : operations
-        .filter((op) => op.type === 'expense')
-        .reduce((sum, op) => sum + Number(op.amount), 0);
-  const balance = propCurrentBalance !== undefined
-    ? propCurrentBalance
-    : (totalIncomes - totalExpenses);
+  const effectiveUnifiedFinancials = useMemo(() => {
+    if (propUnifiedFinancials) return propUnifiedFinancials;
+    return calculateUnifiedAssociationFinancials({
+      operations,
+      contributions,
+      campaignContributions,
+      contributionTypes,
+      campaigns,
+      tenantId: activeTenantId,
+    });
+  }, [
+    propUnifiedFinancials,
+    operations,
+    contributions,
+    campaignContributions,
+    contributionTypes,
+    campaigns,
+    activeTenantId,
+  ]);
+
+  const totalIncomes = propTotalIncomes !== undefined ? propTotalIncomes : effectiveUnifiedFinancials.totalIncomes;
+  const totalExpenses = propTotalExpenses !== undefined ? propTotalExpenses : effectiveUnifiedFinancials.totalExpenses;
+  const balance = propCurrentBalance !== undefined ? propCurrentBalance : effectiveUnifiedFinancials.currentBalance;
 
   return (
     <div className="space-y-6">
@@ -1226,7 +1242,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <div className="flex items-center justify-between mb-2">
                     <Coins className="w-6 h-6 text-emerald-700 group-hover:scale-110 transition-transform" />
                     <span className="px-2 py-0.5 rounded-full text-[11px] bg-emerald-100 text-emerald-800 font-mono font-bold">
-                      {contributions ? contributions.length : 0}
+                      {effectiveUnifiedFinancials.metrics.totalOperationsCount}
                     </span>
                   </div>
                   <h4 className="font-bold text-slate-900 text-sm">{t.manageContributionsTitle || 'سجل المساهمات والانخراطات'}</h4>
@@ -1648,6 +1664,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           totalIncomes={totalIncomes}
           totalExpenses={totalExpenses}
           currentBalance={balance}
+          approvedIncomesCount={effectiveUnifiedFinancials.metrics.approvedCount}
+          approvedExpensesCount={effectiveUnifiedFinancials.approvedExpensesCount}
           lang={lang}
         />
       )}
@@ -1734,8 +1752,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       {activeAdminTab === 'contributions' && canViewSection('contributions') && (
         <ManageContributions
           contributions={contributions || []}
+          campaignContributions={campaignContributions || []}
+          contributionTypes={contributionTypes || []}
+          campaigns={campaigns || []}
           members={members || []}
           operations={operations || []}
+          tenantId={activeTenantId}
+          unifiedFinancials={effectiveUnifiedFinancials}
           lang={lang}
           canAdd={hasPermission('contributions', 'canAdd')}
           canEdit={hasPermission('contributions', 'canEdit')}

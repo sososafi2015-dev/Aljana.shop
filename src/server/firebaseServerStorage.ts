@@ -330,6 +330,34 @@ export async function deleteDocFromFirebaseServer(
   }
 }
 
+export async function saveSingleTenantDocToFirebaseServer(
+  collectionName: string,
+  tenantId: string,
+  item: Record<string, any>,
+  timestamp?: string,
+  merge: boolean = true
+): Promise<boolean> {
+  try {
+    if (!item || !item.id) return false;
+    const cleanTenant = !tenantId || tenantId === 'portal' ? 'tenant_nour' : tenantId;
+    const nowIso = timestamp || new Date().toISOString();
+    const docId = `${cleanTenant}_${item.id}`.replace(/[^a-zA-Z0-9_.-]/g, '_');
+    const rawPayload: Record<string, any> = {
+      ...item,
+      tenantId: item.tenantId && item.tenantId !== 'portal' ? item.tenantId : cleanTenant,
+      associationId: item.associationId && item.associationId !== 'portal' ? item.associationId : cleanTenant,
+      updatedAt: item.updatedAt || nowIso,
+      _updatedAt: nowIso,
+    };
+    const sanitizedPayload = JSON.parse(JSON.stringify(rawPayload));
+    await setDoc(doc(serverDb, collectionName, docId), sanitizedPayload, { merge });
+    return true;
+  } catch (err) {
+    console.warn(`[FirebaseServerStorage] saveSingleTenantDoc (${collectionName}/${item?.id}) notice:`, err);
+    return false;
+  }
+}
+
 export async function syncTenantCollectionToFirebaseServer(
   collectionName: string,
   tenantId: string,

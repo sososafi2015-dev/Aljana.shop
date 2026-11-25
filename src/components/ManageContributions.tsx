@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Coins, 
@@ -28,14 +28,34 @@ import {
   Eye,
   Image as ImageIcon,
 } from 'lucide-react';
-import { MemberContribution, Member, Language, FinancialOperation, ContributionStatus, ContributionCategory, PaymentMethodType } from '../types';
+import {
+  MemberContribution,
+  CampaignContribution,
+  ContributionTypeConfig,
+  DonationCampaign,
+  Member,
+  Language,
+  FinancialOperation,
+  ContributionStatus,
+  ContributionCategory,
+  PaymentMethodType,
+} from '../types';
 import { translations } from '../translations';
-import { calculateFinancials, isUnpaidContributionStatus } from '../storage';
+import { isUnpaidContributionStatus } from '../storage';
+import {
+  calculateUnifiedAssociationFinancials,
+  UnifiedAssociationFinancials,
+} from '../utils/transparencyUtils';
 
 interface ManageContributionsProps {
   contributions: MemberContribution[];
+  campaignContributions?: CampaignContribution[];
+  contributionTypes?: ContributionTypeConfig[];
+  campaigns?: DonationCampaign[];
   members: Member[];
   operations: FinancialOperation[];
+  tenantId?: string;
+  unifiedFinancials?: UnifiedAssociationFinancials;
   lang: Language;
   onAddContribution: (contribution: Omit<MemberContribution, 'id' | 'createdAt'>) => void;
   onUpdateContributionStatus: (id: string, status: ContributionStatus) => void;
@@ -48,8 +68,13 @@ interface ManageContributionsProps {
 
 export const ManageContributions: React.FC<ManageContributionsProps> = ({
   contributions,
+  campaignContributions = [],
+  contributionTypes = [],
+  campaigns = [],
   members,
   operations,
+  tenantId,
+  unifiedFinancials: propUnifiedFinancials,
   lang,
   onAddContribution,
   onUpdateContributionStatus,
@@ -84,30 +109,125 @@ export const ManageContributions: React.FC<ManageContributionsProps> = ({
   const [formStatus, setFormStatus] = useState<ContributionStatus>('pending');
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Statistics & Live Association Financial Balance
-  const financials = calculateFinancials(operations);
-  const currentAssociationBalance = financials.currentBalance;
-  const totalAmount = contributions
-    .filter((c) => !isUnpaidContributionStatus(c.status) && c.status !== 'rejected')
-    .reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
-  const totalCount = contributions.length;
-  const completedCount = contributions.filter((c) => c.status === 'completed').length;
-  const unpaidCount = contributions.filter((c) => isUnpaidContributionStatus(c.status)).length;
-  const pendingCount = contributions.filter((c) => c.status === 'pending').length;
+  // Single Unified Financial Engine (exact same source & figures as «سجل الشفافية المباشر»)
+  const effectiveUnified = useMemo(() => {
+    if (propUnifiedFinancials) return propUnifiedFinancials;
+    return calculateUnifiedAssociationFinancials({
+      operations,
+      contributions,
+      campaignContributions,
+      contributionTypes,
+      campaigns,
+      tenantId,
+    });
+  }, [
+    propUnifiedFinancials,
+    operations,
+    contributions,
+    campaignContributions,
+    contributionTypes,
+    campaigns,
+    tenantId,
+  ]);
 
-  // Filter & Sort logic
-  const filteredContributions = contributions.filter((item) => {
-    const matchesSearch = 
-      item.memberName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.memberCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (item.campaignTitle && item.campaignTitle.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (item.notes && item.notes.toLowerCase().includes(searchTerm.toLowerCase()));
+  const currentAssociationBalance = effectiveUnified.currentBalance;
+  // Strictly actually paid & approved/completed contributions (excludes «لم يتم الدفع», pending, and rejected)
+  const totalAmount = effectiveUnified.metrics.totalApprovedAmount;
+  const totalCount = effectiveUnified.metrics.totalOperationsCount;
+  const completedCount = effectiveUnified.metrics.approvedCount;
+  const unpaidCount = effectiveUnified.metrics.unpaidCount;
+  const pendingCount = effectiveUnified.metrics.pendingCount;
+
+  // Build unified display rows backed by MemberContribution / CampaignContribution IDs
+  const unifiedRows = useMemo<MemberContribution[]>(() => {
+    const mcById = new Map<string, MemberContribution>();
+    for (const mc of contributions || []) {
+      if (mc && mc.id) mcById.set(mc.id, mc);
+    }
+    const ccById = new Map<string, CampaignContribution>();
+    for (const cc of campaignContributions || []) {
+      if (cc && cc.id) ccById.set(cc.id, cc);
+    }
+
+    return effectiveUnified.contributions.map((uc) => {
+      const linkedMc = uc.sourceMemberContributionId
+        ? mcById.get(uc.sourceMemberContributionId)
+        : mcById.get(uc.id);
+      const linkedCc = uc.sourceCampaignContributionId
+        ? ccById.get(uc.sourceCampaignContributionId)
+        : ccById.get(uc.id);
+
+      const actionId = linkedMc?.id || linkedCc?.id || uc.id;
+      const normalizedStatus: ContributionStatus =
+        uc.status === 'approved' || uc.status === 'completed'
+          ? 'completed'
+          : uc.status === 'unpaid'
+          ? 'unpaid'
+          : uc.status === 'rejected'
+          ? 'rejected'
+          : 'pending';
+
+      const normalizedCategory: ContributionCategory =
+        uc.category === 'membership_fee' ||
+        uc.category === 'donation' ||
+        uc.category === 'project_support' ||
+        uc.category === 'other'
+          ? uc.category
+          : uc.sourceType === 'campaign'
+          ? 'donation'
+          : 'other';
+
+      return {
+        id: actionId,
+        memberId: linkedMc?.memberId || uc.memberId || `donor-${actionId}`,
+        memberCode:
+          linkedMc?.memberCode ||
+          uc.memberCode ||
+          (uc.sourceType === 'campaign' ? 'تبرع لحملة' : 'مساهمة عامة'),
+        memberName: linkedMc?.memberName || uc.rawDonorName || uc.donorName,
+        amount: uc.amount,
+        date: uc.date,
+        time: uc.time || linkedMc?.time,
+        createdAt: uc.createdAt,
+        status: normalizedStatus,
+        category: normalizedCategory,
+        paymentMethod: uc.paymentMethod,
+        notes: uc.notes || linkedMc?.notes,
+        proofImageUrl: linkedMc?.proofImageUrl || linkedCc?.proofImageUrl || uc.proofImageUrl,
+        receiptUrl: linkedMc?.receiptUrl || linkedCc?.receiptUrl || uc.receiptUrl,
+        financialOperationId: linkedMc?.financialOperationId || uc.financialOperationId,
+        campaignId: uc.campaignId || linkedMc?.campaignId || linkedCc?.campaignId,
+        campaignTitle: uc.campaignTitle || linkedMc?.campaignTitle || linkedCc?.campaignTitle,
+        contributionTypeName: uc.typeNameAr || linkedMc?.contributionTypeName,
+        isNegative: uc.isNegative,
+        amountSign: uc.amountSign,
+        tenantId: uc.tenantId,
+        associationId: uc.tenantId,
+      };
+    });
+  }, [effectiveUnified.contributions, contributions, campaignContributions]);
+
+  // Filter & Sort logic over unified rows
+  const filteredContributions = unifiedRows.filter((item) => {
+    const q = searchTerm.toLowerCase();
+    const matchesSearch =
+      !q ||
+      item.memberName.toLowerCase().includes(q) ||
+      item.memberCode.toLowerCase().includes(q) ||
+      (item.campaignTitle && item.campaignTitle.toLowerCase().includes(q)) ||
+      (item.contributionTypeName && item.contributionTypeName.toLowerCase().includes(q)) ||
+      (item.notes && item.notes.toLowerCase().includes(q));
 
     const matchesStatus =
       statusFilter === 'all' ||
       item.status === statusFilter ||
       ((statusFilter === 'approved' || statusFilter === 'unpaid') && isUnpaidContributionStatus(item.status));
-    const matchesCategory = categoryFilter === 'all' || item.category === categoryFilter;
+
+    const matchesCategory =
+      categoryFilter === 'all' ||
+      item.category === categoryFilter ||
+      (categoryFilter === 'donation' && Boolean(item.campaignTitle));
+
     const matchesPayment = paymentMethodFilter === 'all' || item.paymentMethod === paymentMethodFilter;
 
     return matchesSearch && matchesStatus && matchesCategory && matchesPayment;
@@ -121,8 +241,8 @@ export const ManageContributions: React.FC<ManageContributionsProps> = ({
         : a.memberName.localeCompare(b.memberName);
     }
     // Default: date
-    const dateA = new Date(a.createdAt || a.date).getTime();
-    const dateB = new Date(b.createdAt || b.date).getTime();
+    const dateA = new Date(a.createdAt || a.date).getTime() || 0;
+    const dateB = new Date(b.createdAt || b.date).getTime() || 0;
     return sortOrder === 'desc' ? dateB - dateA : dateA - dateB;
   });
 
@@ -258,8 +378,9 @@ export const ManageContributions: React.FC<ManageContributionsProps> = ({
 
   // Status badge helper
   const renderStatusBadge = (status: ContributionStatus, id: string) => {
-    const isHistoricalUnpaid = isUnpaidContributionStatus(status) || status === 'rejected';
-    const normalizedValue = isHistoricalUnpaid ? 'unpaid_historical' : status;
+    const isUnpaid = isUnpaidContributionStatus(status);
+    const isRejected = status === 'rejected';
+    const normalizedValue = isUnpaid ? 'unpaid' : status;
     return (
       <select
         value={normalizedValue}
@@ -273,18 +394,19 @@ export const ManageContributions: React.FC<ManageContributionsProps> = ({
         } ${
           status === 'completed'
             ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
-            : isHistoricalUnpaid
+            : isUnpaid || isRejected
             ? 'bg-rose-50 text-rose-800 border-rose-300 hover:bg-rose-100'
             : 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
         }`}
       >
-        {isHistoricalUnpaid && (
-          <option value="unpaid_historical" disabled hidden>
-            🔴 {t.contribStatusApproved || 'لم يتم الدفع'}
+        {isRejected && (
+          <option value="rejected" disabled hidden>
+            ❌ {t.contribStatusRejected || 'مرفوضة'}
           </option>
         )}
         <option value="completed">🟢 {t.contribStatusCompleted || 'مكتملة وموثقة'}</option>
         <option value="pending">⏳ {t.contribStatusPending || 'قيد المراجعة'}</option>
+        <option value="unpaid">🔴 {t.contribStatusUnpaid || 'لم يتم الدفع'}</option>
       </select>
     );
   };
@@ -355,7 +477,7 @@ export const ManageContributions: React.FC<ManageContributionsProps> = ({
             <div className="text-xs sm:text-sm font-bold text-slate-800 mt-2 flex flex-wrap items-center gap-2 justify-between">
               <span className="text-emerald-700">🟢 مكتملة: {completedCount}</span>
               {pendingCount > 0 && <span className="text-amber-700 font-bold">⏳ {t.contribStatusPending || 'قيد المراجعة'}: {pendingCount}</span>}
-              {unpaidCount > 0 && <span className="text-rose-700 text-xs">سجلات سابقة: {unpaidCount}</span>}
+              {unpaidCount > 0 && <span className="text-rose-700 font-bold">🔴 {t.contribStatusUnpaid || 'لم يتم الدفع'}: {unpaidCount}</span>}
             </div>
           </div>
         </div>
@@ -384,6 +506,7 @@ export const ManageContributions: React.FC<ManageContributionsProps> = ({
               <option value="all">{t.allStatuses || 'جميع الحالات'}</option>
               <option value="completed">{t.contribStatusCompleted || 'مكتملة وموثقة'}</option>
               <option value="pending">{t.contribStatusPending || 'قيد المراجعة'}</option>
+              <option value="unpaid">{t.contribStatusUnpaid || 'لم يتم الدفع'}</option>
             </select>
           </div>
 
@@ -703,6 +826,7 @@ export const ManageContributions: React.FC<ManageContributionsProps> = ({
                       >
                         <option value="pending">{t.contribStatusPending || 'قيد المراجعة'}</option>
                         <option value="completed">{t.contribStatusCompleted || 'مكتملة وموثقة'}</option>
+                        <option value="unpaid">{t.contribStatusUnpaid || 'لم يتم الدفع'}</option>
                       </select>
                     )}
                   </div>

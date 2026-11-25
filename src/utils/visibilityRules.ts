@@ -434,3 +434,17 @@ export function isCurrentBalanceVisibleForUser(options: {
   return Boolean(options.isAdmin || options.isMember);
 }
 
+/**
+ * Checks specifically whether the official financial report print action
+ * ("طباعة كشف مالي رسمي") inside the Live Transparency Ledger is permitted for the user.
+ * - Association Admin (verified session) or Logged-in Registered Member: Permitted.
+ * - Visitors / Public / Unregistered users: Strictly hidden and blocked.
+ */
+export function canPrintOfficialFinancialReport(options: {
+  isAdmin?: boolean;
+  isMember?: boolean;
+}): boolean {
+  return Boolean(options.isAdmin || options.isMember);
+}
+
+

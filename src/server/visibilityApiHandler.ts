@@ -1,6 +1,9 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 import fs from 'fs';
 import path from 'path';
+import { verifyAuthSessionToken, extractBearerTokenFromHeaders } from './authCrypto';
+import { normalizeTenantId } from './storageEngine';
+import { readTenantRecordsFromDisk } from './tenantRecordsApiHandler';
 
 interface VisibilityDatabase {
   [key: string]: any;
@@ -14,7 +17,7 @@ const DB_FILE = path.join(DB_DIR, 'section_visibility.json');
 const DEFAULT_VISIBILITY: Record<string, boolean> = {
   featured_activities: true,
   gateway_members: false,
-  board_members: true,
+  board_members: false,
   campaigns_section: true,
   gateway_ledger: true,
   members_voting_section: true,
@@ -36,6 +39,10 @@ const SERVER_SECTION_ALIASES: Record<string, string> = {
   current_balance: 'current_financial_balance',
   currentBalance: 'current_financial_balance',
   nav_balance_badge: 'current_financial_balance',
+  'board-members': 'board_members',
+  boardMembers: 'board_members',
+  board_member: 'board_members',
+  board_members_section: 'board_members',
 };
 
 let inMemoryVisibility: VisibilityDatabase | null = null;
@@ -56,7 +63,12 @@ export function loadVisibilityDatabase(): VisibilityDatabase {
       if (parsed && typeof parsed === 'object') {
         delete (parsed as any).pillars_section;
         delete (parsed as any).gateway_financials;
-        inMemoryVisibility = { ...DEFAULT_VISIBILITY, ...parsed, current_financial_balance: false };
+        inMemoryVisibility = {
+          ...DEFAULT_VISIBILITY,
+          ...parsed,
+          board_members: false,
+          current_financial_balance: false,
+        };
         return inMemoryVisibility;
       }
     }
@@ -66,6 +78,7 @@ export function loadVisibilityDatabase(): VisibilityDatabase {
 
   const initialDb: VisibilityDatabase = {
     ...DEFAULT_VISIBILITY,
+    board_members: false,
     current_financial_balance: false,
     lastUpdated: new Date().toISOString(),
     updatedBy: 'System Initialization',
@@ -83,6 +96,7 @@ export function saveVisibilityDatabase(db: VisibilityDatabase): boolean {
     }
     delete (db as any).pillars_section;
     delete (db as any).gateway_financials;
+    db.board_members = false;
     db.current_financial_balance = false;
     db.lastUpdated = new Date().toISOString();
     fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), 'utf-8');
@@ -103,21 +117,55 @@ export function isSectionAllowedOnServer(sectionId: string, req: IncomingMessage
     return false;
   }
 
-  // Check if caller is admin via header
-  const adminHeader = req.headers['x-admin-session'] as string | undefined;
-  if (adminHeader && adminHeader.trim().length > 0) {
-    return true;
+  const canonicalId = SERVER_SECTION_ALIASES[sectionId] || sectionId;
+  const headerTenant = (req.headers['x-tenant-id'] as string | undefined)?.trim();
+  const reqTenant = headerTenant ? normalizeTenantId(headerTenant) : '';
+
+  const token = extractBearerTokenFromHeaders(req.headers as Record<string, any>);
+  const payload = verifyAuthSessionToken(token);
+
+  let isVerifiedAdmin = false;
+  let isVerifiedActiveMember = false;
+
+  if (payload) {
+    const tokenTenant = payload.tenantId === '*' ? '*' : normalizeTenantId(payload.tenantId);
+    if (payload.role === 'master_super_admin') {
+      isVerifiedAdmin = true;
+    } else if (payload.role === 'admin') {
+      if (!reqTenant || tokenTenant === reqTenant) {
+        isVerifiedAdmin = true;
+      }
+    } else if (payload.role === 'sub_admin') {
+      const targetTenant = reqTenant || tokenTenant;
+      if (targetTenant && targetTenant !== '*' && tokenTenant === targetTenant) {
+        const rec = readTenantRecordsFromDisk(targetTenant);
+        const sub = (rec.subAdmins || []).find((s: any) => s && s.id === payload.subjectId);
+        if (sub && sub.status === 'active') {
+          isVerifiedAdmin = true;
+        }
+      }
+    } else if (payload.role === 'member') {
+      const targetTenant = reqTenant || tokenTenant;
+      if (targetTenant && targetTenant !== '*' && tokenTenant === targetTenant) {
+        const rec = readTenantRecordsFromDisk(targetTenant);
+        const liveMember = (rec.members || []).find((m: any) => m && m.id === payload.subjectId);
+        if (liveMember && liveMember.status === 'active') {
+          isVerifiedActiveMember = true;
+        }
+      }
+    }
   }
 
-  // Check if caller is logged-in member via header
-  const memberIdHeader = req.headers['x-member-id'] as string | undefined;
-  const memberCodeHeader = req.headers['x-member-code'] as string | undefined;
-  if ((memberIdHeader && memberIdHeader.trim().length > 0) || (memberCodeHeader && memberCodeHeader.trim().length > 0)) {
+  // Board members section is strictly reserved for verified active logged-in members and verified admins
+  if (canonicalId === 'board_members') {
+    return isVerifiedAdmin || isVerifiedActiveMember;
+  }
+
+  if (isVerifiedAdmin || isVerifiedActiveMember) {
     return true;
   }
 
   // For non-members, current_financial_balance is strictly forbidden
-  const canonicalId = SERVER_SECTION_ALIASES[sectionId] || sectionId;
   if (canonicalId === 'current_financial_balance') {
     return false;
   }
@@ -132,7 +180,7 @@ function sendJson(res: ServerResponse, statusCode: number, data: any) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-admin-session, x-member-id, x-member-code');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-tenant-id, x-admin-session, x-member-id, x-member-code');
   res.end(JSON.stringify(data));
 }
 
@@ -171,7 +219,7 @@ export async function handleVisibilityApi(req: IncomingMessage, res: ServerRespo
     res.statusCode = 204;
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-admin-session, x-member-id, x-member-code');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-tenant-id, x-admin-session, x-member-id, x-member-code');
     res.end();
     return true;
   }
@@ -184,7 +232,17 @@ export async function handleVisibilityApi(req: IncomingMessage, res: ServerRespo
     const queryIdx = url.indexOf('?');
     const queryString = queryIdx !== -1 ? url.slice(queryIdx + 1) : '';
     const params = new URLSearchParams(queryString);
-    const section = params.get('section') || '';
+    const section = (params.get('section') || params.get('sectionId') || '').trim();
+
+    if (!section) {
+      sendJson(res, 400, {
+        success: false,
+        statusCode: 400,
+        allowed: false,
+        error: 'يرجى تحديد معرف القسم المطلوب التحقق منه.',
+      });
+      return true;
+    }
 
     const allowed = isSectionAllowedOnServer(section, req);
 
@@ -222,6 +280,20 @@ export async function handleVisibilityApi(req: IncomingMessage, res: ServerRespo
 
   // 3. Update visibility configuration: POST or PUT /api/visibility
   if (method === 'POST' || method === 'PUT') {
+    const token = extractBearerTokenFromHeaders(req.headers as Record<string, any>);
+    const payload = verifyAuthSessionToken(token);
+    if (
+      !payload ||
+      (payload.role !== 'master_super_admin' && payload.role !== 'admin' && payload.role !== 'sub_admin')
+    ) {
+      sendJson(res, 403, {
+        success: false,
+        statusCode: 403,
+        error: 'Access Denied (403 Forbidden): تعديل صلاحيات ظهور الأقسام مقتصر على الإدارة فقط.',
+      });
+      return true;
+    }
+
     const adminHeader = req.headers['x-admin-session'] as string | undefined;
     let performedBy = 'مدير النظام (Admin)';
 

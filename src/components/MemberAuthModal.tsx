@@ -30,6 +30,7 @@ interface MemberAuthModalProps {
   members: Member[];
   subAdmins?: SubAdmin[];
   lang: Language;
+  activeTenantId?: string;
   onOpenRegisterModal?: () => void;
 }
 
@@ -41,6 +42,7 @@ export const MemberAuthModal: React.FC<MemberAuthModalProps> = ({
   members,
   subAdmins = [],
   lang,
+  activeTenantId,
   onOpenRegisterModal,
 }) => {
   const t = translations[lang] as any;
@@ -87,7 +89,57 @@ export const MemberAuthModal: React.FC<MemberAuthModalProps> = ({
     setIsLoading(true);
 
     try {
-      // 1. Check if the entered username belongs to a Secondary Admin (أدمن من الدرجة الثانية) in this association
+      // 1. Authoritative server-side login first so server Bearer authToken is issued
+      const cleanTenant =
+        activeTenantId && activeTenantId !== 'portal' ? activeTenantId : 'tenant_nour';
+      const platformRes = await authenticatePlatformAccount(
+        cleanIdentifier,
+        cleanPass,
+        cleanTenant
+      );
+
+      if (platformRes.success) {
+        if (platformRes.role === 'member' && platformRes.member) {
+          onLoginSuccess(platformRes.member, platformRes.tenant);
+          onClose();
+          return;
+        }
+        if (platformRes.role === 'admin' && platformRes.session && onAdminLoginSuccess) {
+          onAdminLoginSuccess(platformRes.session, platformRes.tenant);
+          onClose();
+          return;
+        }
+      }
+
+      if (platformRes.errorCode === 'INACTIVE' || platformRes.errorCode === 'WRONG_PASSWORD') {
+        setErrorMessage(platformRes.error || 'فشل تسجيل الدخول.');
+        setErrorCode(platformRes.errorCode);
+        return;
+      }
+
+      // 2. If user belongs to another association on the platform, check globally
+      if (platformRes.errorCode === 'TENANT_MISMATCH' || platformRes.errorCode === 'USER_NOT_FOUND') {
+        const crossTenantRes = await authenticatePlatformAccount(cleanIdentifier, cleanPass);
+        if (crossTenantRes.success) {
+          if (crossTenantRes.role === 'member' && crossTenantRes.member) {
+            onLoginSuccess(crossTenantRes.member, crossTenantRes.tenant);
+            onClose();
+            return;
+          }
+          if (crossTenantRes.role === 'admin' && crossTenantRes.session && onAdminLoginSuccess) {
+            onAdminLoginSuccess(crossTenantRes.session, crossTenantRes.tenant);
+            onClose();
+            return;
+          }
+        }
+        if (crossTenantRes.errorCode === 'INACTIVE' || crossTenantRes.errorCode === 'WRONG_PASSWORD') {
+          setErrorMessage(crossTenantRes.error || 'فشل تسجيل الدخول.');
+          setErrorCode(crossTenantRes.errorCode);
+          return;
+        }
+      }
+
+      // 3. Offline / unsynced fallback ONLY if server was unreachable or user not synced yet
       const storedSubs = getStoredSubAdmins();
       const subMap = new Map<string, SubAdmin>();
       for (const item of [...storedSubs, ...(subAdmins || [])]) {
@@ -120,7 +172,6 @@ export const MemberAuthModal: React.FC<MemberAuthModalProps> = ({
         return;
       }
 
-      // 2. Authenticate as an Association Member (منخرط)
       const result: AuthResult = await authenticateMember(cleanIdentifier, cleanPass, members);
 
       if (result.success && result.member) {
@@ -129,28 +180,12 @@ export const MemberAuthModal: React.FC<MemberAuthModalProps> = ({
         return;
       }
 
-      // 3. If not found in current association's local members, check across the platform (members & admins)
-      if (result.errorCode === 'NOT_FOUND') {
-        const platformRes = await authenticatePlatformAccount(cleanIdentifier, cleanPass);
-        if (platformRes.success && platformRes.role === 'member' && platformRes.member && platformRes.tenant) {
-          onLoginSuccess(platformRes.member, platformRes.tenant);
-          onClose();
-          return;
-        }
-        if (platformRes.success && platformRes.role === 'admin' && platformRes.session && onAdminLoginSuccess) {
-          onAdminLoginSuccess(platformRes.session, platformRes.tenant);
-          onClose();
-          return;
-        }
-        if (platformRes.errorCode === 'INACTIVE' || platformRes.errorCode === 'WRONG_PASSWORD') {
-          setErrorMessage(platformRes.error || result.error || 'فشل تسجيل الدخول.');
-          setErrorCode(platformRes.errorCode);
-          return;
-        }
-      }
-
-      setErrorMessage(result.error || 'فشل تسجيل الدخول. يرجى التحقق من صحة اسم المستخدم وكلمة المرور.');
-      setErrorCode(result.errorCode || 'UNKNOWN');
+      setErrorMessage(
+        result.error ||
+          platformRes.error ||
+          'فشل تسجيل الدخول. يرجى التحقق من صحة اسم المستخدم وكلمة المرور.'
+      );
+      setErrorCode(result.errorCode || platformRes.errorCode || 'UNKNOWN');
     } catch (err) {
       setErrorMessage('حدث خطأ غير متوقع أثناء التحقق. يرجى المحاولة لاحقًا.');
     } finally {

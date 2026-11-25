@@ -334,6 +334,7 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
   };
 
   // Compute active fields directly from saved registrationFields settings, respecting enabled/disabled toggles for every field
+  const PUBLIC_HIDDEN_FIELD_IDS = new Set(['cin', 'joinDate', 'renewalDate']);
   const activeFields = (() => {
     const sourceList =
       Array.isArray(registrationFields) && registrationFields.length > 0
@@ -341,7 +342,13 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
         : getStoredRegistrationFields();
     const normalized = ensureMandatoryPasswordFields(sourceList);
     return normalized
-      .filter((f) => f && f.enabled !== false && (f as any).enabled !== 'false')
+      .filter((f) => {
+        if (!f || f.enabled === false || (f as any).enabled === 'false') return false;
+        if (isPublicRegistration && (PUBLIC_HIDDEN_FIELD_IDS.has(f.id) || PUBLIC_HIDDEN_FIELD_IDS.has(f.name))) {
+          return false;
+        }
+        return true;
+      })
       .sort((a, b) => a.order - b.order);
   })();
 
@@ -653,11 +660,14 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
       let finalHash = editingMember?.passwordHash;
       let finalSalt = editingMember?.passwordSalt;
 
+      let effectivePlainPass: string | undefined;
       if (isSettingNewPassword && password.trim()) {
+        effectivePlainPass = password.trim();
         finalSalt = generateSalt(16);
-        finalHash = await hashPasswordWithSalt(password.trim(), finalSalt);
+        finalHash = await hashPasswordWithSalt(effectivePlainPass, finalSalt);
       } else if (!editingMember && !finalHash) {
         const defaultPass = phone.trim() || '123456';
+        effectivePlainPass = defaultPass;
         finalSalt = generateSalt(16);
         finalHash = await hashPasswordWithSalt(defaultPass, finalSalt);
       }
@@ -688,7 +698,7 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
         passwordHash: finalHash,
         passwordSalt: finalSalt,
         lastLoginDate: editingMember?.lastLoginDate,
-      });
+      }, effectivePlainPass);
 
       onClose();
     } catch (err: any) {

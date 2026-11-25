@@ -53,6 +53,8 @@ interface ManageOperationsProps {
   totalIncomes: number;
   totalExpenses: number;
   currentBalance: number;
+  approvedIncomesCount?: number;
+  approvedExpensesCount?: number;
   lang?: 'ar' | 'fr' | 'en';
 }
 
@@ -71,6 +73,8 @@ export const ManageOperations: React.FC<ManageOperationsProps> = ({
   totalIncomes,
   totalExpenses,
   currentBalance,
+  approvedIncomesCount,
+  approvedExpensesCount,
 }) => {
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState('');
@@ -371,7 +375,7 @@ export const ManageOperations: React.FC<ManageOperationsProps> = ({
               <span className="text-xs font-normal text-emerald-700 mr-1">د.م</span>
             </div>
             <span className="text-[10px] text-emerald-600 font-medium block mt-1">
-              {operations.filter((o) => o.type === 'income').length} عمليات مدخول مسجلة
+              {approvedIncomesCount ?? operations.filter((o) => o.type === 'income').length} عملية معتمدة ومستخلصة
             </span>
           </div>
 
@@ -388,7 +392,7 @@ export const ManageOperations: React.FC<ManageOperationsProps> = ({
               <span className="text-xs font-normal text-rose-700 mr-1">د.م</span>
             </div>
             <span className="text-[10px] text-rose-600 font-medium block mt-1">
-              {operations.filter((o) => o.type === 'expense').length} عمليات مصروف خيري
+              {approvedExpensesCount ?? operations.filter((o) => o.type === 'expense' && !o.isUnpaidContributionDeduction && !String(o.id || '').startsWith('op-unpaid-deduction-')).length} عمليات مصروف خيري معتمدة
             </span>
           </div>
 

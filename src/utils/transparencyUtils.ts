@@ -4,14 +4,21 @@ import {
   ContributionTypeConfig,
   PaymentMethodType,
   DonationCampaign,
+  FinancialOperation,
 } from '../types';
 import { getAllGlobalContributionTypesIncludingDeleted } from '../contributionTypesStorage';
+import { calculateFinancials } from '../storage';
 
 export interface UnifiedTransparencyContribution {
   id: string;
   sourceType: 'campaign' | 'general' | 'membership';
+  sourceMemberContributionId?: string;
+  sourceCampaignContributionId?: string;
   amount: number;
   donorName: string;
+  rawDonorName?: string;
+  memberCode?: string;
+  memberId?: string;
   isAnonymous: boolean;
   category: string;
   typeNameAr: string;
@@ -27,13 +34,16 @@ export interface UnifiedTransparencyContribution {
   notes?: string;
   receiptNumber?: string;
   financialOperationId?: string;
+  proofImageUrl?: string;
+  receiptUrl?: string;
   tenantId: string;
   associationId?: string;
   isFinancial: boolean;
+  isPaidCompleted?: boolean;
 }
 
 export interface TransparencyMetrics {
-  totalApprovedAmount: number; // ONLY approved/completed
+  totalApprovedAmount: number; // ONLY actually paid & completed contributions
   approvedCount: number;
   totalPendingAmount: number; // Pending amount shown separately
   pendingCount: number;
@@ -44,6 +54,143 @@ export interface TransparencyMetrics {
   campaignContributionsCount: number;
   generalContributionsCount: number;
   uniqueDonorsCount: number;
+}
+
+const UNPAID_STATUS_VALUES = new Set([
+  'unpaid',
+  'approved', // In platform schema & translations, 'approved' on contributions maps to «لم يتم الدفع»
+  'not_paid',
+  'unpaid_historical',
+  'لم يتم الدفع',
+  'غير مدفوع',
+  'غير مدفوعة',
+]);
+
+const UNPAID_PAYMENT_STATUS_VALUES = new Set([
+  'unpaid',
+  'not_paid',
+  'unpaid_historical',
+  'failed',
+  'refunded',
+  'cancelled',
+  'canceled',
+  'rejected',
+  'لم يتم الدفع',
+  'غير مدفوع',
+  'غير مدفوعة',
+]);
+
+const PENDING_STATUS_VALUES = new Set([
+  'pending',
+  'pending_payment',
+  'pending_verification',
+  'under_review',
+  'in_review',
+  'review',
+  'قيد المراجعة',
+  'قيد التحقق',
+  'قيد المعالجة',
+]);
+
+const REJECTED_STATUS_VALUES = new Set([
+  'rejected',
+  'cancelled',
+  'canceled',
+  'ملغى',
+  'ملغاة',
+  'مرفوض',
+  'مرفوضة',
+]);
+
+const PAID_COMPLETED_STATUS_VALUES = new Set([
+  'completed',
+  'paid',
+  'confirmed',
+  'verified',
+  'settled',
+  'مكتمل',
+  'مكتملة',
+  'مدفوع',
+  'مدفوعة',
+]);
+
+type ContributionLikeRecord = {
+  status?: string | null;
+  paymentStatus?: string | null;
+  payment_status?: string | null;
+  isPaid?: boolean;
+  paid?: boolean;
+  isNegative?: boolean;
+  amountSign?: '+' | '-' | string;
+  amount?: number | string;
+  isFinancial?: boolean;
+};
+
+/**
+ * Resolves the true payment state of a contribution record strictly from its database payment fields and status.
+ * Guarantees that «لم يتم الدفع» (unpaid / approved / isNegative / amountSign === '-' / paymentStatus === 'unpaid' / isPaid === false)
+ * is NEVER treated as paid & completed.
+ */
+export function resolveActualPaymentState(
+  record: ContributionLikeRecord | null | undefined,
+  isTypeDeleted: boolean = false
+): 'completed' | 'pending' | 'unpaid' | 'rejected' {
+  if (!record) return 'unpaid';
+
+  const rawStatus = String(record.status ?? '').trim().toLowerCase();
+  const rawPaymentStatus = String(record.paymentStatus ?? record.payment_status ?? '').trim().toLowerCase();
+
+  // 1. Explicit rejected/cancelled status (checked first so rejected items never inflate unpaid totals)
+  if (REJECTED_STATUS_VALUES.has(rawStatus) || REJECTED_STATUS_VALUES.has(rawPaymentStatus)) {
+    return 'rejected';
+  }
+
+  // 2. Explicit negative / deduction signs always indicate unpaid («لم يتم الدفع»)
+  if (record.isNegative === true || record.amountSign === '-') {
+    return 'unpaid';
+  }
+
+  // 3. Explicit paymentStatus field takes precedence over generic status when present
+  if (rawPaymentStatus) {
+    if (UNPAID_PAYMENT_STATUS_VALUES.has(rawPaymentStatus)) {
+      return 'unpaid';
+    }
+    if (PENDING_STATUS_VALUES.has(rawPaymentStatus)) {
+      return isTypeDeleted ? 'unpaid' : 'pending';
+    }
+  }
+
+  // 4. Explicit unpaid status (includes 'unpaid' and legacy 'approved' which means «لم يتم الدفع»)
+  if (UNPAID_STATUS_VALUES.has(rawStatus)) {
+    return 'unpaid';
+  }
+
+  // 5. Pending with deleted contribution type becomes unpaid
+  if ((PENDING_STATUS_VALUES.has(rawStatus) || !rawStatus) && isTypeDeleted) {
+    return 'unpaid';
+  }
+
+  // 6. Pending / under review status -> NOT paid yet (and distinct from explicit «لم يتم الدفع»)
+  if (PENDING_STATUS_VALUES.has(rawStatus)) {
+    return 'pending';
+  }
+
+  // 7. Explicit boolean non-payment flags prevent any non-pending/completed record from counting as paid
+  if (record.isPaid === false || record.paid === false) {
+    return 'unpaid';
+  }
+
+  // 8. Strictly paid & completed ONLY when status is explicitly completed/paid
+  //    AND paymentStatus (if present) is also explicitly paid/confirmed
+  const hasPaidStatus = PAID_COMPLETED_STATUS_VALUES.has(rawStatus);
+  const hasValidPaymentStatus = !rawPaymentStatus || PAID_COMPLETED_STATUS_VALUES.has(rawPaymentStatus);
+  const numericAmount = Number(record.amount);
+
+  if (hasPaidStatus && hasValidPaymentStatus && Number.isFinite(numericAmount) && numericAmount > 0) {
+    return 'completed';
+  }
+
+  return 'pending';
 }
 
 /**
@@ -106,7 +253,7 @@ export function getPaymentMethodArabicLabel(method?: PaymentMethodType | string)
 /**
  * Unifies, deduplicates, and filters contributions for the Live Transparency Portal
  * Enforces strict multi-tenant isolation, guarantees no duplication,
- * and calculates verified totals.
+ * and calculates verified totals strictly from actually paid & completed contributions.
  */
 export function unifyAndDeduplicateContributions(
   memberContributions: MemberContribution[] = [],
@@ -154,15 +301,19 @@ export function unifyAndDeduplicateContributions(
     }
   }
 
-  // Index memberContributions by ID for fast lookup
+  // Index memberContributions by ID and financialOperationId for reliable lookup
   const tenantMemberContribs = (memberContributions || []).filter((mc) => {
     if (!mc || !mc.id) return false;
     const mcTenant = mc.tenantId || mc.associationId || 'tenant_nour';
     return cleanTenant === 'portal' || mcTenant === cleanTenant;
   });
   const memberContribById = new Map<string, MemberContribution>();
+  const memberContribByOpId = new Map<string, MemberContribution>();
   for (const mc of tenantMemberContribs) {
     memberContribById.set(mc.id, mc);
+    if (mc.financialOperationId) {
+      memberContribByOpId.set(mc.financialOperationId, mc);
+    }
   }
 
   // 1. Process Campaign Contributions
@@ -194,50 +345,59 @@ export function unifyAndDeduplicateContributions(
       deletedTypeNames.has(typeName.trim());
 
     const linkedMc =
-      memberContribById.get(`contrib-don-${cc.id}`) || memberContribById.get(cc.id);
+      memberContribById.get(`contrib-don-${cc.id}`) ||
+      memberContribById.get(cc.id) ||
+      memberContribByOpId.get(`op-camp-${cc.id}`);
 
-    const isExplicitlyUnpaid =
-      cc.status === 'unpaid' ||
-      cc.isNegative === true ||
-      cc.amountSign === '-' ||
-      (linkedMc &&
-        (linkedMc.status === 'unpaid' ||
-          linkedMc.status === 'approved' ||
-          linkedMc.isNegative === true ||
-          linkedMc.amountSign === '-'));
+    const ccPaymentState = resolveActualPaymentState(cc as ContributionLikeRecord, isTypeDeleted);
+    const linkedMcPaymentState = linkedMc
+      ? resolveActualPaymentState(linkedMc as ContributionLikeRecord, isTypeDeleted)
+      : null;
 
+    // Strict rule: if either the campaign record OR its linked member contribution is unpaid/rejected,
+    // it MUST NEVER be counted as paid & completed.
     let normalizedStatus: 'completed' | 'approved' | 'pending' | 'unpaid' | 'rejected' = 'pending';
     let isNegative = false;
     let amountSign: '+' | '-' = '+';
+    let isPaidCompleted = false;
 
-    if (
-      isExplicitlyUnpaid ||
-      ((cc.status === 'pending' || cc.status === 'unpaid') && isTypeDeleted)
-    ) {
+    if (ccPaymentState === 'unpaid' || linkedMcPaymentState === 'unpaid') {
       normalizedStatus = 'unpaid';
       isNegative = true;
       amountSign = '-';
-    } else if (cc.status === 'completed' || cc.status === 'approved') {
-      normalizedStatus = 'approved';
-      isNegative = false;
-      amountSign = '+';
-    } else if ((cc.status as any) === 'rejected') {
+      isPaidCompleted = false;
+    } else if (ccPaymentState === 'rejected' || linkedMcPaymentState === 'rejected') {
       normalizedStatus = 'rejected';
       isNegative = true;
       amountSign = '-';
+      isPaidCompleted = false;
+    } else if (
+      ccPaymentState === 'completed' &&
+      (!linkedMcPaymentState || linkedMcPaymentState === 'completed')
+    ) {
+      normalizedStatus = 'completed';
+      isNegative = false;
+      amountSign = '+';
+      isPaidCompleted = cc.isFinancial !== false && Number(cc.amount) > 0;
     } else {
       normalizedStatus = 'pending';
       isNegative = false;
       amountSign = '+';
+      isPaidCompleted = false;
     }
 
     const unified: UnifiedTransparencyContribution = {
       id: cc.id,
       sourceType: 'campaign',
+      sourceMemberContributionId: linkedMc?.id,
+      sourceCampaignContributionId: cc.id,
       amount: Math.abs(Number(cc.amount) || 0),
       donorName: isAnon ? 'فاعل خير (معفى من الظهور)' : cc.donorName.trim(),
+      rawDonorName: linkedMc?.memberName || (isAnon ? 'فاعل خير (معفى من الظهور)' : cc.donorName.trim()),
+      memberCode: linkedMc?.memberCode || (isAnon ? 'فاعل خير' : 'متبرع'),
+      memberId: linkedMc?.memberId,
       isAnonymous: isAnon,
-      category: cc.contributionTypeId || 'campaign_donation',
+      category: linkedMc?.category || cc.contributionTypeId || 'campaign_donation',
       typeNameAr: typeName,
       campaignId: cc.campaignId,
       campaignTitle: resolvedCampaignTitle,
@@ -248,12 +408,15 @@ export function unifyAndDeduplicateContributions(
       isNegative,
       amountSign,
       paymentMethod: cc.paymentMethod || 'bank_transfer',
-      notes: cc.notes || '',
+      notes: linkedMc?.notes || cc.notes || '',
       receiptNumber: `REC-CAMP-${cc.id.slice(-6).toUpperCase()}`,
-      financialOperationId: `op-camp-${cc.id}`,
+      financialOperationId: linkedMc?.financialOperationId || `op-camp-${cc.id}`,
+      proofImageUrl: linkedMc?.proofImageUrl || cc.proofImageUrl || linkedMc?.receiptUrl || cc.receiptUrl,
+      receiptUrl: linkedMc?.receiptUrl || cc.receiptUrl || linkedMc?.proofImageUrl || cc.proofImageUrl,
       tenantId: cleanTenant,
       associationId: cleanTenant,
       isFinancial: cc.isFinancial !== false,
+      isPaidCompleted,
     };
 
     resultMap.set(cc.id, unified);
@@ -264,8 +427,12 @@ export function unifyAndDeduplicateContributions(
     // Check if this member contribution corresponds to an existing campaign contribution
     let matchedExistingKey: string | null = null;
 
-    // Check explicit link IDs
-    if (mc.id.startsWith('contrib-don-')) {
+    // Check explicit link IDs (exact match or contrib-don- prefix)
+    if (resultMap.has(mc.id)) {
+      matchedExistingKey = mc.id;
+    }
+
+    if (!matchedExistingKey && mc.id.startsWith('contrib-don-')) {
       const campIdCandidate = mc.id.replace('contrib-don-', '');
       if (resultMap.has(campIdCandidate)) {
         matchedExistingKey = campIdCandidate;
@@ -306,33 +473,43 @@ export function unifyAndDeduplicateContributions(
         (deletedTypeIds.has(mc.category.trim()) || deletedTypeNames.has(mc.category.trim()))) ||
       deletedTypeNames.has(typeName.trim());
 
-    // Note: in storage.ts, mc.status === 'unpaid' || mc.status === 'approved' means 'لم يتم الدفع'
-    const isMcUnpaid =
-      mc.status === 'unpaid' ||
-      mc.status === 'approved' ||
-      mc.isNegative === true ||
-      mc.amountSign === '-' ||
-      (mc.status === 'pending' && isMcTypeDeleted);
+    const mcPaymentState = resolveActualPaymentState(mc as ContributionLikeRecord, isMcTypeDeleted);
 
     if (matchedExistingKey) {
       // Merge additional metadata if available
       const existing = resultMap.get(matchedExistingKey)!;
+      if (!existing.sourceMemberContributionId) existing.sourceMemberContributionId = mc.id;
+      if (!existing.memberCode && mc.memberCode) existing.memberCode = mc.memberCode;
+      if (!existing.memberId && mc.memberId) existing.memberId = mc.memberId;
+      if (!existing.rawDonorName && mc.memberName) existing.rawDonorName = mc.memberName;
       if (mc.notes && !existing.notes) existing.notes = mc.notes;
+      if (mc.proofImageUrl && !existing.proofImageUrl) existing.proofImageUrl = mc.proofImageUrl;
+      if (mc.receiptUrl && !existing.receiptUrl) existing.receiptUrl = mc.receiptUrl;
       if (mc.financialOperationId && !existing.financialOperationId) {
         existing.financialOperationId = mc.financialOperationId;
       }
-      if (isMcUnpaid) {
+      if (mcPaymentState === 'unpaid') {
         existing.status = 'unpaid';
         existing.isNegative = true;
         existing.amountSign = '-';
-      } else if (mc.status === 'completed' && existing.status !== 'unpaid') {
-        existing.status = 'approved';
-        existing.isNegative = false;
-        existing.amountSign = '+';
-      } else if (mc.status === 'rejected') {
+        existing.isPaidCompleted = false;
+      } else if (mcPaymentState === 'rejected') {
         existing.status = 'rejected';
         existing.isNegative = true;
         existing.amountSign = '-';
+        existing.isPaidCompleted = false;
+      } else if (mcPaymentState === 'pending') {
+        if (existing.status !== 'unpaid' && existing.status !== 'rejected') {
+          existing.status = 'pending';
+          existing.isNegative = false;
+          existing.amountSign = '+';
+          existing.isPaidCompleted = false;
+        }
+      } else if (mcPaymentState === 'completed' && existing.status !== 'unpaid' && existing.status !== 'rejected') {
+        existing.status = 'completed';
+        existing.isNegative = false;
+        existing.amountSign = '+';
+        existing.isPaidCompleted = existing.isFinancial !== false && Number(existing.amount) > 0;
       }
       continue;
     }
@@ -348,23 +525,28 @@ export function unifyAndDeduplicateContributions(
     let normalizedStatus: 'completed' | 'approved' | 'pending' | 'unpaid' | 'rejected' = 'pending';
     let isNegative = false;
     let amountSign: '+' | '-' = '+';
+    let isPaidCompleted = false;
 
-    if (isMcUnpaid) {
+    if (mcPaymentState === 'unpaid') {
       normalizedStatus = 'unpaid';
       isNegative = true;
       amountSign = '-';
-    } else if (mc.status === 'completed') {
-      normalizedStatus = 'approved';
-      isNegative = false;
-      amountSign = '+';
-    } else if (mc.status === 'rejected') {
+      isPaidCompleted = false;
+    } else if (mcPaymentState === 'rejected') {
       normalizedStatus = 'rejected';
       isNegative = true;
       amountSign = '-';
+      isPaidCompleted = false;
+    } else if (mcPaymentState === 'completed') {
+      normalizedStatus = 'completed';
+      isNegative = false;
+      amountSign = '+';
+      isPaidCompleted = Number(mc.amount) > 0;
     } else {
       normalizedStatus = 'pending';
       isNegative = false;
       amountSign = '+';
+      isPaidCompleted = false;
     }
 
     const sourceType: 'campaign' | 'general' | 'membership' = mc.campaignId
@@ -378,12 +560,16 @@ export function unifyAndDeduplicateContributions(
     const unified: UnifiedTransparencyContribution = {
       id: mc.id,
       sourceType,
+      sourceMemberContributionId: mc.id,
       amount: Math.abs(Number(mc.amount) || 0),
       donorName: isAnon
         ? 'فاعل خير (معفى من الظهور)'
         : mc.memberCode
         ? `${mc.memberName.trim()} (${mc.memberCode})`
         : mc.memberName.trim(),
+      rawDonorName: isAnon ? 'فاعل خير (معفى من الظهور)' : mc.memberName.trim(),
+      memberCode: mc.memberCode,
+      memberId: mc.memberId,
       isAnonymous: isAnon,
       category: mc.category,
       typeNameAr: typeName,
@@ -399,9 +585,12 @@ export function unifyAndDeduplicateContributions(
       notes: mc.notes || '',
       receiptNumber: `REC-${mc.id.slice(-6).toUpperCase()}`,
       financialOperationId: mc.financialOperationId,
+      proofImageUrl: mc.proofImageUrl || mc.receiptUrl,
+      receiptUrl: mc.receiptUrl || mc.proofImageUrl,
       tenantId: cleanTenant,
       associationId: cleanTenant,
       isFinancial: true,
+      isPaidCompleted,
     };
 
     resultMap.set(mc.id, unified);
@@ -415,17 +604,33 @@ export function unifyAndDeduplicateContributions(
   });
 
   // Calculate strict financial metrics
-  // RULE: Only approved & completed contributions calculate into total funds collected!
+  // RULE: ONLY actually paid & completed financial contributions calculate into total funds collected!
+  // All unpaid («لم يتم الدفع»), pending, rejected, negative, or non-financial records are strictly excluded.
   const approvedList = contributionsList.filter(
-    (c) => c.status === 'completed' || c.status === 'approved'
+    (c) =>
+      c.isPaidCompleted === true &&
+      c.status === 'completed' &&
+      !c.isNegative &&
+      c.amountSign === '+' &&
+      c.isFinancial !== false &&
+      Number.isFinite(Number(c.amount)) &&
+      Number(c.amount) > 0
   );
   const pendingList = contributionsList.filter((c) => c.status === 'pending');
-  const unpaidList = contributionsList.filter((c) => c.status === 'unpaid');
+  const unpaidList = contributionsList.filter(
+    (c) => c.status === 'unpaid' && c.isPaidCompleted !== true
+  );
   const rejectedList = contributionsList.filter((c) => c.status === 'rejected');
 
-  const totalApprovedAmount = approvedList.reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
-  const totalPendingAmount = pendingList.reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
-  const totalUnpaidAmount = unpaidList.reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+  const totalApprovedAmount = approvedList.reduce((sum, c) => sum + Math.abs(Number(c.amount) || 0), 0);
+  const totalPendingAmount = pendingList.reduce((sum, c) => sum + Math.abs(Number(c.amount) || 0), 0);
+  const totalUnpaidAmount = unpaidList.reduce(
+    (sum, c) =>
+      c.isFinancial !== false && Number.isFinite(Number(c.amount)) && Math.abs(Number(c.amount)) > 0
+        ? sum + Math.abs(Number(c.amount))
+        : sum,
+    0
+  );
 
   const campaignContribsCount = contributionsList.filter((c) => c.sourceType === 'campaign').length;
   const generalContribsCount = contributionsList.filter((c) => c.sourceType !== 'campaign').length;
@@ -456,4 +661,185 @@ export function unifyAndDeduplicateContributions(
     metrics,
   };
 }
+
+export interface ApprovedExpensesResult {
+  approvedCompletedExpenses: FinancialOperation[];
+  totalApprovedExpenses: number;
+  approvedExpensesCount: number;
+}
+
+const EXPENSE_EXCLUDED_STATUSES = new Set([
+  'pending',
+  'under_review',
+  'in_review',
+  'review',
+  'rejected',
+  'incomplete',
+  'unpaid',
+  'cancelled',
+  'canceled',
+  'draft',
+  'failed',
+  'قيد المراجعة',
+  'قيد التحقق',
+  'مرفوض',
+  'مرفوضة',
+  'غير مكتمل',
+  'غير مكتملة',
+  'ملغى',
+  'ملغاة',
+]);
+
+const EXPENSE_APPROVED_STATUSES = new Set([
+  'approved',
+  'completed',
+  'paid',
+  'confirmed',
+  'verified',
+  'settled',
+  'معتمد',
+  'معتمدة',
+  'مكتمل',
+  'مكتملة',
+]);
+
+/**
+ * Calculates approved & completed actual expenses strictly from verified financial operations.
+ * Excludes unpaid-contribution deduction bookkeeping entries, pending/rejected/cancelled/draft expenses,
+ * soft-deleted items, and enforces strict multi-tenant isolation.
+ */
+export function calculateApprovedExpenses(
+  operations: FinancialOperation[] = [],
+  tenantId: string = 'tenant_nour'
+): ApprovedExpensesResult {
+  const cleanTenant = (tenantId || 'tenant_nour').trim();
+
+  const approvedCompletedExpenses = (operations || []).filter((op) => {
+    if (!op || !op.id || op.type !== 'expense') return false;
+    if (op.isUnpaidContributionDeduction || String(op.id).startsWith('op-unpaid-deduction-')) {
+      return false;
+    }
+
+    const opTenant = (op.tenantId || op.associationId || 'tenant_nour').trim();
+    if (cleanTenant !== 'portal' && opTenant !== cleanTenant) {
+      return false;
+    }
+
+    const rawStatus = String(op.status ?? '').trim().toLowerCase();
+    if (rawStatus) {
+      if (EXPENSE_EXCLUDED_STATUSES.has(rawStatus) || !EXPENSE_APPROVED_STATUSES.has(rawStatus)) {
+        return false;
+      }
+    }
+
+    const opFlags = op as FinancialOperation & {
+      isDeleted?: boolean;
+      isRejected?: boolean;
+      isPending?: boolean;
+      isApproved?: boolean;
+      isCompleted?: boolean;
+    };
+    if (
+      opFlags.isDeleted === true ||
+      opFlags.isRejected === true ||
+      opFlags.isPending === true ||
+      opFlags.isApproved === false ||
+      opFlags.isCompleted === false
+    ) {
+      return false;
+    }
+
+    const amt = Number(op.amount);
+    return Number.isFinite(amt) && amt > 0;
+  });
+
+  const totalApprovedExpenses = approvedCompletedExpenses.reduce(
+    (sum, op) => sum + Math.abs(Number(op.amount) || 0),
+    0
+  );
+
+  return {
+    approvedCompletedExpenses,
+    totalApprovedExpenses,
+    approvedExpensesCount: approvedCompletedExpenses.length,
+  };
+}
+
+export interface UnifiedAssociationFinancials {
+  /** Unified approved & collected incomes/contributions (identical across Admin, Contributions Ledger & Transparency Portal) */
+  totalIncomes: number;
+  /** Unified approved & completed actual expenses (identical across Admin & Transparency Portal) */
+  totalExpenses: number;
+  /** Explicit alias for approved & collected incomes */
+  totalApprovedIncomes: number;
+  /** Explicit alias for approved & completed actual expenses */
+  totalApprovedExpenses: number;
+  approvedCompletedExpenses: FinancialOperation[];
+  approvedExpensesCount: number;
+  /** Raw operational ledger sums backing operational balance equation */
+  operationalIncomes: number;
+  operationalExpenses: number;
+  currentBalance: number;
+  processedOperations: FinancialOperation[];
+  expenseByCategory: Record<string, number>;
+  contributions: UnifiedTransparencyContribution[];
+  metrics: TransparencyMetrics;
+}
+
+/**
+ * Single Unified Financial Source across the Admin Dashboard («لوحة الإدارة»),
+ * Operations Management («إدارة العمليات المالية»), Admin Contributions Ledger («سجل المساهمات والانخراطات»),
+ * Live Transparency Portal («بوابة سجل الشفافية المباشر»), Financial Dashboard, and Official Statements.
+ * Guarantees 100% identical `totalIncomes`, `totalExpenses`, `currentBalance`, and `metrics.totalApprovedAmount`
+ * across all sections for tenant_nour and every association on the platform.
+ */
+export function calculateUnifiedAssociationFinancials(params: {
+  operations?: FinancialOperation[];
+  contributions?: MemberContribution[];
+  campaignContributions?: CampaignContribution[];
+  contributionTypes?: ContributionTypeConfig[];
+  campaigns?: DonationCampaign[];
+  tenantId?: string;
+}): UnifiedAssociationFinancials {
+  const cleanTenant = (params.tenantId || 'tenant_nour').trim();
+
+  const tenantOps = (params.operations || []).filter((op) => {
+    if (!op || !op.id) return false;
+    if (cleanTenant === 'portal') return true;
+    const opTenant = (op.tenantId || op.associationId || 'tenant_nour').trim();
+    return opTenant === cleanTenant;
+  });
+
+  const opFinancials = calculateFinancials(tenantOps);
+  const unified = unifyAndDeduplicateContributions(
+    params.contributions || [],
+    params.campaignContributions || [],
+    params.contributionTypes || [],
+    params.campaigns || [],
+    cleanTenant
+  );
+  const approvedExpensesResult = calculateApprovedExpenses(opFinancials.processedOperations, cleanTenant);
+
+  const totalApprovedIncomes = unified.metrics.totalApprovedAmount;
+  const totalApprovedExpenses = approvedExpensesResult.totalApprovedExpenses;
+  const totalUnpaidAmount = unified.metrics.totalUnpaidAmount;
+  const currentBalance = totalApprovedIncomes - totalApprovedExpenses - totalUnpaidAmount;
+
+  return {
+    totalIncomes: totalApprovedIncomes,
+    totalExpenses: totalApprovedExpenses,
+    totalApprovedIncomes,
+    totalApprovedExpenses,
+    approvedCompletedExpenses: approvedExpensesResult.approvedCompletedExpenses,
+    approvedExpensesCount: approvedExpensesResult.approvedExpensesCount,
+    operationalIncomes: opFinancials.totalIncomes,
+    operationalExpenses: opFinancials.totalExpenses,
+    currentBalance,
+    processedOperations: opFinancials.processedOperations,
+    expenseByCategory: opFinancials.expenseByCategory,
+    contributions: unified.contributions,
+    metrics: unified.metrics,
+  };
+}
+
 

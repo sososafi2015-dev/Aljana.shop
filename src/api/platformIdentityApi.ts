@@ -3,6 +3,7 @@ import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { syncPortalLogoLocally } from '../portalSettingsStorage';
 import type { PlatformIdentitySettings, MasterAdminSession } from '../types';
+import { setMasterAuthToken, getMasterAuthToken } from '../authSessionClient';
 
 export const PLATFORM_IDENTITY_STORAGE_KEY = 'smart_platform_identity_v1';
 export const PLATFORM_IDENTITY_EVENT = 'platform-identity-changed';
@@ -312,6 +313,11 @@ export async function apiUnifiedMasterAdminLogin(password: string): Promise<Unif
       };
     }
 
+    const authToken = data.authToken || data.session?.token;
+    if (authToken) {
+      setMasterAuthToken(authToken);
+    }
+
     return {
       success: true,
       verified: true,
@@ -417,13 +423,20 @@ export async function verifyMasterSuperAdminPin(pin: string): Promise<{ success:
 
 function getAdminAuthHeaders(session?: MasterAdminSession | null): Record<string, string> {
   const safeSession = session || { isMaster: true, role: 'super_admin' };
+  const token = getMasterAuthToken();
+  const baseHeaders: Record<string, string> = {};
+  if (token) {
+    baseHeaders['Authorization'] = `Bearer ${token}`;
+  }
   try {
     return {
+      ...baseHeaders,
       'x-admin-session': encodeURIComponent(JSON.stringify(safeSession)),
     };
   } catch (err) {
     console.error('[PlatformIdentityApi] Error serializing session header:', err);
     return {
+      ...baseHeaders,
       'x-admin-session': encodeURIComponent(JSON.stringify({ isMaster: true, role: 'super_admin' })),
     };
   }

@@ -25,11 +25,155 @@ import {
   getDocFromFirebaseServer,
   fetchTenantCollectionFromFirebaseServer,
   awaitPendingOffloadBackups,
+  saveSingleTenantDocToFirebaseServer,
+  deleteDocFromFirebaseServer,
 } from './firebaseServerStorage';
+import {
+  verifyAuthSessionToken,
+  extractBearerTokenFromHeaders,
+} from './authCrypto';
 
 const tenantRecordsCloudReconcileCache = new Map<string, number>();
 const TENANT_RECORDS_RECONCILE_TTL_MS = 2000;
 const COLD_SEED_EPOCH = '1970-01-01T00:00:00.000Z';
+
+interface TenantRecordsAccess {
+  authenticated: boolean;
+  role: 'master_super_admin' | 'admin' | 'sub_admin' | 'member' | 'visitor';
+  isAdmin: boolean;
+  isSuperAdmin: boolean;
+  isActiveMember: boolean;
+  canViewBoardMembers: boolean;
+  subjectId: string;
+}
+
+function readDiskSubAdminsForAuthCheck(tenantId: string, db: TenantRecordsDatabase): any[] {
+  const result: any[] = [];
+  if (Array.isArray(db.subAdmins)) {
+    result.push(...db.subAdmins);
+  }
+  try {
+    const subFile = path.join(DATA_DIR, 'subadmins_database.json');
+    if (fs.existsSync(subFile)) {
+      const parsed = readJsonFileSync<any>(subFile, null);
+      if (parsed && Array.isArray(parsed.subAdmins)) {
+        for (const s of parsed.subAdmins) {
+          if (s && s.id && (!s.tenantId || normalizeTenantId(s.tenantId) === tenantId)) {
+            result.push(s);
+          }
+        }
+      }
+    }
+  } catch {}
+  return result;
+}
+
+function resolveTenantRecordsAccess(
+  req: IncomingMessage,
+  targetTenant: string,
+  db: TenantRecordsDatabase
+): TenantRecordsAccess {
+  const visitor: TenantRecordsAccess = {
+    authenticated: false,
+    role: 'visitor',
+    isAdmin: false,
+    isSuperAdmin: false,
+    isActiveMember: false,
+    canViewBoardMembers: false,
+    subjectId: '',
+  };
+
+  const token = extractBearerTokenFromHeaders(req.headers as Record<string, any>);
+  const payload = verifyAuthSessionToken(token);
+  if (!payload) {
+    return visitor;
+  }
+
+  const tokenTenant = payload.tenantId === '*' ? '*' : normalizeTenantId(payload.tenantId);
+
+  if (payload.role === 'master_super_admin') {
+    return {
+      authenticated: true,
+      role: 'master_super_admin',
+      isAdmin: true,
+      isSuperAdmin: true,
+      isActiveMember: false,
+      canViewBoardMembers: true,
+      subjectId: payload.subjectId || 'master',
+    };
+  }
+
+  if (payload.role === 'admin') {
+    if (tokenTenant !== targetTenant) {
+      return visitor;
+    }
+    return {
+      authenticated: true,
+      role: 'admin',
+      isAdmin: true,
+      isSuperAdmin: true,
+      isActiveMember: false,
+      canViewBoardMembers: true,
+      subjectId: payload.subjectId || 'admin',
+    };
+  }
+
+  if (payload.role === 'sub_admin') {
+    if (tokenTenant !== targetTenant) {
+      return visitor;
+    }
+    const allSubs = readDiskSubAdminsForAuthCheck(targetTenant, db);
+    const matchedSub = allSubs.find((s: any) => s && s.id === payload.subjectId);
+    if (!matchedSub || matchedSub.status !== 'active') {
+      return visitor;
+    }
+    return {
+      authenticated: true,
+      role: 'sub_admin',
+      isAdmin: true,
+      isSuperAdmin: matchedSub.role === 'main_admin',
+      isActiveMember: false,
+      canViewBoardMembers: true,
+      subjectId: matchedSub.id,
+    };
+  }
+
+  if (payload.role === 'member') {
+    if (tokenTenant !== targetTenant) {
+      return visitor;
+    }
+    const liveMember = (Array.isArray(db.members) ? db.members : []).find(
+      (m: any) => m && m.id === payload.subjectId
+    );
+    if (!liveMember || liveMember.status !== 'active') {
+      return visitor;
+    }
+    return {
+      authenticated: true,
+      role: 'member',
+      isAdmin: false,
+      isSuperAdmin: false,
+      isActiveMember: true,
+      canViewBoardMembers: true,
+      subjectId: liveMember.id,
+    };
+  }
+
+  return visitor;
+}
+
+function sanitizeRecordsForCaller(
+  db: TenantRecordsDatabase,
+  access: TenantRecordsAccess
+): TenantRecordsDatabase {
+  if (access.canViewBoardMembers) {
+    return db;
+  }
+  return {
+    ...db,
+    boardMembers: [],
+  };
+}
 
 const MEMBER_SELF_EDITABLE_FIELDS = new Set<string>([
   'fullName',
@@ -274,10 +418,24 @@ function reconcileServerUnpaidContributionsAndOperations(
   const cleanTenant = normalizeTenantId(tenantId);
   let didChange = false;
   const removedOperationIds: string[] = [];
-  const deletedOpSet = new Set(deletedOperationIds.filter(Boolean));
+  const deletedOpSet = new Set(
+    deletedOperationIds.filter((id) => Boolean(id) && !String(id).startsWith('op-unpaid-deduction-'))
+  );
   const deletedContribSet = new Set(deletedContributionIds.filter(Boolean));
 
   const isUnpaid = (status?: string | null) => status === 'approved' || status === 'unpaid';
+  const isUnpaidRecord = (c: any) => {
+    if (!c || typeof c !== 'object') return false;
+    if (c.status === 'rejected') return false;
+    const ps = String(c.paymentStatus || '').trim().toLowerCase();
+    return (
+      isUnpaid(c.status) ||
+      c.isNegative === true ||
+      c.amountSign === '-' ||
+      ps === 'unpaid' ||
+      ps === 'not_paid'
+    );
+  };
   const unpaidMap = new Map<string, any>();
 
   // 1. Normalize and filter contributions
@@ -435,17 +593,39 @@ function reconcileServerUnpaidContributionsAndOperations(
   const reconciledContribs = baseContribs.map((c) => {
     if (!c || typeof c !== 'object') return c;
     const deductionOpId = `op-unpaid-deduction-${c.id}`;
-    if (isUnpaid(c.status) && Number(c.amount) > 0) {
-      unpaidMap.set(c.id, c);
-      if (c.unpaidDeductionOperationId !== deductionOpId) {
+    if (isUnpaidRecord(c) && Number(c.amount) > 0) {
+      const normalizedUnpaid = {
+        ...c,
+        status: 'unpaid',
+        isNegative: true,
+        amountSign: '-',
+        paymentStatus: 'unpaid',
+        isPaid: false,
+        unpaidDeductionOperationId: deductionOpId,
+      };
+      unpaidMap.set(c.id, normalizedUnpaid);
+      if (
+        c.status !== 'unpaid' ||
+        c.isNegative !== true ||
+        c.amountSign !== '-' ||
+        c.paymentStatus !== 'unpaid' ||
+        c.isPaid !== false ||
+        c.unpaidDeductionOperationId !== deductionOpId
+      ) {
         didChange = true;
-        return { ...c, unpaidDeductionOperationId: deductionOpId };
+        return normalizedUnpaid;
       }
       return c;
     } else {
-      if (c.unpaidDeductionOperationId) {
+      const hasPendingPaymentDrift =
+        c.status === 'completed' &&
+        (String(c.paymentStatus || '').trim().toLowerCase() === 'pending' || c.isPaid === false);
+      if (c.unpaidDeductionOperationId || hasPendingPaymentDrift) {
         didChange = true;
-        const clone = { ...c };
+        const clone = {
+          ...c,
+          ...(hasPendingPaymentDrift ? { status: 'pending' } : {}),
+        };
         delete clone.unpaidDeductionOperationId;
         return clone;
       }
@@ -570,7 +750,11 @@ export function readTenantRecordsFromDisk(tenantId?: string | null): TenantRecor
   if (fs.existsSync(filePath)) {
     const parsed = readJsonFileSync<any>(filePath, () => null);
     if (parsed && typeof parsed === 'object') {
-      const deletedOperationIds = Array.isArray(parsed.deletedOperationIds) ? parsed.deletedOperationIds : [];
+      const rawDeletedOperationIds = Array.isArray(parsed.deletedOperationIds) ? parsed.deletedOperationIds : [];
+      const deletedOperationIds = rawDeletedOperationIds.filter(
+        (id: any) => Boolean(id) && !String(id).startsWith('op-unpaid-deduction-')
+      );
+      const didStripAutoDeletedOps = deletedOperationIds.length !== rawDeletedOperationIds.length;
       const deletedContributionIds = Array.isArray(parsed.deletedContributionIds) ? parsed.deletedContributionIds : [];
       const reconciled = reconcileServerUnpaidContributionsAndOperations(
         Array.isArray(parsed.contributions) ? parsed.contributions : [],
@@ -619,7 +803,7 @@ export function readTenantRecordsFromDisk(tenantId?: string | null): TenantRecor
         deletedContributionIds,
         updatedAt: parsed.updatedAt || COLD_SEED_EPOCH,
       };
-      if (reconciled.didChange || didSubAdminsChange) {
+      if (reconciled.didChange || didSubAdminsChange || didStripAutoDeletedOps) {
         writeTenantRecordsToDisk(dbObj, cleanTenant, false, true);
       }
       return dbObj;
@@ -641,7 +825,9 @@ export function writeTenantRecordsToDisk(
   const cleanTenant = normalizeTenantId(tenantId || db.tenantId);
   const filePath = getTenantRecordsFile(cleanTenant);
 
-  const deletedOperationIds = Array.isArray(db.deletedOperationIds) ? db.deletedOperationIds : [];
+  const deletedOperationIds = (Array.isArray(db.deletedOperationIds) ? db.deletedOperationIds : []).filter(
+    (id) => Boolean(id) && !String(id).startsWith('op-unpaid-deduction-')
+  );
   const deletedContributionIds = Array.isArray(db.deletedContributionIds) ? db.deletedContributionIds : [];
 
   const reconciled = reconcileServerUnpaidContributionsAndOperations(
@@ -905,14 +1091,49 @@ export async function reconcileTenantRecordsFromCloudFirestore(
     }
 
     const contribsMax = getMaxTs(cloudContribs);
-    if (
-      Array.isArray(cloudContribs) &&
-      (cloudContribs.length > 0 || isMetaNewer) &&
-      (isColdLocal || contribsMax > localTs || isMetaNewer)
-    ) {
-      if (cloudContribs.length > 0 || isMetaNewer) {
+    if (Array.isArray(cloudContribs) && (cloudContribs.length > 0 || isMetaNewer)) {
+      if (isColdLocal) {
         nextDb.contributions = cloudContribs;
         if (contribsMax > newestTs) newestTs = contribsMax;
+        changed = true;
+      } else if (cloudContribs.length > 0) {
+        const deletedContribSet = new Set(nextDb.deletedContributionIds || []);
+        const itemTs = (it: any) =>
+          Math.max(
+            new Date(it?.updatedAt || 0).getTime() || 0,
+            new Date(it?._updatedAt || 0).getTime() || 0,
+            new Date(it?.createdAt || 0).getTime() || 0
+          );
+        const localById = new Map<string, any>();
+        for (const lc of nextDb.contributions || []) {
+          if (lc && lc.id && !deletedContribSet.has(lc.id)) {
+            localById.set(lc.id, lc);
+          }
+        }
+        const mergedById = new Map<string, any>(localById);
+        let contribsChanged = false;
+        for (const cc of cloudContribs) {
+          if (!cc || !cc.id || deletedContribSet.has(cc.id)) continue;
+          const localItem = localById.get(cc.id);
+          if (!localItem) {
+            mergedById.set(cc.id, cc);
+            contribsChanged = true;
+          } else {
+            const cTs = itemTs(cc);
+            const lTs = itemTs(localItem);
+            if (cTs > lTs || (cTs === lTs && isMetaNewer && cc.status !== localItem.status)) {
+              mergedById.set(cc.id, cc);
+              contribsChanged = true;
+            }
+          }
+        }
+        if (contribsChanged) {
+          nextDb.contributions = Array.from(mergedById.values());
+          if (contribsMax > newestTs) newestTs = contribsMax;
+          changed = true;
+        }
+      } else if (isMetaNewer) {
+        nextDb.contributions = [];
         changed = true;
       }
     }
@@ -1022,7 +1243,7 @@ function sendJson(res: ServerResponse, statusCode: number, data: any): boolean {
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-admin-session, x-tenant-id, x-user-role, x-member-id');
   res.end(JSON.stringify(data));
   return true;
@@ -1037,7 +1258,7 @@ export async function handleTenantRecordsApi(req: IncomingMessage, res: ServerRe
   if (req.method === 'OPTIONS') {
     res.statusCode = 204;
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-admin-session, x-tenant-id, x-user-role, x-member-id');
     res.end();
     return true;
@@ -1061,13 +1282,154 @@ export async function handleTenantRecordsApi(req: IncomingMessage, res: ServerRe
     // 1. GET /api/tenant-records -> Fetch all persistent records for the tenant (reconciled with Cloud Firestore)
     if (method === 'GET' && url === '/api/tenant-records') {
       const db = await reconcileTenantRecordsFromCloudFirestore(tenantId, forceCloud);
+      const access = resolveTenantRecordsAccess(req, tenantId, db);
+      const safeDb = sanitizeRecordsForCaller(db, access);
       const globalRegistrationFields = readGlobalRegistrationFieldsFromDisk();
       return sendJson(res, 200, {
         success: true,
         tenantId,
-        records: db,
+        records: safeDb,
         globalRegistrationFields,
         updatedAt: db.updatedAt,
+      });
+    }
+
+    // 1.5 PATCH or POST /api/tenant-records/contributions/:id/status -> Atomic persistent status update for a single contribution
+    const contribStatusMatch = url.match(/^\/api\/tenant-records\/contributions\/([^/]+)\/status$/);
+    if (contribStatusMatch && (method === 'PATCH' || method === 'POST' || method === 'PUT')) {
+      const contribId = decodeURIComponent(contribStatusMatch[1]).trim();
+      const body = await readLargeJsonBody(req);
+      const targetTenant = normalizeTenantId(body?.tenantId || tenantId);
+
+      // Verified Bearer Token Admin Authorization & Tenant Isolation Check
+      const authDb = await reconcileTenantRecordsFromCloudFirestore(targetTenant, false);
+      const access = resolveTenantRecordsAccess(req, targetTenant, authDb);
+      if (!access.isAdmin) {
+        return sendJson(res, 403, {
+          success: false,
+          error: 'Access Denied (403 Forbidden): غير مصرح لك بتعديل حالة المساهمات والانخراطات.',
+        });
+      }
+
+      const validStatuses = new Set(['completed', 'pending', 'approved', 'unpaid', 'rejected']);
+      const nextStatus = String(body?.status || '').trim();
+      if (!validStatuses.has(nextStatus)) {
+        return sendJson(res, 400, {
+          success: false,
+          error: 'قيمة الحالة غير صالحة.',
+        });
+      }
+
+      let current = await reconcileTenantRecordsFromCloudFirestore(targetTenant, false);
+      const findTargetIdx = (list: any[]) =>
+        (list || []).findIndex(
+          (c: any) =>
+            c &&
+            (c.id === contribId ||
+              c.id === `contrib-don-${contribId}` ||
+              c.financialOperationId === `op-camp-${contribId}`)
+        );
+      let targetIdx = findTargetIdx(current.contributions);
+      if (targetIdx === -1) {
+        current = await reconcileTenantRecordsFromCloudFirestore(targetTenant, true);
+        targetIdx = findTargetIdx(current.contributions);
+      }
+
+      if (targetIdx === -1) {
+        return sendJson(res, 404, {
+          success: false,
+          error: 'تعذر العثور على سجل المساهمة المطلوب في قاعدة البيانات.',
+        });
+      }
+
+      const existingContrib = current.contributions[targetIdx];
+      const resolvedContribId = String(existingContrib.id || contribId);
+      const isUnpaid = (st?: string | null) => st === 'approved' || st === 'unpaid';
+      const existingPaymentStatus = String(existingContrib.paymentStatus || '').trim().toLowerCase();
+      const wasUnpaid =
+        existingContrib.status !== 'rejected' &&
+        (isUnpaid(existingContrib.status) ||
+          existingContrib.isNegative === true ||
+          existingContrib.amountSign === '-' ||
+          existingPaymentStatus === 'unpaid' ||
+          existingPaymentStatus === 'not_paid');
+      const isNowUnpaid = isUnpaid(nextStatus);
+      const isNowNegative = isNowUnpaid || nextStatus === 'rejected';
+      const nextAmountSign: '+' | '-' = isNowNegative ? '-' : '+';
+      const nextPaymentStatus = isNowUnpaid
+        ? 'unpaid'
+        : nextStatus === 'completed'
+        ? 'paid'
+        : nextStatus === 'rejected'
+        ? 'rejected'
+        : 'pending';
+      const nextIsPaid = nextStatus === 'completed' && !isNowNegative;
+      const nowIso =
+        typeof body?.updatedAt === 'string' && body.updatedAt.trim()
+          ? body.updatedAt.trim()
+          : new Date().toISOString();
+
+      const updatedContrib = {
+        ...existingContrib,
+        status: nextStatus,
+        isNegative: isNowNegative,
+        amountSign: nextAmountSign,
+        paymentStatus: nextPaymentStatus,
+        isPaid: nextIsPaid,
+        updatedAt: nowIso,
+        _updatedAt: nowIso,
+        tenantId: targetTenant,
+        associationId: targetTenant,
+      };
+
+      const nextContributions = [...current.contributions];
+      nextContributions[targetIdx] = updatedContrib;
+      current.contributions = nextContributions;
+      current.updatedAt = nowIso;
+
+      // Save atomically to disk with the exact same timestamp (preserveTimestamp = true)
+      const saved = writeTenantRecordsToDisk(current, targetTenant, false, true);
+      const savedContrib =
+        saved.contributions.find((c: any) => c && c.id === resolvedContribId) || updatedContrib;
+
+      // Persist ONLY the modified contribution doc + records_meta to Cloud Firestore
+      const cloudTasks: Promise<any>[] = [
+        saveSingleTenantDocToFirebaseServer('contributions', targetTenant, savedContrib, nowIso, false),
+        saveDocToFirebaseServer('settings', `${targetTenant}_records_meta`, {
+          tenantId: targetTenant,
+          updatedAt: nowIso,
+          _updatedAt: nowIso,
+          deletedOperationIds: saved.deletedOperationIds || [],
+          deletedContributionIds: saved.deletedContributionIds || [],
+        }),
+      ];
+
+      // Always keep Firestore unpaid deduction op consistent on any transition involving unpaid
+      if (wasUnpaid !== isNowUnpaid || isNowUnpaid || !isNowUnpaid) {
+        const deductionOpId = `op-unpaid-deduction-${resolvedContribId}`;
+        if (isNowUnpaid) {
+          const deductionOp = saved.operations.find((op: any) => op && op.id === deductionOpId);
+          if (deductionOp) {
+            cloudTasks.push(
+              saveSingleTenantDocToFirebaseServer('operations', targetTenant, deductionOp, nowIso)
+            );
+          }
+        } else if (wasUnpaid) {
+          const docId = `${targetTenant}_${deductionOpId}`.replace(/[^a-zA-Z0-9_.-]/g, '_');
+          cloudTasks.push(deleteDocFromFirebaseServer('operations', docId));
+        }
+      }
+
+      await Promise.all(cloudTasks);
+
+      return sendJson(res, 200, {
+        success: true,
+        tenantId: targetTenant,
+        contribution: savedContrib,
+        contributions: saved.contributions,
+        operations: saved.operations,
+        updatedAt: nowIso,
+        message: 'تم تحديث وحفظ حالة المساهمة بشكل دائم في قاعدة البيانات بنجاح.',
       });
     }
 
@@ -1077,54 +1439,11 @@ export async function handleTenantRecordsApi(req: IncomingMessage, res: ServerRe
       const targetTenant = normalizeTenantId(body.tenantId || tenantId);
       const current = await reconcileTenantRecordsFromCloudFirestore(targetTenant, true);
 
-      // Database-level Role & Authorization Check
-      const callerRole = ((req.headers['x-user-role'] as string | undefined) || body.callerRole || '').trim();
-      const callerMemberId = ((req.headers['x-member-id'] as string | undefined) || body.callerMemberId || '').trim();
-      const adminSessionHeader = (req.headers['x-admin-session'] as string | undefined)?.trim();
-
-      let hasValidAdminSession = callerRole === 'admin';
-      let isSuperAdminCaller = false;
-      if (adminSessionHeader) {
-        try {
-          const parsedAdmin = JSON.parse(decodeURIComponent(adminSessionHeader));
-          if (
-            parsedAdmin &&
-            (parsedAdmin.isMaster === true ||
-              parsedAdmin.isMasterPlatformAdmin === true ||
-              parsedAdmin.type === 'super_admin' ||
-              parsedAdmin.type === 'sub_admin' ||
-              parsedAdmin.role === 'super_admin' ||
-              parsedAdmin.role === 'main_admin' ||
-              parsedAdmin.role === 'secondary_admin')
-          ) {
-            hasValidAdminSession = true;
-          }
-          if (
-            parsedAdmin &&
-            (parsedAdmin.isMaster === true ||
-              parsedAdmin.isMasterPlatformAdmin === true ||
-              parsedAdmin.type === 'super_admin' ||
-              parsedAdmin.role === 'super_admin' ||
-              parsedAdmin.role === 'main_admin') &&
-            parsedAdmin.type !== 'sub_admin' &&
-            parsedAdmin.role !== 'secondary_admin'
-          ) {
-            isSuperAdminCaller = true;
-          }
-          // Strict tenant isolation for non-master association admins
-          const isPlatformMaster =
-            parsedAdmin?.isMaster === true ||
-            parsedAdmin?.isMasterPlatformAdmin === true ||
-            parsedAdmin?.role === 'master_super_admin';
-          const sessionTenant = parsedAdmin?.tenantId ? normalizeTenantId(parsedAdmin.tenantId) : '';
-          if (!isPlatformMaster && sessionTenant && sessionTenant !== targetTenant) {
-            return sendJson(res, 403, {
-              success: false,
-              error: 'Access Denied (403 Forbidden): غير مصرح لمدير جمعية بتعديل بيانات جمعية أخرى.',
-            });
-          }
-        } catch {}
-      }
+      // Authoritative Verified Token Role & Authorization Check (never trust spoofable headers alone)
+      const access = resolveTenantRecordsAccess(req, targetTenant, current);
+      const hasValidAdminSession = access.isAdmin;
+      const isSuperAdminCaller = access.isSuperAdmin;
+      const verifiedMemberId = access.isActiveMember ? access.subjectId : '';
 
       if (body.propagateToAllTenants === true && !isSuperAdminCaller) {
         return sendJson(res, 403, {
@@ -1133,7 +1452,7 @@ export async function handleTenantRecordsApi(req: IncomingMessage, res: ServerRe
         });
       }
 
-      const isRestrictedMemberCaller = callerRole === 'member' && !hasValidAdminSession;
+      const isRestrictedNonAdminCaller = !hasValidAdminSession;
       const adminOnlyCollections: Array<keyof TenantRecordsDatabase> = [
         'boardMembers',
         'registrationFields',
@@ -1152,19 +1471,26 @@ export async function handleTenantRecordsApi(req: IncomingMessage, res: ServerRe
         'adCampaigns',
       ];
 
-      // Track any explicit deletion IDs sent by the client
-      const incomingDeletedOpIds: string[] = [
-        ...(Array.isArray(body.removedOperationIds) ? body.removedOperationIds : []),
-        ...(Array.isArray(body.deletedOperationIds) ? body.deletedOperationIds : []),
-      ].filter(Boolean);
+      // Track explicit deletion IDs ONLY when caller is a verified admin
+      const incomingDeletedOpIds: string[] = hasValidAdminSession
+        ? [
+            ...(Array.isArray(body.removedOperationIds) ? body.removedOperationIds : []),
+            ...(Array.isArray(body.deletedOperationIds) ? body.deletedOperationIds : []),
+          ].filter((id) => Boolean(id) && !String(id).startsWith('op-unpaid-deduction-'))
+        : [];
 
-      const incomingDeletedContribIds: string[] = [
-        ...(Array.isArray(body.removedContributionIds) ? body.removedContributionIds : []),
-        ...(Array.isArray(body.deletedContributionIds) ? body.deletedContributionIds : []),
-      ].filter(Boolean);
+      const incomingDeletedContribIds: string[] = hasValidAdminSession
+        ? [
+            ...(Array.isArray(body.removedContributionIds) ? body.removedContributionIds : []),
+            ...(Array.isArray(body.deletedContributionIds) ? body.deletedContributionIds : []),
+          ].filter(Boolean)
+        : [];
 
       const mergedDeletedOpIds = Array.from(
-        new Set([...(current.deletedOperationIds || []), ...incomingDeletedOpIds])
+        new Set([
+          ...(current.deletedOperationIds || []).filter((id) => Boolean(id) && !String(id).startsWith('op-unpaid-deduction-')),
+          ...incomingDeletedOpIds,
+        ])
       );
       const mergedDeletedContribIds = Array.from(
         new Set([...(current.deletedContributionIds || []), ...incomingDeletedContribIds])
@@ -1178,13 +1504,13 @@ export async function handleTenantRecordsApi(req: IncomingMessage, res: ServerRe
       const applyCollectionUpdateSafely = (col: keyof TenantRecordsDatabase, incomingData: any[]) => {
         if (!Array.isArray(incomingData)) return;
 
-        // Block member-only sessions from modifying admin-only collections
-        if (isRestrictedMemberCaller && adminOnlyCollections.includes(col)) {
+        // Block non-admin sessions from modifying admin-only collections (boardMembers, registrationFields, subAdmins, adCampaigns)
+        if (isRestrictedNonAdminCaller && adminOnlyCollections.includes(col)) {
           return;
         }
 
-        // If caller is a member (not an admin), protect existing records from deletion or unauthorized tampering
-        if (isRestrictedMemberCaller) {
+        // If caller is not a verified admin, protect existing records from deletion or unauthorized tampering
+        if (isRestrictedNonAdminCaller) {
           if (col === 'members') {
             const existingMap = new Map<string, any>();
             for (const m of current.members || []) {
@@ -1193,15 +1519,15 @@ export async function handleTenantRecordsApi(req: IncomingMessage, res: ServerRe
             for (const inc of incomingData) {
               if (!inc || !inc.id) continue;
               if (!existingMap.has(inc.id)) {
-                // Allow self-registration of a new member (default status enforced)
+                // Allow public self-registration of a new member
                 existingMap.set(inc.id, {
                   ...inc,
                   tenantId: targetTenant,
                   associationId: targetTenant,
                   updatedAt: new Date().toISOString(),
                 });
-              } else if (callerMemberId && inc.id === callerMemberId) {
-                // Strict Member Self-Edit Whitelist: ONLY permitted personal fields may be modified by the member themselves
+              } else if (verifiedMemberId && inc.id === verifiedMemberId) {
+                // Strict Member Self-Edit Whitelist: ONLY permitted personal fields may be modified by the verified member themselves
                 const prev = existingMap.get(inc.id);
                 const safePersonalFields = pickMemberSelfEditableFields(inc);
                 existingMap.set(inc.id, {
@@ -1243,14 +1569,8 @@ export async function handleTenantRecordsApi(req: IncomingMessage, res: ServerRe
               ? deletedContribSet
               : new Set<string>();
 
-          const incomingById = new Map<string, any>();
           const orderedResult: any[] = [];
           const addedIds = new Set<string>();
-
-          for (const item of incomingData) {
-            if (!item || !item.id || delSet.has(item.id)) continue;
-            incomingById.set(item.id, item);
-          }
 
           // First place incoming items in their order (merging with existing properties if present)
           const existingById = new Map<string, any>();
@@ -1260,14 +1580,17 @@ export async function handleTenantRecordsApi(req: IncomingMessage, res: ServerRe
             }
           }
 
+          const mergeNowIso = new Date().toISOString();
           for (const item of incomingData) {
             if (!item || !item.id || delSet.has(item.id) || addedIds.has(item.id)) continue;
             const prev = existingById.get(item.id);
+            const statusChanged = Boolean(prev && col === 'contributions' && item.status !== prev.status);
             orderedResult.push(
               prev
                 ? {
                     ...prev,
                     ...item,
+                    ...(statusChanged ? { updatedAt: item.updatedAt || mergeNowIso, _updatedAt: mergeNowIso } : {}),
                     tenantId: item.tenantId || prev.tenantId || targetTenant,
                     associationId: item.associationId || prev.associationId || targetTenant,
                   }
@@ -1310,10 +1633,10 @@ export async function handleTenantRecordsApi(req: IncomingMessage, res: ServerRe
       // 1. Support single collection update via `{ collection: 'members', data: [...] }` or `{ key: 'members', data: [...] }`
       const targetCollection = (body.collection || body.key) as keyof TenantRecordsDatabase | undefined;
       if (targetCollection && validCollections.includes(targetCollection) && Array.isArray(body.data)) {
-        if (isRestrictedMemberCaller && adminOnlyCollections.includes(targetCollection)) {
+        if (isRestrictedNonAdminCaller && adminOnlyCollections.includes(targetCollection)) {
           return sendJson(res, 403, {
             success: false,
-            error: 'Access Denied (403 Forbidden): حساب المنخرط لا يملك صلاحية تعديل إعدادات أو سجلات لوحة تحكم الجمعية.',
+            error: 'Access Denied (403 Forbidden): لا تملك صلاحية تعديل إعدادات أو سجلات لوحة تحكم الجمعية.',
           });
         }
         applyCollectionUpdateSafely(targetCollection, body.data);
@@ -1322,16 +1645,26 @@ export async function handleTenantRecordsApi(req: IncomingMessage, res: ServerRe
 
       // 2. Support nested `{ records: { members: [...], ... } }`
       const sourceObj = body.records && typeof body.records === 'object' ? body.records : body;
+      if (isRestrictedNonAdminCaller && Array.isArray(sourceObj?.boardMembers)) {
+        return sendJson(res, 403, {
+          success: false,
+          error: 'Access Denied (403 Forbidden): تعديل أعضاء مكتب الجمعية مقتصر على إدارة الجمعية فقط.',
+        });
+      }
       for (const col of validCollections) {
         if (Array.isArray(sourceObj[col])) {
+          if (isRestrictedNonAdminCaller && adminOnlyCollections.includes(col)) {
+            continue;
+          }
           applyCollectionUpdateSafely(col, sourceObj[col]);
           touchedCollections.add(String(col));
         }
       }
 
-      if (body.propagateToAllTenants === true && Array.isArray(current.registrationFields)) {
+      if (body.propagateToAllTenants === true && isSuperAdminCaller && Array.isArray(current.registrationFields)) {
         current.registrationFields = propagateRegistrationFieldsToAllTenantsOnDisk(current.registrationFields);
       } else if (
+        hasValidAdminSession &&
         targetTenant === 'tenant_nour' &&
         (targetCollection === 'registrationFields' || Array.isArray(sourceObj.registrationFields)) &&
         Array.isArray(current.registrationFields)
@@ -1340,10 +1673,11 @@ export async function handleTenantRecordsApi(req: IncomingMessage, res: ServerRe
       }
 
       const saved = await writeTenantRecordsToDiskAndCloud(current, targetTenant, touchedCollections);
+      const safeSaved = sanitizeRecordsForCaller(saved, access);
       return sendJson(res, 200, {
         success: true,
         tenantId: targetTenant,
-        records: saved,
+        records: safeSaved,
         propagatedToAllTenants: Boolean(body.propagateToAllTenants),
         updatedAt: saved.updatedAt,
         message: 'تم حفظ بيانات وسجلات الجمعية في قاعدة البيانات السحابية بنجاح.',

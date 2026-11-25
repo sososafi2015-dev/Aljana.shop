@@ -24,7 +24,10 @@ import {
   Video,
   Image as ImageIcon,
   Maximize2,
-  Eye
+  Eye,
+  Calculator,
+  BookOpen,
+  PenTool
 } from 'lucide-react';
 import { ActivityItem, Member, FinancialOperation, AssociationSettings, Language, UserRole, UIElementConfig, Poll, PollVote, BoardMember, DonationCampaign, CurrentAdminSession } from '../types';
 import { translations } from '../translations';
@@ -33,6 +36,12 @@ import { VideoPlayer, parseVideoUrl } from '../utils/videoUtils';
 import { CampaignsSection } from './CampaignsSection';
 import { isSectionVisibleForUser, isProofPreviewVisibleForUser } from '../utils/visibilityRules';
 import { DynamicUIElementsSection } from './DynamicUIElements';
+import { FinancialAuditorBackdropSvg } from './FinancialAuditorBackdropSvg';
+
+const transparencyBackdropUrl = new URL(
+  '../assets/images/transparency_governance_backdrop_1795544906348.jpg',
+  import.meta.url
+).href;
 
 interface HomeSectionProps {
   settings: AssociationSettings;
@@ -56,6 +65,7 @@ interface HomeSectionProps {
   onOpenMediaModal: (media: { title: string; url: string; type: 'image' | 'video' | 'document'; description?: string }) => void;
   onOpenReportModal: () => void;
   onOpenDonationModal?: (campaign: DonationCampaign) => void;
+  canViewBoardMembers?: boolean;
 }
 
 export const HomeSection: React.FC<HomeSectionProps> = ({
@@ -80,6 +90,7 @@ export const HomeSection: React.FC<HomeSectionProps> = ({
   onOpenMediaModal,
   onOpenReportModal,
   onOpenDonationModal,
+  canViewBoardMembers: canViewBoardMembersProp,
 }) => {
   const t = translations[lang] as any;
   const activeActivities = activities.filter((a) => a.isActive !== false && (a as any).isActive !== 'false');
@@ -110,6 +121,14 @@ export const HomeSection: React.FC<HomeSectionProps> = ({
     effectiveVideoUrl &&
     (homeFeaturedActivity?.videoMetadata?.processingStatus === 'ready' || (videoInfo && videoInfo.isValid))
   );
+
+  const canViewBoardMembers =
+    canViewBoardMembersProp !== undefined
+      ? canViewBoardMembersProp
+      : Boolean(role === 'admin' || (loggedInMember && loggedInMember.status === 'active'));
+
+  const isBoardGatewayEnabled =
+    (uiElements || []).find((e) => e.id === 'board_members')?.enabled !== false;
 
   const isVisible = (id: string) => {
     return isSectionVisibleForUser(id, {
@@ -765,7 +784,7 @@ export const HomeSection: React.FC<HomeSectionProps> = ({
 
       {/* 5. DEDICATED BOTTOM SECTION (القسم الموجود أسفل واجهة المتجر) */}
       {/* Strictly contains the full access gateways to: Live Transparency Ledger, Members Directory, and Board Members */}
-      {isVisible('bottom_records_section') && (isVisible('gateway_ledger') || isVisible('gateway_members') || isVisible('board_members')) && (
+      {isVisible('bottom_records_section') && (isVisible('gateway_ledger') || isVisible('gateway_members') || isBoardGatewayEnabled) && (
         <div id="bottom-records-section" className="pt-4 border-t-2 border-slate-200/80 space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div>
@@ -790,9 +809,9 @@ export const HomeSection: React.FC<HomeSectionProps> = ({
 
           <div
             className={`grid grid-cols-1 ${
-              [isVisible('gateway_ledger'), isVisible('gateway_members'), isVisible('board_members')].filter(Boolean).length === 2
+              [isVisible('gateway_ledger'), isVisible('gateway_members'), isBoardGatewayEnabled].filter(Boolean).length === 2
                 ? 'md:grid-cols-2'
-                : [isVisible('gateway_ledger'), isVisible('gateway_members'), isVisible('board_members')].filter(Boolean).length === 1
+                : [isVisible('gateway_ledger'), isVisible('gateway_members'), isBoardGatewayEnabled].filter(Boolean).length === 1
                   ? 'md:grid-cols-1'
                   : 'md:grid-cols-3'
             } gap-4`}
@@ -803,7 +822,7 @@ export const HomeSection: React.FC<HomeSectionProps> = ({
                 className="p-6 rounded-2xl bg-white border border-slate-200 hover:border-emerald-500 shadow-xs hover:shadow-md transition-all flex flex-col justify-between group store-card"
                 style={{ backgroundColor: settings.themeColors?.cardColor || '#ffffff' }}
               >
-                <div className="space-y-3">
+                <div className="space-y-3.5">
                   <div 
                     className="w-12 h-12 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform"
                     style={{
@@ -815,11 +834,81 @@ export const HomeSection: React.FC<HomeSectionProps> = ({
                   </div>
                   <div>
                     <h3 className="text-base font-bold text-slate-900 group-hover:text-emerald-700 transition-colors store-heading">
-                      {getElementTitle('gateway_ledger', 'سجل الشفافية المباشر')}
+                      {getElementTitle('gateway_ledger', 'بوابة سجل الشفافية المباشر')}
                     </h3>
-                    <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                      {getElementDesc('gateway_ledger', 'الاطلاع على جميع العمليات المالية والمداخيل والمصاريف الموثقة مع سندات الأداء والوصولات المعتمدة.')}
-                    </p>
+                  </div>
+
+                  {/* New Serene Institutional Background Panel with Headings & Calculator/Book/Pen Visual Symbols */}
+                  <div className="relative overflow-hidden rounded-2xl border border-emerald-200/75 bg-gradient-to-br from-white via-emerald-50/50 to-orange-50/45 p-4 sm:p-5 min-h-[192px] sm:min-h-[205px] flex flex-col justify-between gap-4 shadow-2xs">
+                    <img
+                      src={transparencyBackdropUrl}
+                      alt=""
+                      aria-hidden="true"
+                      referrerPolicy="no-referrer"
+                      loading="lazy"
+                      className="absolute inset-0 w-full h-full object-cover object-center pointer-events-none select-none transition-transform duration-500 group-hover:scale-[1.02]"
+                    />
+                    <div
+                      aria-hidden="true"
+                      className="absolute inset-0 bg-gradient-to-br from-white/75 via-emerald-50/55 to-orange-50/45 pointer-events-none"
+                    />
+                    {/* Large Integrated Background Symbol: Financial Auditor Reviewing Accounts */}
+                    <FinancialAuditorBackdropSvg
+                      className="absolute bottom-0 end-0 sm:end-1.5 z-[1] w-[168px] h-[138px] sm:w-[200px] sm:h-[164px] md:w-[155px] md:h-[128px] lg:w-[200px] lg:h-[164px] opacity-90 pointer-events-none select-none transition-transform duration-500 group-hover:scale-[1.03]"
+                    />
+                    <div
+                      aria-hidden="true"
+                      className={`absolute inset-0 z-[2] pointer-events-none ${
+                        lang === 'ar'
+                          ? 'bg-gradient-to-l from-white/90 via-white/50 to-transparent'
+                          : 'bg-gradient-to-r from-white/90 via-white/50 to-transparent'
+                      }`}
+                    />
+                    <div
+                      aria-hidden="true"
+                      className="absolute inset-x-0 top-0 z-[3] h-[2px] bg-gradient-to-r from-emerald-500/45 via-orange-400/55 to-emerald-500/40 pointer-events-none"
+                    />
+
+                    {/* Visual Symbols Row: Calculator, Book, Pen */}
+                    <div className="relative z-10 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2.5">
+                        <div
+                          className="w-9 h-9 rounded-xl bg-white/90 border border-emerald-200/80 text-emerald-700 flex items-center justify-center shadow-2xs"
+                          title="الحسابات المالية"
+                          aria-label="آلة حاسبة للحسابات المالية"
+                        >
+                          <Calculator className="w-4 h-4" strokeWidth={1.85} />
+                        </div>
+                        <div
+                          className="w-9 h-9 rounded-xl bg-white/90 border border-sky-200/80 text-sky-700 flex items-center justify-center shadow-2xs"
+                          title="السجلات والتوثيق"
+                          aria-label="كتاب للسجلات والتوثيق"
+                        >
+                          <BookOpen className="w-4 h-4" strokeWidth={1.85} />
+                        </div>
+                        <div
+                          className="w-9 h-9 rounded-xl bg-white/90 border border-amber-200/80 text-amber-700 flex items-center justify-center shadow-2xs"
+                          title="تدوين الحسابات وتسجيل البيانات"
+                          aria-label="قلم لتدوين الحسابات وتسجيل البيانات"
+                        >
+                          <PenTool className="w-4 h-4" strokeWidth={1.85} />
+                        </div>
+                      </div>
+                      <span
+                        aria-hidden="true"
+                        className="h-px flex-1 bg-gradient-to-l from-amber-300/60 via-emerald-300/40 to-transparent"
+                      />
+                    </div>
+
+                    {/* Clear, Legible Institutional Headings over New Background */}
+                    <div className="relative z-10 space-y-1.5">
+                      <h4 className="text-sm sm:text-base font-black text-slate-900 leading-snug tracking-tight">
+                        سجل الشفافية والحكامة المالية
+                      </h4>
+                      <p className="text-xs sm:text-[13px] font-bold text-emerald-900/90 leading-relaxed">
+                        تعرف على المداخيل والمصاريف
+                      </p>
+                    </div>
                   </div>
                 </div>
 
@@ -876,7 +965,7 @@ export const HomeSection: React.FC<HomeSectionProps> = ({
             )}
 
             {/* Gateway 4: الهيئة التنفيذية والتدبيرية – أعضاء مكتب الجمعية */}
-            {isVisible('board_members') && (
+            {isBoardGatewayEnabled && (
               <div 
                 className="p-6 rounded-2xl text-white border shadow-md hover:shadow-lg transition-all flex flex-col justify-between group relative overflow-hidden"
                 style={{
@@ -890,7 +979,7 @@ export const HomeSection: React.FC<HomeSectionProps> = ({
                       <Award className="w-6 h-6" />
                     </div>
                     <span className="px-2.5 py-0.5 rounded-full bg-white/20 text-white text-[11px] font-mono font-bold border border-white/20">
-                      {boardMembers.length} أعضاء
+                      {canViewBoardMembers ? `${boardMembers.length} أعضاء` : 'للمنخرطين فقط'}
                     </span>
                   </div>
                   <div>

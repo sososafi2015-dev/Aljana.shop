@@ -539,6 +539,7 @@ class FirestoreSyncService {
       const keepDocIds = new Set<string>();
       const nowIso = new Date().toISOString();
 
+      const writePromises: Promise<void>[] = [];
       for (const item of items || []) {
         if (!item || !item.id) continue;
         const docId = `${cleanTenant}_${item.id}`;
@@ -547,10 +548,13 @@ class FirestoreSyncService {
           JSON.stringify({
             ...item,
             tenantId: cleanTenant,
-            _updatedAt: nowIso,
+            _updatedAt: (item as any)._updatedAt || (item as any).updatedAt || nowIso,
           })
         );
-        await setDoc(doc(col, docId), payload, { merge: true });
+        writePromises.push(setDoc(doc(col, docId), payload, { merge: true }));
+      }
+      if (writePromises.length > 0) {
+        await Promise.all(writePromises);
       }
 
       try {
@@ -856,6 +860,52 @@ class FirestoreSyncService {
 
   public async syncContributionsToFirestore(tenantId: string, contributions: MemberContribution[]): Promise<boolean> {
     return this.syncTenantCollectionWithDeletions('contributions', tenantId, contributions);
+  }
+
+  public async saveSingleContributionToFirestore(
+    tenantId: string,
+    contribution: MemberContribution
+  ): Promise<boolean> {
+    try {
+      if (!contribution || !contribution.id) return false;
+      const cleanTenant = !tenantId || tenantId === 'portal' ? 'tenant_nour' : tenantId;
+      const nowIso = contribution.updatedAt || contribution._updatedAt || new Date().toISOString();
+      const docId = `${cleanTenant}_${contribution.id}`.replace(/[^a-zA-Z0-9_.-]/g, '_');
+      const payload = JSON.parse(
+        JSON.stringify({
+          ...contribution,
+          tenantId: cleanTenant,
+          associationId: cleanTenant,
+          updatedAt: nowIso,
+          _updatedAt: nowIso,
+        })
+      );
+      await setDoc(doc(db, 'contributions', docId), payload, { merge: true });
+      return true;
+    } catch (err) {
+      console.warn('[Firestore] Save single contribution error:', err);
+      return false;
+    }
+  }
+
+  public async fetchContributionsFromFirestore(tenantId: string): Promise<MemberContribution[]> {
+    try {
+      const cleanTenant = !tenantId || tenantId === 'portal' ? 'tenant_nour' : tenantId;
+      const col = collection(db, 'contributions');
+      const q = query(col, where('tenantId', '==', cleanTenant));
+      const snap = await getDocs(q);
+      const list: MemberContribution[] = [];
+      snap.forEach((d) => {
+        const data = d.data() as MemberContribution;
+        if (data && data.id) {
+          list.push(data);
+        }
+      });
+      return list;
+    } catch (err) {
+      console.warn('[Firestore] Fetch contributions error:', err);
+      return [];
+    }
   }
 
   public async saveMemberCardSettingsToFirestore(tenantId: string, cardSettings: any): Promise<boolean> {

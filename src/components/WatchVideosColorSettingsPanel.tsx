@@ -675,14 +675,6 @@ export const WatchVideosColorSettingsPanel: React.FC<WatchVideosColorSettingsPan
                             شاهد شرح بالفيديو كيفية استخدام المنصة
                           </h2>
                         </div>
-
-                        {/* Section Description / Subtitle */}
-                        <p
-                          className="text-xs sm:text-sm leading-relaxed max-w-2xl font-medium"
-                          style={{ color: colors.subtitleColor }}
-                        >
-                          استعرض الفيديوهات التوضيحية المصورة التي تشرح طريقة استخدام المنصة وإنشاء حساب جمعيتك والاستفادة من جميع خدماتها الرقمية بسهولة.
-                        </p>
                       </div>
                     </div>
 

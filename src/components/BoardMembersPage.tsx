@@ -16,7 +16,9 @@ import {
   ArrowRight,
   ArrowLeft,
   Users,
-  Sparkles
+  Sparkles,
+  UserCheck,
+  UserPlus
 } from 'lucide-react';
 import { BoardMember, Member, AssociationSettings, Language, UserRole } from '../types';
 import { translations } from '../translations';
@@ -28,6 +30,9 @@ interface BoardMembersPageProps {
   settings: AssociationSettings;
   lang: Language;
   role?: UserRole;
+  canViewBoardMembers?: boolean;
+  onRequestRegister?: () => void;
+  onRequestLogin?: () => void;
   onBack: () => void;
 }
 
@@ -37,26 +42,86 @@ export const BoardMembersPage: React.FC<BoardMembersPageProps> = ({
   settings,
   lang,
   role = 'user',
+  canViewBoardMembers,
+  onRequestRegister,
+  onRequestLogin,
   onBack,
 }) => {
   const t = translations[lang] as any;
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Sorted by order (1, 2, 3...)
-  const sortedBoardMembers = [...(boardMembers || [])]
-    .sort((a, b) => a.order - b.order)
-    .filter((bm) => {
-      if (!searchQuery.trim()) return true;
-      const q = searchQuery.toLowerCase();
-      const linked = (members || []).find((m) => m.id === bm.memberId);
-      const name = linked?.fullName.toLowerCase() || '';
-      const code = linked?.memberCode.toLowerCase() || '';
-      const roleName = bm.roleAr.toLowerCase();
-      return name.includes(q) || (role === 'admin' && code.includes(q)) || roleName.includes(q);
-    });
+  const isAuthorized =
+    canViewBoardMembers !== undefined ? canViewBoardMembers : role === 'admin';
+
+  // Sorted by order (1, 2, 3...) - only evaluated when authorized
+  const sortedBoardMembers = isAuthorized
+    ? [...(boardMembers || [])]
+        .sort((a, b) => a.order - b.order)
+        .filter((bm) => {
+          if (!searchQuery.trim()) return true;
+          const q = searchQuery.toLowerCase();
+          const linked = (members || []).find((m) => m.id === bm.memberId);
+          const name = linked?.fullName.toLowerCase() || '';
+          const code = linked?.memberCode.toLowerCase() || '';
+          const roleName = bm.roleAr.toLowerCase();
+          return name.includes(q) || (role === 'admin' && code.includes(q)) || roleName.includes(q);
+        })
+    : [];
 
   const isRtl = lang === 'ar';
   const BackArrow = isRtl ? ArrowRight : ArrowLeft;
+
+  if (!isAuthorized) {
+    return (
+      <div className="space-y-6 animate-fadeIn pb-12">
+        <BackToHomeButton
+          onBack={onBack}
+          lang={lang}
+          currentPageTitle="أعضاء مكتب الجمعية"
+          id="back-to-home-from-board-btn"
+        />
+
+        <div className="bg-white rounded-3xl p-8 sm:p-12 border border-slate-200 text-center max-w-xl mx-auto my-8 shadow-sm space-y-5" dir="rtl">
+          <div className="w-16 h-16 rounded-2xl bg-amber-50 text-amber-600 border border-amber-200 flex items-center justify-center mx-auto shadow-sm">
+            <ShieldCheck className="w-8 h-8" />
+          </div>
+          <h3 className="text-xl font-bold text-slate-800">
+            قسم «أعضاء مكتب الجمعية» متاح حصرياً للمنخرطين
+          </h3>
+          <p className="text-sm text-slate-600 leading-relaxed">
+            هذا القسم متاح فقط للمنخرطين في الجمعية. يرجى الانخراط في الجمعية لكي تتمكن من الاطلاع على أعضاء مكتب الجمعية.
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+            {onRequestRegister && (
+              <button
+                onClick={onRequestRegister}
+                className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm transition-all shadow-sm flex items-center gap-2 cursor-pointer"
+                style={{ backgroundColor: settings.themeColors?.buttonColor || settings.themeColors?.primaryColor || '#059669' }}
+              >
+                <UserPlus className="w-4 h-4" />
+                <span>انخرط الآن</span>
+              </button>
+            )}
+            {onRequestLogin && (
+              <button
+                onClick={onRequestLogin}
+                className="px-5 py-2.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 font-bold text-sm transition-all flex items-center gap-2 cursor-pointer"
+              >
+                <UserCheck className="w-4 h-4" />
+                <span>تسجيل دخول المنخرطين</span>
+              </button>
+            )}
+            <button
+              onClick={onBack}
+              className="px-5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-sm transition-all cursor-pointer"
+            >
+              العودة للواجهة الرئيسية
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 animate-fadeIn pb-12">

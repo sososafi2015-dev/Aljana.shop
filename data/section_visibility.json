@@ -1,0 +1,18 @@
+{
+  "featured_activities": true,
+  "gateway_members": false,
+  "board_members": false,
+  "campaigns_section": true,
+  "gateway_ledger": true,
+  "members_voting_section": true,
+  "member_card": true,
+  "hero_banner": true,
+  "transparency_pledge": true,
+  "bottom_records_section": true,
+  "bank_rib_card": true,
+  "nav_report_button": true,
+  "proof_document_preview": true,
+  "current_financial_balance": false,
+  "lastUpdated": "2026-11-25T16:44:24.686Z",
+  "updatedBy": "System Initialization"
+}

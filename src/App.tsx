@@ -5,6 +5,8 @@ import {
   saveMembers, 
   getStoredBoardMembers,
   saveBoardMembers,
+  clearStoredBoardMembersCache,
+  hasAuthorizedBoardAccessInClient,
   getStoredContributions,
   saveContributions,
   getStoredOperations, 
@@ -29,7 +31,12 @@ import {
   reconcileMemberFinancialOperations,
   reconcileUnpaidContributionDeductions,
   saveContributionsAndOperations,
+  registerPendingContributionStatusUpdate,
+  markPendingContributionStatusSettled,
+  applyPendingContributionStatusUpdates,
+  updateContributionStatusPersisted,
   isUnpaidContributionStatus,
+  isUnpaidContributionRecord,
   addAuditLog,
   resetToDefaults,
   exportBackupJSON,
@@ -137,8 +144,12 @@ import { defaultStoreThemeColors } from './initialData';
 import { applyStoreTheme } from './utils/themeEngine';
 import { checkAdminPermission } from './security';
 import { GLOBAL_CONTRIBUTION_SETTINGS_EVENT } from './contributionTypesStorage';
-import { ShieldCheck, UserCheck, HeartHandshake, ArrowRight, Users, LayoutDashboard, ArrowLeft, Sparkles } from 'lucide-react';
-import { isSectionVisibleForUser, isProofPreviewVisibleForUser } from './utils/visibilityRules';
+import {
+  calculateUnifiedAssociationFinancials,
+  resolveActualPaymentState,
+} from './utils/transparencyUtils';
+import { ShieldCheck, UserCheck, UserPlus, HeartHandshake, ArrowRight, Users, LayoutDashboard, ArrowLeft, Sparkles } from 'lucide-react';
+import { isSectionVisibleForUser, isProofPreviewVisibleForUser, canPrintOfficialFinancialReport } from './utils/visibilityRules';
 import { fetchUIElementsApi, saveUIElementsListApi } from './api/uiElementsApi';
 import { Navbar } from './components/Navbar';
 import { BottomNav } from './components/BottomNav';
@@ -183,8 +194,10 @@ import {
   saveTenantData,
   TENANT_DATA_KEYS,
   getMasterAdminSession,
-  setMasterAdminSession
+  setMasterAdminSession,
+  authenticatePlatformAccount
 } from './tenantStorage';
+import { clearTenantAuthToken, clearMasterAuthToken } from './authSessionClient';
 import { syncPaymentsFromBackend } from './paymentStorage';
 import { AssociationTenant } from './types';
 import { useAssociationSectionsConfig } from './associationSectionsStorage';
@@ -395,6 +408,7 @@ export default function App() {
 
   // Sync campaigns and contribution types with backend JSON storage & Cloud Firestore on mount / tenant switch / auth state change
   useEffect(() => {
+    let isMounted = true;
     async function loadCampaignData() {
       try {
         const rawActive = getActiveTenantId();
@@ -436,12 +450,18 @@ export default function App() {
           };
         };
 
+        let remoteCampaignsOk = false;
+        let remoteContribsOk = false;
+        let remoteTypesOk = false;
+
         const [remoteCampaigns, remoteContribs, remoteTypes, firestoreCampaigns] = await Promise.all([
-          campaignsApi.getCampaigns(currentActive).catch(() => []),
-          campaignsApi.getContributions(undefined, currentActive).catch(() => []),
-          campaignsApi.getContributionTypes(currentActive).catch(() => []),
+          campaignsApi.getCampaigns(currentActive).then((r) => { remoteCampaignsOk = true; return r; }).catch(() => []),
+          campaignsApi.getContributions(undefined, currentActive).then((r) => { remoteContribsOk = true; return r; }).catch(() => []),
+          campaignsApi.getContributionTypes(currentActive).then((r) => { remoteTypesOk = true; return r; }).catch(() => []),
           firestoreSyncService.fetchCampaignsFromFirestore(currentActive).catch(() => []),
         ]);
+
+        if (!isMounted) return;
 
         const byId = new Map<string, DonationCampaign>();
         for (const c of Array.isArray(remoteCampaigns) ? remoteCampaigns : []) {
@@ -456,19 +476,19 @@ export default function App() {
         }
 
         let finalCampaigns = Array.from(byId.values());
-        if (Array.isArray(remoteContribs) && remoteContribs.length > 0 && finalCampaigns.length > 0) {
+        if (Array.isArray(remoteContribs) && finalCampaigns.length > 0) {
           finalCampaigns = recalculateCampaignsFromContributions(finalCampaigns, remoteContribs);
         }
 
-        if (finalCampaigns && finalCampaigns.length > 0) {
+        if (remoteCampaignsOk || (firestoreCampaigns && firestoreCampaigns.length > 0)) {
           setCampaigns(finalCampaigns);
           saveCampaigns(finalCampaigns, currentActive, false);
         }
-        if (remoteContribs && remoteContribs.length > 0) {
+        if (remoteContribsOk) {
           setCampaignContributions(remoteContribs);
           saveCampaignContributions(remoteContribs, currentActive);
         }
-        if (remoteTypes && remoteTypes.length > 0) {
+        if (remoteTypesOk && remoteTypes.length > 0) {
           setContributionTypes(remoteTypes);
           saveContributionTypes(remoteTypes, currentActive);
         }
@@ -477,6 +497,9 @@ export default function App() {
       }
     }
     loadCampaignData();
+    return () => {
+      isMounted = false;
+    };
   }, [activeTenantId, currentAdminSession?.tenantId, role]);
 
   // Listen to Global Platform Admin changes to Contribution Types & Registration Fields
@@ -574,18 +597,28 @@ export default function App() {
         setRegistrationFields(getStoredRegistrationFields(currentActive));
       }
     };
-    const handleTransparencyRecordsUpdate = () => {
+    const handleTransparencyRecordsUpdate = (e?: any) => {
+      if (e?.detail?.skipRefetch) return;
       const rawActive = getActiveTenantId();
       const currentActive = !rawActive || rawActive === 'portal' ? MASTER_TEMPLATE_TENANT_ID : rawActive;
       Promise.all([
         syncTenantRecordsFromBackend(currentActive).catch(() => null),
         campaignsApi.getContributions(undefined, currentActive).catch(() => []),
-      ]).then(([syncedRecords, remoteCampaignContribs]) => {
-        if (syncedRecords && Array.isArray(syncedRecords.contributions)) {
-          setContributions(syncedRecords.contributions);
+        campaignsApi.getCampaigns(currentActive).catch(() => []),
+      ]).then(([syncedRecords, remoteCampaignContribs, remoteCampaigns]) => {
+        if (syncedRecords) {
+          if (Array.isArray(syncedRecords.contributions)) {
+            setContributions(applyPendingContributionStatusUpdates(currentActive, syncedRecords.contributions));
+          }
+          if (Array.isArray(syncedRecords.operations)) {
+            setOperations(calculateFinancials(syncedRecords.operations).processedOperations);
+          }
         }
         if (remoteCampaignContribs && Array.isArray(remoteCampaignContribs)) {
           setCampaignContributions(remoteCampaignContribs);
+        }
+        if (remoteCampaigns && Array.isArray(remoteCampaigns)) {
+          setCampaigns(remoteCampaigns);
         }
       });
     };
@@ -642,8 +675,11 @@ export default function App() {
           if (Array.isArray(syncedRecords.members)) {
             setMembers(syncedRecords.members);
           }
-          if (Array.isArray(syncedRecords.boardMembers)) {
+          if (hasAuthorizedBoardAccessInClient(currentActive) && Array.isArray(syncedRecords.boardMembers)) {
             setBoardMembers(syncedRecords.boardMembers);
+          } else {
+            setBoardMembers([]);
+            clearStoredBoardMembersCache(currentActive);
           }
 
           const { reconciledOperations, reconciledContributions, didUpdate } = reconcileMemberFinancialOperations(
@@ -920,6 +956,10 @@ export default function App() {
 
       if (liveAccount && liveAccount.status !== 'active') {
         // Account disabled by main admin
+        const revokedTenant = currentAdminSession.tenantId || activeTenantId;
+        clearTenantAuthToken(revokedTenant);
+        setBoardMembers([]);
+        clearStoredBoardMembersCache(revokedTenant);
         setCurrentAdminSession(null);
         clearCurrentAdminSession();
         setRole('member');
@@ -952,6 +992,65 @@ export default function App() {
     saveCampaigns(recalc, activeTenantId);
     campaignsApi.saveContributions(updated, activeTenantId).catch(console.error);
     campaignsApi.saveCampaigns(recalc, activeTenantId).catch(console.error);
+
+    // Keep linked MemberContributions synchronized when a campaign contribution payment status changes
+    const updatedById = new Map<string, CampaignContribution>();
+    for (const cc of updated) {
+      if (cc && cc.id) updatedById.set(cc.id, cc);
+    }
+    const nowIso = new Date().toISOString();
+    let linkedChanged = false;
+    const syncedMemberContribs = contributions.map((mc) => {
+      const ccId = mc.id.startsWith('contrib-don-')
+        ? mc.id.replace('contrib-don-', '')
+        : mc.financialOperationId?.startsWith('op-camp-')
+        ? mc.financialOperationId.replace('op-camp-', '')
+        : mc.id;
+      const linkedCc = updatedById.get(ccId);
+      if (!linkedCc) return mc;
+      const isCcUnpaid = isUnpaidContributionRecord(linkedCc);
+      const targetStatus: ContributionStatus = isCcUnpaid ? 'unpaid' : linkedCc.status;
+      const targetIsNegative = isCcUnpaid || targetStatus === 'rejected';
+      const targetSign: '+' | '-' = targetIsNegative ? '-' : '+';
+      const targetPaymentStatus = isCcUnpaid ? 'unpaid' : targetStatus === 'completed' ? 'paid' : targetStatus === 'rejected' ? 'rejected' : 'pending';
+      const targetIsPaid = targetStatus === 'completed' && !targetIsNegative;
+      if (
+        mc.status !== targetStatus ||
+        Boolean(mc.isNegative) !== targetIsNegative ||
+        (mc.amountSign || '+') !== targetSign ||
+        Boolean(mc.isPaid) !== targetIsPaid ||
+        mc.paymentStatus !== targetPaymentStatus
+      ) {
+        linkedChanged = true;
+        return {
+          ...mc,
+          status: targetStatus,
+          isNegative: targetIsNegative,
+          amountSign: targetSign,
+          paymentStatus: targetPaymentStatus,
+          isPaid: targetIsPaid,
+          updatedAt: nowIso,
+          _updatedAt: nowIso,
+        };
+      }
+      return mc;
+    });
+
+    if (linkedChanged) {
+      const {
+        reconciledContributions,
+        reconciledOperations,
+        removedOperationIds,
+      } = reconcileUnpaidContributionDeductions(syncedMemberContribs, operations, activeTenantId);
+      setContributions(reconciledContributions);
+      setOperations(reconciledOperations);
+      saveContributionsAndOperations(
+        reconciledContributions,
+        reconciledOperations,
+        activeTenantId,
+        removedOperationIds
+      );
+    }
   };
 
   const handleUpdateContributionTypes = (updated: ContributionTypeConfig[]) => {
@@ -1161,6 +1260,10 @@ export default function App() {
     firestoreSyncService.logout().catch(console.warn);
     clearCurrentAdminSession(effectiveTenantId);
     saveTenantData(TENANT_DATA_KEYS.CURRENT_ADMIN_SESSION, null, effectiveTenantId);
+    clearTenantAuthToken(effectiveTenantId);
+    clearMasterAuthToken();
+    setBoardMembers([]);
+    clearStoredBoardMembersCache(effectiveTenantId);
     saveData(KEYS.ROLE, 'member');
     setCurrentAdminSession(null);
     setRole('member');
@@ -1244,6 +1347,7 @@ export default function App() {
 
     // Reload all tenant-isolated data into React state (syncBackend = false so local cache doesn't overwrite server before loadTenantRecordsAndPolls completes)
     const tenantMembers = getStoredMembers(newTenantId);
+    setBoardMembers(getStoredBoardMembers(newTenantId));
     const tenantContribs = getStoredContributions(newTenantId);
     const tenantOps = getStoredOperations(newTenantId);
     const { reconciledOperations, reconciledContributions, didUpdate } = reconcileMemberFinancialOperations(
@@ -1333,7 +1437,8 @@ export default function App() {
           finalCamps = Array.from(byId.values());
         }
       } catch {}
-      if (finalCamps && finalCamps.length > 0) {
+      if (getActiveTenantId() !== newTenantId) return;
+      if (Array.isArray(camps)) {
         setCampaigns(finalCamps);
         saveCampaigns(finalCamps, newTenantId, false);
       }
@@ -1379,12 +1484,19 @@ export default function App() {
         setCurrentAdminSession(null);
         setRole('member');
         saveData(KEYS.ROLE, 'member');
+        setBoardMembers(getStoredBoardMembers(newTenantId));
         setActiveTab('home');
       } else {
         setLoggedInMember(null);
         const newAdminSession = !isTenantRestricted ? getStoredCurrentAdminSession(newTenantId) : null;
         const isAdminValid = isValidAdminSessionForTenant(newAdminSession, 'admin', newTenantId, tenantSubAdmins);
         setCurrentAdminSession(isAdminValid ? newAdminSession : null);
+        if (!isAdminValid || isTenantRestricted) {
+          setBoardMembers([]);
+          clearStoredBoardMembersCache(newTenantId);
+        } else {
+          setBoardMembers(getStoredBoardMembers(newTenantId));
+        }
         setActiveTab('home');
         setRole(isAdminValid && !isTenantRestricted ? 'admin' : 'member');
       }
@@ -1665,22 +1777,37 @@ export default function App() {
     return found || null;
   });
 
+  const canAccessBoardMembers = Boolean(
+    (!loggedInMember && isValidAdminSessionForTenant(currentAdminSession, role, activeTenantId, subAdmins)) ||
+    (loggedInMember && loggedInMember.status === 'active')
+  );
+
   // Keep loggedInMember synced with members list updates
   useEffect(() => {
     if (loggedInMember) {
+      const cleanTenant =
+        !activeTenantId || activeTenantId === 'portal'
+          ? MASTER_TEMPLATE_TENANT_ID
+          : activeTenantId;
       const refreshed = members.find((m) => m.id === loggedInMember.id);
       if (refreshed && refreshed.status === 'active') {
         setLoggedInMember(refreshed);
       } else if (refreshed && refreshed.status !== 'active') {
         setLoggedInMember(null);
-        clearLoggedInMemberId();
+        clearLoggedInMemberId(cleanTenant);
+        clearTenantAuthToken(cleanTenant);
+        setBoardMembers([]);
+        clearStoredBoardMembersCache(cleanTenant);
         if (activeTab === 'my-account') {
           setActiveTab('home');
         }
         addToast('error', 'تم تعليق أو تعطيل الحساب من طرف الإدارة. تم تسجيل الخروج.');
       } else if (!refreshed && members.length > 0) {
         setLoggedInMember(null);
-        clearLoggedInMemberId();
+        clearLoggedInMemberId(cleanTenant);
+        clearTenantAuthToken(cleanTenant);
+        setBoardMembers([]);
+        clearStoredBoardMembersCache(cleanTenant);
         if (activeTab === 'my-account') {
           setActiveTab('home');
         }
@@ -1880,17 +2007,20 @@ export default function App() {
           return refreshed ? { ...prevLogged, ...refreshed } : prevLogged;
         });
       },
-      onBoardMembers: (liveBoard) => {
-        saveData(getScopedKey(KEYS.BOARD_MEMBERS, cleanTenant), liveBoard);
-        setBoardMembers(liveBoard);
-      },
+      onBoardMembers: canAccessBoardMembers
+        ? (liveBoard) => {
+            saveData(getScopedKey(KEYS.BOARD_MEMBERS, cleanTenant), liveBoard);
+            setBoardMembers(liveBoard);
+          }
+        : undefined,
       onOperations: (liveOps) => {
         saveData(getScopedKey(KEYS.OPERATIONS, cleanTenant), liveOps);
         setOperations(liveOps);
       },
       onContributions: (liveContribs) => {
-        saveData(getScopedKey(KEYS.CONTRIBUTIONS, cleanTenant), liveContribs);
-        setContributions(liveContribs);
+        const guarded = applyPendingContributionStatusUpdates(cleanTenant, liveContribs);
+        saveData(getScopedKey(KEYS.CONTRIBUTIONS, cleanTenant), guarded);
+        setContributions(guarded);
       },
       onPolls: (livePolls) => {
         saveData(getScopedKey(KEYS.POLLS, cleanTenant), livePolls);
@@ -1917,7 +2047,41 @@ export default function App() {
     return () => {
       unsubscribeTenant();
     };
-  }, [activeTenantId]);
+  }, [activeTenantId, canAccessBoardMembers]);
+
+  // Enforce strict client-side data isolation for board members based on verified active membership or admin access
+  useEffect(() => {
+    const cleanTenant =
+      !activeTenantId || activeTenantId === 'portal'
+        ? MASTER_TEMPLATE_TENANT_ID
+        : activeTenantId;
+
+    if (!canAccessBoardMembers) {
+      setBoardMembers([]);
+      clearStoredBoardMembersCache(cleanTenant);
+      return;
+    }
+
+    let isCancelled = false;
+    syncTenantRecordsFromBackend(cleanTenant)
+      .then((synced) => {
+        if (isCancelled) return;
+        if (synced && Array.isArray(synced.boardMembers)) {
+          setBoardMembers(synced.boardMembers);
+        } else {
+          setBoardMembers(getStoredBoardMembers(cleanTenant));
+        }
+      })
+      .catch(() => {
+        if (!isCancelled) {
+          setBoardMembers(getStoredBoardMembers(cleanTenant));
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [activeTenantId, canAccessBoardMembers]);
 
   // Modals States
   const [isAdminAuthOpen, setIsAdminAuthOpen] = useState(false);
@@ -1988,8 +2152,20 @@ export default function App() {
     }
   }, [lang]);
 
-  // Recalculate Financials
-  const { totalIncomes, totalExpenses, currentBalance, processedOperations } = calculateFinancials(operations);
+  // Recalculate Unified Financials (Single Source of Truth for ManageContributions & ExpensesLedger)
+  const unifiedFinancials = useMemo(
+    () =>
+      calculateUnifiedAssociationFinancials({
+        operations,
+        contributions,
+        campaignContributions,
+        contributionTypes,
+        campaigns,
+        tenantId: activeTenantId,
+      }),
+    [operations, contributions, campaignContributions, contributionTypes, campaigns, activeTenantId]
+  );
+  const { totalIncomes, totalExpenses, currentBalance, processedOperations } = unifiedFinancials;
 
   // ---------------- OPERATIONS HANDLERS ----------------
   const handleSaveOperation = async (
@@ -2030,7 +2206,16 @@ export default function App() {
       const updatedList = operations.map((op) => (op.id === editId ? taggedUpdatedOp : op));
 
       // Also sync any linked MemberContribution in «سجل المساهمات والانخراطات»
-      const updatedContribs = contributions.map((c) => {
+      const removedContribIdsOnEdit: string[] = [];
+      let updatedContribs = contributions.filter((c) => {
+        const isLinked = c.financialOperationId === editId || c.id === `contrib-op-${editId}`;
+        if (isLinked && taggedUpdatedOp.type === 'expense') {
+          removedContribIdsOnEdit.push(c.id);
+          recordDeletedContributionId(c.id, cleanTenant);
+          return false;
+        }
+        return true;
+      }).map((c) => {
         if (c.financialOperationId === editId || c.id === `contrib-op-${editId}`) {
           return {
             ...c,
@@ -2047,6 +2232,32 @@ export default function App() {
         return c;
       });
 
+      // Keep linked CampaignContribution synced when editing an `op-camp-*` operation
+      if (editId.startsWith('op-camp-')) {
+        const linkedCcId = editId.replace('op-camp-', '');
+        if (campaignContributions.some((cc) => cc.id === linkedCcId)) {
+          const nowIso = new Date().toISOString();
+          const updatedCc = campaignContributions.map((cc) =>
+            cc.id === linkedCcId
+              ? {
+                  ...cc,
+                  amount: Number(taggedUpdatedOp.amount) || cc.amount,
+                  date: taggedUpdatedOp.date || cc.date,
+                  updatedAt: nowIso,
+                  _updatedAt: nowIso,
+                }
+              : cc
+          );
+          setCampaignContributions(updatedCc);
+          saveCampaignContributions(updatedCc, cleanTenant);
+          const recalcCampaigns = recalculateCampaignsFromContributions(campaigns, updatedCc);
+          setCampaigns(recalcCampaigns);
+          saveCampaigns(recalcCampaigns, cleanTenant);
+          campaignsApi.saveContributions(updatedCc, cleanTenant).catch(() => {});
+          campaignsApi.saveCampaigns(recalcCampaigns, cleanTenant).catch(() => {});
+        }
+      }
+
       const reconciled = reconcileUnpaidContributionDeductions(
         updatedContribs,
         updatedList,
@@ -2060,7 +2271,8 @@ export default function App() {
         reconciled.reconciledContributions,
         reconciled.reconciledOperations,
         cleanTenant,
-        reconciled.removedOperationIds
+        reconciled.removedOperationIds,
+        removedContribIdsOnEdit
       );
       if (!savedOk) {
         addToast('error', 'تعذر حفظ تعديلات العملية المالية في قاعدة البيانات الدائمة. يرجى إعادة المحاولة.');
@@ -2225,6 +2437,33 @@ export default function App() {
 
     const updatedOps = operations.filter((op) => op.id !== id);
     const updatedContribs = contributions.filter((c) => !removedContribIds.includes(c.id));
+
+    // Also synchronize linked CampaignContribution if an `op-camp-*` operation is removed
+    const linkedCampCcId = id.startsWith('op-camp-') ? id.replace('op-camp-', '') : null;
+    if (linkedCampCcId && campaignContributions.some((cc) => cc.id === linkedCampCcId)) {
+      const nowIso = new Date().toISOString();
+      const updatedCc = campaignContributions.map((cc) =>
+        cc.id === linkedCampCcId
+          ? {
+              ...cc,
+              status: 'unpaid' as const,
+              isNegative: true,
+              amountSign: '-' as const,
+              paymentStatus: 'unpaid' as const,
+              isPaid: false,
+              updatedAt: nowIso,
+              _updatedAt: nowIso,
+            }
+          : cc
+      );
+      setCampaignContributions(updatedCc);
+      saveCampaignContributions(updatedCc, cleanTenant);
+      const recalcCampaigns = recalculateCampaignsFromContributions(campaigns, updatedCc);
+      setCampaigns(recalcCampaigns);
+      saveCampaigns(recalcCampaigns, cleanTenant);
+      campaignsApi.saveContributions(updatedCc, cleanTenant).catch(() => {});
+      campaignsApi.saveCampaigns(recalcCampaigns, cleanTenant).catch(() => {});
+    }
 
     const reconciled = reconcileUnpaidContributionDeductions(
       updatedContribs,
@@ -3029,17 +3268,22 @@ export default function App() {
   };
 
   const handleMemberRegistrationSuccess = async (newMember: Member, plainPassword?: string) => {
+    const cleanTenant =
+      !activeTenantId || activeTenantId === 'portal'
+        ? currentTenant?.id || MASTER_TEMPLATE_TENANT_ID
+        : activeTenantId;
+
     // Ensure member role and clear any admin session
-    clearCurrentAdminSession();
-    saveTenantData(TENANT_DATA_KEYS.CURRENT_ADMIN_SESSION, null, activeTenantId);
+    clearCurrentAdminSession(cleanTenant);
+    saveTenantData(TENANT_DATA_KEYS.CURRENT_ADMIN_SESSION, null, cleanTenant);
     setCurrentAdminSession(null);
     setRole('member');
     saveData(KEYS.ROLE, 'member');
 
-    // Add to members list and save
+    // Add to members list and save to backend
     const updatedMembers = [newMember, ...members];
-    saveMembers(updatedMembers);
     setMembers(updatedMembers);
+    await saveMembers(updatedMembers, cleanTenant, true);
 
     // If there is an annual fee assigned, create corresponding financial record
     const fee = Number(newMember.annualFee) || 0;
@@ -3088,7 +3332,7 @@ export default function App() {
       const updatedContribs = [newContrib, ...contributions];
       const calculated = calculateFinancials(updatedOps);
 
-      await saveContributionsAndOperations(updatedContribs, calculated.processedOperations, activeTenantId);
+      await saveContributionsAndOperations(updatedContribs, calculated.processedOperations, cleanTenant);
       setContributions(updatedContribs);
       setOperations(calculated.processedOperations);
     }
@@ -3098,30 +3342,58 @@ export default function App() {
       'create',
       'member',
       `تسجيل منخرط جديد ذاتياً عبر البوابة: ${newMember.fullName} (${newMember.memberCode}) - الهاتف: ${newMember.phone}`,
-      newMember.fullName
+      newMember.fullName,
+      undefined,
+      undefined,
+      cleanTenant
     );
     setAuditLogs(updatedLogs);
 
-    // Log the member in automatically and direct to the association's general public interface
-    setLoggedInMember(newMember);
-    saveLoggedInMemberId(newMember.id);
-    setActiveTab('home');
+    if (newMember.status === 'active') {
+      const loginIdentifier = newMember.username || newMember.phone || newMember.memberCode;
+      if (loginIdentifier && plainPassword) {
+        await authenticatePlatformAccount(loginIdentifier, plainPassword, cleanTenant).catch(() => null);
+      }
 
-    try {
-      confetti({
-        particleCount: 70,
-        spread: 65,
-        origin: { y: 0.6 },
-      });
-    } catch (e) {}
+      // Log the approved active member in and direct to the association's general public interface
+      setLoggedInMember(newMember);
+      saveLoggedInMemberId(newMember.id, cleanTenant);
+      setActiveTab('home');
 
-    addToast('success', `تهانينا يا ${newMember.fullName}! تم تسجيل طلب انخراطك بنجاح (${newMember.memberCode}) وإضافته إلى سجل المنخرطين بالجمعية.`);
+      try {
+        confetti({
+          particleCount: 70,
+          spread: 65,
+          origin: { y: 0.6 },
+        });
+      } catch (e) {}
+
+      addToast('success', `تهانينا يا ${newMember.fullName}! تم تسجيل طلب انخراطك بنجاح (${newMember.memberCode}) وإضافته إلى سجل المنخرطين بالجمعية.`);
+    } else {
+      setLoggedInMember(null);
+      clearLoggedInMemberId(cleanTenant);
+      clearTenantAuthToken(cleanTenant);
+      setBoardMembers([]);
+      clearStoredBoardMembersCache(cleanTenant);
+      setActiveTab('home');
+      addToast(
+        'info',
+        `تم تسجيل طلب انخراطك بنجاح (${newMember.memberCode}) وهو قيد المراجعة من طرف إدارة الجمعية. بمجرد اعتماد العضوية وتسجيل الدخول بحسابك ستتمكن من الاطلاع على أعضاء مكتب الجمعية.`
+      );
+    }
   };
 
   const handleMemberLogout = () => {
+    const cleanTenant =
+      !activeTenantId || activeTenantId === 'portal'
+        ? currentTenant?.id || MASTER_TEMPLATE_TENANT_ID
+        : activeTenantId;
     firestoreSyncService.logout().catch(console.warn);
     setLoggedInMember(null);
-    clearLoggedInMemberId();
+    clearLoggedInMemberId(cleanTenant);
+    clearTenantAuthToken(cleanTenant);
+    setBoardMembers([]);
+    clearStoredBoardMembersCache(cleanTenant);
     if (activeTab === 'my-account') {
       setActiveTab('home');
     }
@@ -3535,43 +3807,247 @@ export default function App() {
     return { success: true, message: 'تم تسجيل وتوثيق المساهمة بنجاح!', contribution: newContribution };
   };
 
-  const handleUpdateContributionStatus = (id: string, newStatus: ContributionStatus) => {
+  const handleUpdateContributionStatus = async (id: string, newStatus: ContributionStatus) => {
     const permCheck = checkAdminPermission(currentAdminSession, subAdmins, 'contributions', 'canEdit');
     if (!permCheck.allowed) {
       addToast('error', permCheck.reason || 'تم رفض العملية أمنياً: لا تملك صلاحية تعديل حالة المساهمات.');
       return;
     }
 
-    const targetContrib = contributions.find((c) => c.id === id);
-    if (!targetContrib) return;
+    const targetTenant =
+      !activeTenantId || activeTenantId === 'portal' ? MASTER_TEMPLATE_TENANT_ID : activeTenantId;
+    const nowIso = new Date().toISOString();
 
-    const previousStatus = targetContrib.status;
-    if (previousStatus === newStatus) return;
-
-    const updatedContribs = contributions.map((c) =>
-      c.id === id ? { ...c, status: newStatus } : c
-    );
-
-    const {
-      reconciledContributions,
-      reconciledOperations,
-      removedOperationIds,
-    } = reconcileUnpaidContributionDeductions(updatedContribs, operations, activeTenantId);
-
-    setContributions(reconciledContributions);
-    setOperations(reconciledOperations);
-
-    saveContributionsAndOperations(
-      reconciledContributions,
-      reconciledOperations,
-      activeTenantId,
-      removedOperationIds
-    );
-
-    const wasUnpaid = isUnpaidContributionStatus(previousStatus);
     const isNowUnpaid = isUnpaidContributionStatus(newStatus);
+    const isNowNegative = isNowUnpaid || newStatus === 'rejected';
+    const nextAmountSign: '+' | '-' = isNowNegative ? '-' : '+';
+    const nextPaymentStatus = isNowUnpaid
+      ? 'unpaid'
+      : newStatus === 'completed'
+      ? 'paid'
+      : newStatus === 'rejected'
+      ? 'rejected'
+      : 'pending';
+    const nextIsPaid = newStatus === 'completed' && !isNowNegative;
+
+    const targetContrib = contributions.find(
+      (c) =>
+        c.id === id ||
+        c.id === `contrib-don-${id}` ||
+        c.financialOperationId === `op-camp-${id}`
+    );
+
+    // Handle campaign-only contributions (e.g., seeded sample campaign donations not duplicated into MemberContribution)
+    if (!targetContrib) {
+      const targetCc = campaignContributions.find((cc) => cc.id === id);
+      if (!targetCc) return;
+
+      const resolvedCcState = resolveActualPaymentState(targetCc);
+      const normalizedTargetState = isNowUnpaid ? 'unpaid' : newStatus;
+      if (
+        resolvedCcState === normalizedTargetState &&
+        targetCc.status === normalizedTargetState &&
+        Boolean(targetCc.isNegative) === isNowNegative &&
+        (targetCc.amountSign || '+') === nextAmountSign &&
+        Boolean(targetCc.isPaid) === nextIsPaid
+      ) {
+        return;
+      }
+
+      const updatedCc = campaignContributions.map((cc) =>
+        cc.id === targetCc.id
+          ? {
+              ...cc,
+              status: normalizedTargetState as any,
+              isNegative: isNowNegative,
+              amountSign: nextAmountSign,
+              paymentStatus: nextPaymentStatus as any,
+              isPaid: nextIsPaid,
+              updatedAt: nowIso,
+              _updatedAt: nowIso,
+            }
+          : cc
+      );
+      setCampaignContributions(updatedCc);
+      saveCampaignContributions(updatedCc, targetTenant);
+      const recalcCampaigns = recalculateCampaignsFromContributions(campaigns, updatedCc);
+      setCampaigns(recalcCampaigns);
+      saveCampaigns(recalcCampaigns, targetTenant);
+      await Promise.all([
+        campaignsApi.saveContributions(updatedCc, targetTenant).catch(() => {}),
+        campaignsApi.saveCampaigns(recalcCampaigns, targetTenant).catch(() => {}),
+      ]);
+      addToast('success', 'تم تحديث وحفظ حالة المساهمة ومزامنتها في السجل المالي وسجل الشفافية بنجاح.');
+      return;
+    }
+
+    const resolvedId = targetContrib.id;
+    const resolvedCurrentState = resolveActualPaymentState(targetContrib);
+    const normalizedTargetState = isNowUnpaid ? 'unpaid' : newStatus;
+
+    if (
+      resolvedCurrentState === normalizedTargetState &&
+      targetContrib.status === normalizedTargetState &&
+      Boolean(targetContrib.isNegative) === isNowNegative &&
+      (targetContrib.amountSign || '+') === nextAmountSign &&
+      Boolean(targetContrib.isPaid) === nextIsPaid
+    ) {
+      return;
+    }
+
+    const wasUnpaid = isUnpaidContributionRecord(targetContrib);
+
+    const statusPatch: Partial<MemberContribution> & { status: ContributionStatus } = {
+      status: normalizedTargetState,
+      isNegative: isNowNegative,
+      amountSign: nextAmountSign,
+      paymentStatus: nextPaymentStatus,
+      isPaid: nextIsPaid,
+      updatedAt: nowIso,
+      _updatedAt: nowIso,
+      tenantId: targetTenant,
+      associationId: targetTenant,
+    };
+
+    const updatedTargetContrib: MemberContribution = {
+      ...targetContrib,
+      ...statusPatch,
+    };
+
+    // Guard against stale in-flight GETs or out-of-order Firestore snapshots immediately
+    registerPendingContributionStatusUpdate(targetTenant, resolvedId, statusPatch, nowIso);
+
+    const updatedContribs = contributions.map((c) => (c.id === resolvedId ? updatedTargetContrib : c));
+
+    // Reconcile financial operations when unpaid deduction presence changes or needs repair
+    const hasDeductionOp = operations.some((op) => op.id === `op-unpaid-deduction-${resolvedId}`);
+    const needsOpReconcile = wasUnpaid !== isNowUnpaid || (isNowUnpaid && !hasDeductionOp) || (!isNowUnpaid && hasDeductionOp);
+    let nextReconciledContribs = updatedContribs;
+    let nextReconciledOps = operations;
+    if (needsOpReconcile) {
+      const reconciled = reconcileUnpaidContributionDeductions(updatedContribs, operations, targetTenant);
+      nextReconciledContribs = reconciled.reconciledContributions;
+      nextReconciledOps = reconciled.reconciledOperations;
+      setOperations(nextReconciledOps);
+      saveData(getScopedKey(KEYS.OPERATIONS, targetTenant), nextReconciledOps);
+    }
+
+    // Immediate optimistic state update using functional updater so rapid edits never clobber each other
+    setContributions((prev) =>
+      prev.map((c) => (c.id === resolvedId ? { ...c, ...statusPatch } : c))
+    );
+    saveData(getScopedKey(KEYS.CONTRIBUTIONS, targetTenant), nextReconciledContribs);
+
+    // Sync payment status to any linked CampaignContribution so transparency totals update consistently
+    const linkedCcId = resolvedId.startsWith('contrib-don-')
+      ? resolvedId.replace('contrib-don-', '')
+      : targetContrib.financialOperationId?.startsWith('op-camp-')
+      ? targetContrib.financialOperationId.replace('op-camp-', '')
+      : resolvedId;
+
+    const hasLinkedCc = campaignContributions.some((cc) => cc.id === linkedCcId);
+    const linkedCampaignTasks: Promise<any>[] = [];
+    if (hasLinkedCc) {
+      const normalizedCcStatus = isNowUnpaid ? ('unpaid' as const) : newStatus;
+      const updatedCc = campaignContributions.map((cc) =>
+        cc.id === linkedCcId
+          ? {
+              ...cc,
+              status: normalizedCcStatus,
+              isNegative: isNowNegative,
+              amountSign: nextAmountSign,
+              paymentStatus: nextPaymentStatus,
+              isPaid: nextIsPaid,
+              updatedAt: nowIso,
+              _updatedAt: nowIso,
+            }
+          : cc
+      );
+      setCampaignContributions(updatedCc);
+      saveCampaignContributions(updatedCc, targetTenant);
+      const recalcCampaigns = recalculateCampaignsFromContributions(campaigns, updatedCc);
+      setCampaigns(recalcCampaigns);
+      saveCampaigns(recalcCampaigns, targetTenant);
+      linkedCampaignTasks.push(
+        campaignsApi.saveContributions(updatedCc, targetTenant).catch(() => {}),
+        campaignsApi.saveCampaigns(recalcCampaigns, targetTenant).catch(() => {})
+      );
+    }
+
+    // Await atomic permanent persistence to backend disk + Cloud Firestore
+    const [persistResult] = await Promise.all([
+      updateContributionStatusPersisted(
+        resolvedId,
+        normalizedTargetState,
+        updatedTargetContrib,
+        targetTenant,
+        currentAdminSession
+      ),
+      ...linkedCampaignTasks,
+    ]);
+
+    markPendingContributionStatusSettled(targetTenant, resolvedId, nowIso, persistResult.success);
+
+    if (!persistResult.success) {
+      // Revert optimistic UI state if database persistence failed so UI always matches DB
+      setContributions((prev) =>
+        prev.map((c) => (c.id === resolvedId ? targetContrib : c))
+      );
+      saveData(
+        getScopedKey(KEYS.CONTRIBUTIONS, targetTenant),
+        contributions
+      );
+      if (needsOpReconcile) {
+        setOperations(operations);
+        saveData(getScopedKey(KEYS.OPERATIONS, targetTenant), operations);
+      }
+      addToast('error', persistResult.error || 'تعذر حفظ تغيير الحالة في قاعدة البيانات. يرجى المحاولة مجدداً.');
+      return;
+    }
+
+    if (Array.isArray(persistResult.contributions)) {
+      const guardedList = applyPendingContributionStatusUpdates(targetTenant, persistResult.contributions);
+      setContributions(guardedList);
+      saveData(getScopedKey(KEYS.CONTRIBUTIONS, targetTenant), guardedList);
+    }
+    if (needsOpReconcile && Array.isArray(persistResult.operations)) {
+      const calculatedOps = calculateFinancials(persistResult.operations).processedOperations;
+      setOperations(calculatedOps);
+      saveData(getScopedKey(KEYS.OPERATIONS, targetTenant), calculatedOps);
+    }
+
     const amountNum = Number(targetContrib.amount) || 0;
-    const newFinancials = calculateFinancials(reconciledOperations);
+    const finalContribsForBalance = Array.isArray(persistResult.contributions)
+      ? applyPendingContributionStatusUpdates(targetTenant, persistResult.contributions)
+      : nextReconciledContribs;
+    const finalOpsForBalance =
+      needsOpReconcile && Array.isArray(persistResult.operations)
+        ? persistResult.operations
+        : nextReconciledOps;
+    const finalCampaignContribsForBalance = hasLinkedCc
+      ? campaignContributions.map((cc) =>
+          cc.id === linkedCcId
+            ? {
+                ...cc,
+                status: isNowUnpaid ? ('unpaid' as const) : newStatus,
+                isNegative: isNowNegative,
+                amountSign: nextAmountSign,
+                paymentStatus: nextPaymentStatus,
+                isPaid: nextIsPaid,
+                updatedAt: nowIso,
+                _updatedAt: nowIso,
+              }
+            : cc
+        )
+      : campaignContributions;
+    const newFinancials = calculateUnifiedAssociationFinancials({
+      operations: finalOpsForBalance,
+      contributions: finalContribsForBalance,
+      campaignContributions: finalCampaignContribsForBalance,
+      contributionTypes,
+      campaigns,
+      tenantId: targetTenant,
+    });
     const adminActorName = currentAdminSession?.fullName || 'إدارة الجمعية';
 
     if (!wasUnpaid && isNowUnpaid) {
@@ -3582,7 +4058,7 @@ export default function App() {
         adminActorName,
         currentAdminSession?.type,
         currentAdminSession?.phone,
-        activeTenantId
+        targetTenant
       );
       setAuditLogs(updatedLogs);
       addToast(
@@ -3603,7 +4079,7 @@ export default function App() {
         adminActorName,
         currentAdminSession?.type,
         currentAdminSession?.phone,
-        activeTenantId
+        targetTenant
       );
       setAuditLogs(updatedLogs);
       addToast(
@@ -3611,39 +4087,93 @@ export default function App() {
         `تم تحديث حالة المساهمة إلى «${statusLabel}» واسترجاع مبلغ ${amountNum.toLocaleString()} د.م إلى الرصيد المالي للجمعية.`
       );
     } else {
-      addToast('success', 'تم تحديث حالة المساهمة بنجاح');
+      addToast('success', 'تم تحديث وحفظ حالة المساهمة بنجاح');
     }
   };
 
-  const handleDeleteContribution = (id: string) => {
+  const handleDeleteContribution = async (id: string) => {
     const permCheck = checkAdminPermission(currentAdminSession, subAdmins, 'contributions', 'canDelete');
     if (!permCheck.allowed) {
       addToast('error', permCheck.reason || 'تم رفض العملية أمنياً: لا تملك صلاحية حذف المساهمات.');
       return;
     }
-    const contribToDelete = contributions.find((c) => c.id === id);
-    if (!contribToDelete) return;
 
-    // Preserve all original contribution data and transition status from 'pending' to 'unpaid' («لم يتم الدفع») with '-' sign
+    const targetTenant =
+      !activeTenantId || activeTenantId === 'portal' ? MASTER_TEMPLATE_TENANT_ID : activeTenantId;
+    const nowIso = new Date().toISOString();
+
+    const contribToDelete = contributions.find(
+      (c) =>
+        c.id === id ||
+        c.id === `contrib-don-${id}` ||
+        c.financialOperationId === `op-camp-${id}`
+    );
+
+    if (!contribToDelete) {
+      const ccToMarkUnpaid = campaignContributions.find((cc) => cc.id === id);
+      if (!ccToMarkUnpaid) return;
+      const updatedCc = campaignContributions.map((cc) =>
+        cc.id === ccToMarkUnpaid.id
+          ? {
+              ...cc,
+              status: 'unpaid' as const,
+              isNegative: true,
+              amountSign: '-' as const,
+              paymentStatus: 'unpaid' as const,
+              isPaid: false,
+              updatedAt: nowIso,
+              _updatedAt: nowIso,
+            }
+          : cc
+      );
+      setCampaignContributions(updatedCc);
+      saveCampaignContributions(updatedCc, targetTenant);
+      const recalcCampaigns = recalculateCampaignsFromContributions(campaigns, updatedCc);
+      setCampaigns(recalcCampaigns);
+      saveCampaigns(recalcCampaigns, targetTenant);
+      await Promise.all([
+        campaignsApi.saveContributions(updatedCc, targetTenant).catch(() => {}),
+        campaignsApi.saveCampaigns(recalcCampaigns, targetTenant).catch(() => {}),
+      ]);
+      addToast('info', 'تم تحويل حالة العملية إلى «لم يتم الدفع» وتحديث إشارة المبلغ إلى (-) في سجل الشفافية المباشر.');
+      return;
+    }
+
+    const resolvedId = contribToDelete.id;
+
+    const unpaidPatch: Partial<MemberContribution> & { status: ContributionStatus } = {
+      status: 'unpaid' as const,
+      isNegative: true,
+      amountSign: '-' as const,
+      paymentStatus: 'unpaid' as const,
+      isPaid: false,
+      updatedAt: nowIso,
+      _updatedAt: nowIso,
+      tenantId: targetTenant,
+      associationId: targetTenant,
+    };
+
+    registerPendingContributionStatusUpdate(targetTenant, resolvedId, unpaidPatch, nowIso);
+
+    // Preserve all original contribution data and transition status to 'unpaid' («لم يتم الدفع») with '-' sign
     const updatedContribs = contributions.map((c) =>
-      c.id === id
+      c.id === resolvedId
         ? {
             ...c,
-            status: 'unpaid' as const,
-            isNegative: true,
-            amountSign: '-' as const,
+            ...unpaidPatch,
           }
         : c
     );
 
     // Also transition any linked CampaignContribution (`contrib-don-${cc.id}`) to 'unpaid' with '-' sign and persist to backend & Firebase
-    const linkedCcId = id.startsWith('contrib-don-')
-      ? id.replace('contrib-don-', '')
+    const linkedCcId = resolvedId.startsWith('contrib-don-')
+      ? resolvedId.replace('contrib-don-', '')
       : contribToDelete.financialOperationId?.startsWith('op-camp-')
       ? contribToDelete.financialOperationId.replace('op-camp-', '')
-      : id;
+      : resolvedId;
 
     const hasLinkedCc = campaignContributions.some((cc) => cc.id === linkedCcId);
+    const linkedTasks: Promise<any>[] = [];
     if (hasLinkedCc) {
       const updatedCc = campaignContributions.map((cc) =>
         cc.id === linkedCcId
@@ -3652,31 +4182,44 @@ export default function App() {
               status: 'unpaid' as const,
               isNegative: true,
               amountSign: '-' as const,
+              paymentStatus: 'unpaid' as const,
+              isPaid: false,
+              updatedAt: nowIso,
+              _updatedAt: nowIso,
             }
           : cc
       );
       setCampaignContributions(updatedCc);
-      saveCampaignContributions(updatedCc, activeTenantId);
-      campaignsApi.saveContributions(updatedCc, activeTenantId).catch(() => {});
+      saveCampaignContributions(updatedCc, targetTenant);
+      const recalcCampaigns = recalculateCampaignsFromContributions(campaigns, updatedCc);
+      setCampaigns(recalcCampaigns);
+      saveCampaigns(recalcCampaigns, targetTenant);
+      linkedTasks.push(
+        campaignsApi.saveContributions(updatedCc, targetTenant).catch(() => {}),
+        campaignsApi.saveCampaigns(recalcCampaigns, targetTenant).catch(() => {})
+      );
     }
 
     const {
       reconciledContributions,
       reconciledOperations,
       removedOperationIds,
-    } = reconcileUnpaidContributionDeductions(updatedContribs, operations, activeTenantId);
+    } = reconcileUnpaidContributionDeductions(updatedContribs, operations, targetTenant);
 
     setContributions(reconciledContributions);
     setOperations(reconciledOperations);
 
-    saveContributionsAndOperations(
-      reconciledContributions,
-      reconciledOperations,
-      activeTenantId,
-      removedOperationIds
-    );
+    const [savedOk] = await Promise.all([
+      saveContributionsAndOperations(
+        reconciledContributions,
+        reconciledOperations,
+        targetTenant,
+        removedOperationIds
+      ),
+      ...linkedTasks,
+    ]);
 
-    window.dispatchEvent(new CustomEvent('transparency_records_updated', { detail: { tenantId: activeTenantId } }));
+    markPendingContributionStatusSettled(targetTenant, resolvedId, nowIso, Boolean(savedOk));
     addToast('info', 'تم تحويل حالة العملية إلى «لم يتم الدفع» وتحديث إشارة المبلغ إلى (-) في سجل الشفافية المباشر.');
   };
 
@@ -3691,10 +4234,10 @@ export default function App() {
       ]);
       if (syncedRecords) {
         if (Array.isArray(syncedRecords.contributions)) {
-          setContributions(syncedRecords.contributions);
+          setContributions(applyPendingContributionStatusUpdates(currentActive, syncedRecords.contributions));
         }
         if (Array.isArray(syncedRecords.operations)) {
-          setOperations(syncedRecords.operations);
+          setOperations(calculateFinancials(syncedRecords.operations).processedOperations);
         }
       }
       if (remoteCampaignContribs && Array.isArray(remoteCampaignContribs)) {
@@ -3924,6 +4467,26 @@ export default function App() {
   const isMasterAdminEnteringDashboard =
     role === 'admin' && currentAdminSession?.isMasterPlatformAdmin === true;
 
+  // Authoritative permission check for printing the official financial statement ("طباعة كشف مالي رسمي")
+  // Allowed ONLY for verified association admins (or master platform admin in dashboard) and logged-in active registered members
+  const hasValidAssociationAdminSession =
+    !loggedInMember &&
+    isValidAdminSessionForTenant(currentAdminSession, role, activeTenantId, subAdmins);
+  const isAuthenticatedRegisteredMember = Boolean(
+    loggedInMember && loggedInMember.status === 'active'
+  );
+  const canPrintOfficialReport = canPrintOfficialFinancialReport({
+    isAdmin: hasValidAssociationAdminSession || isMasterAdminEnteringDashboard,
+    isMember: isAuthenticatedRegisteredMember,
+  });
+
+  const handleOpenOfficialFinancialReport = () => {
+    if (!canPrintOfficialReport) {
+      return;
+    }
+    setReceiptModalData({ type: 'financial_statement' });
+  };
+
   // If the association is in pending_subscription or pending_activation status (and not Master Admin), show the activation screen
   if (
     (currentTenant.status === 'pending_subscription' || currentTenant.status === 'pending_activation') &&
@@ -4142,9 +4705,10 @@ export default function App() {
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
             onOpenMediaModal={handleOpenMediaModal}
-            onOpenReportModal={() => setReceiptModalData({ type: 'financial_statement' })}
+            onOpenReportModal={handleOpenOfficialFinancialReport}
             onOpenDonationModal={(campaign) => setDonationModalCampaign(campaign)}
             uiElements={uiElements}
+            canViewBoardMembers={canAccessBoardMembers}
           />
         )}
 
@@ -4305,8 +4869,8 @@ export default function App() {
         )}
 
         {activeTab === 'board-members' && (
-          !isUIElementVisible('board_members') ? (
-            <div className="bg-white rounded-3xl p-8 sm:p-12 border border-slate-200 text-center max-w-xl mx-auto my-12 shadow-sm space-y-4" dir="rtl">
+          !canAccessBoardMembers ? (
+            <div className="bg-white rounded-3xl p-8 sm:p-12 border border-slate-200 text-center max-w-xl mx-auto my-12 shadow-sm space-y-5" dir="rtl">
               <div className="w-16 h-16 rounded-2xl bg-amber-50 text-amber-600 border border-amber-200 flex items-center justify-center mx-auto shadow-sm">
                 <ShieldCheck className="w-8 h-8" />
               </div>
@@ -4314,12 +4878,20 @@ export default function App() {
                 قسم «أعضاء مكتب الجمعية» متاح حصرياً للمنخرطين
               </h3>
               <p className="text-sm text-slate-600 leading-relaxed">
-                تم تخصيص هذا القسم ليكون مرئياً ومتاحاً فقط للمنخرطين المسجلين في الجمعية. إذا كنت منخرطاً، يرجى تسجيل الدخول إلى حسابك لعرض هذا القسم فوراً.
+                هذا القسم متاح فقط للمنخرطين في الجمعية. يرجى الانخراط في الجمعية لكي تتمكن من الاطلاع على أعضاء مكتب الجمعية.
               </p>
-              <div className="flex flex-wrap items-center justify-center gap-3 pt-3">
+              <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+                <button
+                  onClick={() => setIsMemberRegistrationOpen(true)}
+                  className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm transition-all shadow-sm flex items-center gap-2 cursor-pointer"
+                  style={{ backgroundColor: settings.themeColors?.buttonColor || settings.themeColors?.primaryColor || '#059669' }}
+                >
+                  <UserPlus className="w-4 h-4" />
+                  <span>انخرط الآن</span>
+                </button>
                 <button
                   onClick={() => setIsMemberAuthOpen(true)}
-                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm transition-all shadow-sm flex items-center gap-2 cursor-pointer"
+                  className="px-5 py-2.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 font-bold text-sm transition-all flex items-center gap-2 cursor-pointer"
                 >
                   <UserCheck className="w-4 h-4" />
                   <span>تسجيل دخول المنخرطين</span>
@@ -4342,6 +4914,9 @@ export default function App() {
               settings={settings}
               lang={lang}
               role={role}
+              canViewBoardMembers={canAccessBoardMembers}
+              onRequestRegister={() => setIsMemberRegistrationOpen(true)}
+              onRequestLogin={() => setIsMemberAuthOpen(true)}
               onBack={() => setActiveTab('home')}
             />
           )
@@ -4380,11 +4955,12 @@ export default function App() {
             </div>
           ) : (
             <ExpensesLedger
-              operations={operations}
+              operations={processedOperations}
               contributions={contributions}
               campaignContributions={campaignContributions}
               contributionTypes={contributionTypes}
               campaigns={campaigns}
+              unifiedFinancials={unifiedFinancials}
               role={role}
               lang={lang}
               tenantId={activeTenantId}
@@ -4394,6 +4970,7 @@ export default function App() {
               canAdd={role === 'admin' ? checkAdminPermission(currentAdminSession, subAdmins, 'operations', 'canAdd').allowed : false}
               canEdit={role === 'admin' ? checkAdminPermission(currentAdminSession, subAdmins, 'operations', 'canEdit').allowed : false}
               canDelete={role === 'admin' ? checkAdminPermission(currentAdminSession, subAdmins, 'operations', 'canDelete').allowed : false}
+              canPrintReport={canPrintOfficialReport}
               onOpenAddOperation={() => {
                 if (role === 'admin' && !checkAdminPermission(currentAdminSession, subAdmins, 'operations', 'canAdd').allowed) return;
                 setIsAddOperationOpen(true);
@@ -4423,7 +5000,7 @@ export default function App() {
               }}
               onOpenMediaModal={handleOpenMediaModal}
               onExportCSV={() => exportOperationsCSV(operations)}
-              onPrintReport={() => setReceiptModalData({ type: 'financial_statement' })}
+              onPrintReport={handleOpenOfficialFinancialReport}
               onDeleteOperation={role === 'admin' ? handleDeleteOperation : undefined}
               onBackToHome={() => setActiveTab('home')}
               onRefreshLiveRecords={handleRefreshTransparencyRecords}
@@ -4517,6 +5094,7 @@ export default function App() {
             totalIncomes={totalIncomes}
             totalExpenses={totalExpenses}
             currentBalance={currentBalance}
+            unifiedFinancials={unifiedFinancials}
             onOpenAddActivity={() => {
               setEditingActivity(null);
               setIsAddActivityOpen(true);
@@ -4641,9 +5219,10 @@ export default function App() {
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
             onOpenMediaModal={handleOpenMediaModal}
-            onOpenReportModal={() => setReceiptModalData({ type: 'financial_statement' })}
+            onOpenReportModal={handleOpenOfficialFinancialReport}
             onOpenDonationModal={(campaign) => setDonationModalCampaign(campaign)}
             uiElements={uiElements}
+            canViewBoardMembers={canAccessBoardMembers}
           />
         )}
       </main>
@@ -4855,6 +5434,7 @@ export default function App() {
         members={members}
         subAdmins={subAdmins}
         lang={lang}
+        activeTenantId={!activeTenantId || activeTenantId === 'portal' ? (currentTenant?.id || MASTER_TEMPLATE_TENANT_ID) : activeTenantId}
         onOpenRegisterModal={() => setIsMemberRegistrationOpen(true)}
       />
 
@@ -5002,7 +5582,7 @@ export default function App() {
       )}
 
       {/* Printable Receipt & Financial Statement Modal */}
-      {receiptModalData && (
+      {receiptModalData && (receiptModalData.type !== 'financial_statement' || canPrintOfficialReport) && (
         <ReceiptModal
           isOpen={Boolean(receiptModalData)}
           onClose={() => setReceiptModalData(null)}
@@ -5016,6 +5596,8 @@ export default function App() {
           cardSettings={memberCardSettings}
           lang={lang}
           canViewBalance={role === 'admin' || Boolean(loggedInMember) || isMasterAdminEnteringDashboard}
+          canPrintFinancialStatement={canPrintOfficialReport}
+          unifiedFinancials={unifiedFinancials}
         />
       )}
 

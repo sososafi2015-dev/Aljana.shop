@@ -26,7 +26,8 @@ import {
   Landmark,
   Scale,
   Sparkles,
-  HeartHandshake
+  HeartHandshake,
+  XCircle
 } from 'lucide-react';
 import {
   FinancialOperation,
@@ -41,10 +42,17 @@ import {
 import { translations } from '../translations';
 import { BackToHomeButton } from './BackToHomeButton';
 import {
-  unifyAndDeduplicateContributions,
+  calculateUnifiedAssociationFinancials,
+  UnifiedAssociationFinancials,
   UnifiedTransparencyContribution,
 } from '../utils/transparencyUtils';
 import { TransparencyContributionsView } from './TransparencyContributionsView';
+import { canPrintOfficialFinancialReport } from '../utils/visibilityRules';
+
+const transparencyPortalBgUrl = new URL(
+  '../assets/images/transparency_portal_bg_1795520656509.jpg',
+  import.meta.url
+).href;
 
 interface ExpensesLedgerProps {
   operations: FinancialOperation[];
@@ -69,7 +77,9 @@ interface ExpensesLedgerProps {
   canAdd?: boolean;
   canEdit?: boolean;
   canDelete?: boolean;
+  canPrintReport?: boolean;
   loggedInMember?: Member | null;
+  unifiedFinancials?: UnifiedAssociationFinancials;
 }
 
 export const ExpensesLedger: React.FC<ExpensesLedgerProps> = ({
@@ -95,55 +105,88 @@ export const ExpensesLedger: React.FC<ExpensesLedgerProps> = ({
   canAdd = true,
   canEdit = true,
   canDelete = false,
+  canPrintReport,
   loggedInMember = null,
+  unifiedFinancials: propUnifiedFinancials,
 }) => {
   const t = translations[lang] as any;
   const canViewBalance = role === 'admin' || Boolean(loggedInMember);
+  const hasPrintReportPermission =
+    canPrintReport !== undefined
+      ? Boolean(canPrintReport)
+      : canPrintOfficialFinancialReport({
+          isAdmin: role === 'admin',
+          isMember: Boolean(loggedInMember && loggedInMember.status === 'active'),
+        });
+
+  const handlePrintOfficialReport = () => {
+    if (!hasPrintReportPermission) return;
+    onPrintReport();
+  };
 
   // Active Tab inside Transparency Portal
   const [activeLedgerTab, setActiveLedgerTab] = useState<'contributions' | 'operations' | 'charter'>('contributions');
 
   // Operations Table State
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterType, setFilterType] = useState<'all' | 'income' | 'expense'>('all');
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Unify and deduplicate all financial contributions with strict multi-tenant validation
-  const { contributions: unifiedContributions, metrics } = useMemo(() => {
-    return unifyAndDeduplicateContributions(
+  // Single Unified Financial Engine shared identically with ManageContributions & AdminPanel
+  const effectiveUnified = useMemo(() => {
+    if (propUnifiedFinancials) return propUnifiedFinancials;
+    return calculateUnifiedAssociationFinancials({
+      operations,
       contributions,
       campaignContributions,
       contributionTypes,
       campaigns,
-      tenantId
+      tenantId,
+    });
+  }, [
+    propUnifiedFinancials,
+    operations,
+    contributions,
+    campaignContributions,
+    contributionTypes,
+    campaigns,
+    tenantId,
+  ]);
+
+  const {
+    contributions: unifiedContributions,
+    metrics,
+    totalApprovedExpenses: totalApprovedCompletedExpenses,
+    approvedCompletedExpenses,
+    operationalIncomes,
+    operationalExpenses,
+    currentBalance: currentOperationalBalance,
+    processedOperations,
+  } = effectiveUnified;
+
+  // Strict display-only filter for "سجل المصاريف": actual expense operations ONLY
+  // Excludes all incomes, donations, revenues, and unpaid-contribution deductions without modifying stored data
+  const expenseOperations = useMemo(() => {
+    return processedOperations.filter(
+      (op) =>
+        op &&
+        op.type === 'expense' &&
+        !op.isUnpaidContributionDeduction &&
+        !String(op.id || '').startsWith('op-unpaid-deduction-')
     );
-  }, [contributions, campaignContributions, contributionTypes, campaigns, tenantId]);
+  }, [processedOperations]);
 
-  // Operational Balance Calculation
-  const totalIncomes = useMemo(() => {
-    return operations
-      .filter((op) => op.type === 'income')
-      .reduce((sum, op) => sum + Number(op.amount), 0);
-  }, [operations]);
-
-  const totalExpenses = useMemo(() => {
-    return operations
-      .filter((op) => op.type === 'expense')
-      .reduce((sum, op) => sum + Number(op.amount), 0);
-  }, [operations]);
-
-  const currentOperationalBalance = totalIncomes - totalExpenses;
-
-  // Filter operations for Tab 2
-  const filteredOperations = operations.filter((op) => {
-    const matchesType = filterType === 'all' || op.type === filterType;
-    const matchesSearch =
-      op.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      op.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (op.description && op.description.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (op.memberName && op.memberName.toLowerCase().includes(searchTerm.toLowerCase()));
-    return matchesType && matchesSearch;
-  });
+  // Search filter strictly over actual expense operations for Tab 2 ("سجل المصاريف")
+  const filteredOperations = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
+    if (!q) return expenseOperations;
+    return expenseOperations.filter(
+      (op) =>
+        op.title.toLowerCase().includes(q) ||
+        op.code.toLowerCase().includes(q) ||
+        (op.description && op.description.toLowerCase().includes(q)) ||
+        (op.memberName && op.memberName.toLowerCase().includes(q))
+    );
+  }, [expenseOperations, searchTerm]);
 
   // Handle Refresh Trigger
   const handleTriggerRefresh = async () => {
@@ -203,7 +246,19 @@ export const ExpensesLedger: React.FC<ExpensesLedgerProps> = ({
       )}
 
       {/* Main Header Card with Live Status */}
-      <div className="relative overflow-hidden bg-gradient-to-br from-white via-emerald-50/30 to-white p-5 sm:p-7 rounded-3xl border border-slate-200/90 shadow-sm space-y-4">
+      <div className="relative overflow-hidden bg-gradient-to-br from-white via-emerald-50/30 to-white p-5 sm:p-7 rounded-3xl border border-slate-200/90 shadow-sm">
+        <img
+          src={transparencyPortalBgUrl}
+          alt=""
+          aria-hidden="true"
+          referrerPolicy="no-referrer"
+          className="absolute inset-0 w-full h-full object-cover object-center pointer-events-none select-none"
+        />
+        <div
+          aria-hidden="true"
+          className="absolute inset-0 bg-gradient-to-br from-white/78 via-emerald-50/68 to-white/75 backdrop-blur-[1px] pointer-events-none"
+        />
+        <div className="relative z-10 space-y-4">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-start gap-4">
             <div className="p-3.5 rounded-2xl bg-emerald-600 text-white shadow-md shadow-emerald-600/25 flex-shrink-0">
@@ -245,14 +300,16 @@ export const ExpensesLedger: React.FC<ExpensesLedgerProps> = ({
               <span>{isRefreshing ? 'جارٍ التحديث...' : 'تحديث السجل'}</span>
             </button>
 
-            <button
-              onClick={onPrintReport}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition-all border border-slate-200 shadow-2xs cursor-pointer"
-              title="طباعة كشف الحساب والبيان المالي المعتمد"
-            >
-              <Printer className="w-3.5 h-3.5 text-slate-600" />
-              <span>{t.printReport || 'طباعة البيان المالي'}</span>
-            </button>
+            {hasPrintReportPermission && (
+              <button
+                onClick={handlePrintOfficialReport}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition-all border border-slate-200 shadow-2xs cursor-pointer"
+                title="طباعة كشف الحساب والبيان المالي المعتمد"
+              >
+                <Printer className="w-3.5 h-3.5 text-slate-600" />
+                <span>{t.printReport || 'طباعة البيان المالي'}</span>
+              </button>
+            )}
 
             {role === 'admin' && canAdd && (
               <button
@@ -267,7 +324,7 @@ export const ExpensesLedger: React.FC<ExpensesLedgerProps> = ({
         </div>
 
         {/* Financial Key Metric Cards Grid */}
-        <div className={`grid grid-cols-1 sm:grid-cols-2 ${canViewBalance ? 'lg:grid-cols-4' : 'lg:grid-cols-3'} gap-3.5 pt-3 border-t border-slate-200/80`}>
+        <div className={`grid grid-cols-1 sm:grid-cols-2 ${canViewBalance ? 'lg:grid-cols-3' : 'lg:grid-cols-3 xl:grid-cols-5'} gap-3.5 pt-3 border-t border-slate-200/80`}>
           {/* Card 1: Total Approved Contributions (CRITICAL: Completed & Approved ONLY!) */}
           <div className="p-4 rounded-2xl bg-gradient-to-br from-emerald-600 to-teal-700 text-white shadow-sm flex flex-col justify-between space-y-2">
             <div className="flex items-center justify-between">
@@ -292,7 +349,56 @@ export const ExpensesLedger: React.FC<ExpensesLedgerProps> = ({
             </div>
           </div>
 
-          {/* Card 2: Approved Transactions Count */}
+          {/* Card 2: Total Approved & Completed Expenses (CRITICAL: Approved & Completed Actual Expenses ONLY!) */}
+          <div className="p-4 rounded-2xl bg-gradient-to-br from-rose-600 to-rose-700 text-white shadow-sm flex flex-col justify-between space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-rose-100 font-medium">إجمالي المصاريف المعتمدة والمكتملة</span>
+              <div className="p-1.5 rounded-lg bg-white/15 text-white">
+                <ArrowDownRight className="w-4 h-4" />
+              </div>
+            </div>
+            <div>
+              <div className="text-2xl font-black font-mono tracking-tight">
+                {totalApprovedCompletedExpenses.toLocaleString()}{' '}
+                <span className="text-sm font-normal text-rose-100">{currency}</span>
+              </div>
+              <div className="flex items-center gap-1 mt-1 text-[11px] text-rose-100">
+                <CheckCircle2 className="w-3.5 h-3.5 text-rose-200" />
+                <span>مصروفة وموثقة ({approvedCompletedExpenses.length} عملية معتمدة)</span>
+              </div>
+            </div>
+            <div className="pt-1 border-t border-white/20 text-[10px] text-rose-100/90 font-medium flex items-center justify-between">
+              <span>مصاريف مكتملة فقط</span>
+              <span className="bg-white/20 px-1.5 py-0.5 rounded text-[9px] font-bold">معتمدة رسمياً</span>
+            </div>
+          </div>
+
+          {/* Card 3: Total Unpaid Contributions (CRITICAL: «لم يتم الدفع» status ONLY!) */}
+          <div className="p-4 rounded-2xl bg-rose-50/80 border border-rose-200 shadow-2xs flex flex-col justify-between space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-rose-900 font-bold">إجمالي المساهمات لم يتم دفعها</span>
+              <div className="p-1.5 rounded-lg bg-rose-100 text-rose-800 border border-rose-200">
+                <XCircle className="w-4 h-4" />
+              </div>
+            </div>
+            <div>
+              <div className="text-2xl font-black font-mono text-rose-900 tracking-tight">
+                {metrics.totalUnpaidAmount.toLocaleString()}{' '}
+                <span className="text-xs font-normal text-rose-700">{currency}</span>
+              </div>
+              <p className="text-[11px] text-rose-800 mt-1 font-medium">
+                {metrics.unpaidCount} مساهمة بحالة لم يتم الدفع
+              </p>
+            </div>
+            <div className="pt-1 border-t border-rose-200/80 text-[10px] text-rose-800 font-medium flex items-center justify-between">
+              <span>غير مضافة للمساهمات المحصلة</span>
+              <span className="bg-rose-200 text-rose-900 px-1.5 py-0.5 rounded text-[9px] font-bold">
+                لم يتم الدفع
+              </span>
+            </div>
+          </div>
+
+          {/* Card 4: Approved Transactions Count */}
           <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-2xs flex flex-col justify-between space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs text-slate-500 font-medium">العمليات المعتمدة والموثقة</span>
@@ -355,15 +461,16 @@ export const ExpensesLedger: React.FC<ExpensesLedgerProps> = ({
                   <span className="text-xs font-normal text-slate-500">{currency}</span>
                 </div>
                 <p className="text-[11px] text-slate-500 mt-1">
-                  المداخيل التشغيلية (+{totalIncomes.toLocaleString()}) ناقص المصاريف (-{totalExpenses.toLocaleString()})
+                  المساهمات المعتمدة (+{metrics.totalApprovedAmount.toLocaleString()}) − المصاريف (-{totalApprovedCompletedExpenses.toLocaleString()}) − لم يتم الدفع (-{metrics.totalUnpaidAmount.toLocaleString()})
                 </p>
               </div>
               <div className="pt-1 border-t border-slate-100 text-[10px] text-slate-500 flex items-center justify-between">
-                <span>{operations.length} عملية تشغيلية</span>
+                <span>{processedOperations.length} عملية تشغيلية</span>
                 <span className="text-slate-700 font-bold">ميزانية الجمعية</span>
               </div>
             </div>
           )}
+        </div>
         </div>
       </div>
 
@@ -393,9 +500,9 @@ export const ExpensesLedger: React.FC<ExpensesLedgerProps> = ({
           }`}
         >
           <FileSpreadsheet className="w-4 h-4 text-slate-600" />
-          <span>سجل المصاريف والمداخيل التشغيلية</span>
+          <span>سجل المصاريف</span>
           <span className="bg-slate-200 text-slate-700 text-[10px] px-2 py-0.5 rounded-full font-mono">
-            {operations.length}
+            {expenseOperations.length}
           </span>
         </button>
 
@@ -439,45 +546,17 @@ export const ExpensesLedger: React.FC<ExpensesLedgerProps> = ({
                   type="text"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="بحث في سجل العمليات التشغيلية، رمز الوصل، أو البيان..."
+                  placeholder="بحث في سجل المصاريف، رمز الوصل، أو البيان..."
                   className="w-full bg-slate-50 border border-slate-300 rounded-xl py-2.5 px-9 text-xs sm:text-sm focus:border-emerald-600 focus:bg-white outline-hidden transition-all text-slate-800"
                 />
               </div>
 
-              {/* Type Filter Buttons */}
+              {/* Expenses Only Badge */}
               <div className="flex items-center p-1 bg-slate-100 rounded-xl self-start md:self-auto">
-                <button
-                  onClick={() => setFilterType('all')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                    filterType === 'all'
-                      ? 'bg-white text-emerald-800 shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  {t.filterAll} ({operations.length})
-                </button>
-                <button
-                  onClick={() => setFilterType('income')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
-                    filterType === 'income'
-                      ? 'bg-white text-emerald-800 shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <ArrowUpRight className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>{t.filterIncomes}</span>
-                </button>
-                <button
-                  onClick={() => setFilterType('expense')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
-                    filterType === 'expense'
-                      ? 'bg-white text-rose-800 shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
+                <span className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white text-rose-800 shadow-xs flex items-center gap-1.5">
                   <ArrowDownRight className="w-3.5 h-3.5 text-rose-600" />
-                  <span>{t.filterExpenses}</span>
-                </button>
+                  <span>{t.filterExpenses} ({expenseOperations.length})</span>
+                </span>
               </div>
 
               {/* Export CSV for Operations */}
@@ -650,9 +729,9 @@ export const ExpensesLedger: React.FC<ExpensesLedgerProps> = ({
           ) : (
             <div className="bg-white p-12 rounded-2xl border border-slate-200 text-center space-y-3">
               <FileSpreadsheet className="w-12 h-12 text-slate-300 mx-auto" />
-              <h4 className="font-bold text-slate-800">لا توجد عمليات مسجلة مطابقة للبحث</h4>
+              <h4 className="font-bold text-slate-800">لا توجد مصاريف مسجلة مطابقة للبحث</h4>
               <p className="text-xs text-slate-500">
-                يمكنك تسجيل عملية مالية جديدة أو تغيير معايير الفرز.
+                يمكنك تسجيل مصروف جديد أو تعديل عبارة البحث.
               </p>
             </div>
           )}

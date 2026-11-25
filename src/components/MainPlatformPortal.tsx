@@ -4,7 +4,6 @@ import {
   Sparkles, 
   ShieldCheck, 
   Users, 
-  CheckCircle2, 
   ArrowLeft, 
   ArrowRight,
   Home,
@@ -669,26 +668,6 @@ export const MainPlatformPortal: React.FC<MainPlatformPortalProps> = ({
                       <p className="text-sm sm:text-base text-slate-600 leading-relaxed font-medium">
                         {assoc.tagline || texts.masterTemplateDescription || 'هذا هو النموذج والتصميم الذي يُستنسخ منه هيكل كل جمعية جديدة تسجل في المنصة. يحتوي على أقسام الأنشطة الميدانية، الدفتر المالي للشفافية، بطاقات الانخراط برمز QR، وحملات التبرع والتصويت.'}
                       </p>
-
-                      {/* 4 Feature Highlights (Balanced with Donation Assurances) */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2 text-xs sm:text-sm text-slate-700 font-bold">
-                        <div className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-50 border border-slate-200/80">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                          <span>إدارة مالية شفافة ودفتر حسابات مباشر</span>
-                        </div>
-                        <div className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-50 border border-slate-200/80">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                          <span>بطاقات عضوية ذكية وتحقق برمز QR</span>
-                        </div>
-                        <div className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-50 border border-slate-200/80">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                          <span>توثيق الأنشطة الميدانية بالصور</span>
-                        </div>
-                        <div className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-50 border border-slate-200/80">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                          <span>نظام تصويت الأعضاء وحملات التبرع</span>
-                        </div>
-                      </div>
                     </div>
 
                     {/* Prominent CTA Actions */}
@@ -978,14 +957,6 @@ export const MainPlatformPortal: React.FC<MainPlatformPortalProps> = ({
                           شاهد شرح بالفيديو كيفية استخدام المنصة
                         </h2>
                       </div>
-
-                      <p
-                        id="watch-videos-section-subtitle"
-                        className="text-sm sm:text-base leading-relaxed max-w-2xl font-medium transition-colors"
-                        style={{ color: wvColors.subtitleColor }}
-                      >
-                        استعرض الفيديوهات التوضيحية المصورة التي تشرح طريقة استخدام المنصة وإنشاء حساب جمعيتك والاستفادة من جميع خدماتها الرقمية بسهولة.
-                      </p>
                     </div>
                   </div>
 

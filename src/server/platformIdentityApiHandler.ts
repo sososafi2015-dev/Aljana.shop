@@ -16,6 +16,7 @@ import {
   getDocFromFirebaseServer,
   persistFileToCloudFirestore,
 } from './firebaseServerStorage';
+import { signAuthSessionToken } from './authCrypto';
 
 export interface PlatformIdentityDatabase {
   platformName: string;
@@ -413,15 +414,23 @@ export async function handlePlatformIdentityApi(
           details: 'تسجيل دخول ناجح للأدمين الرئيسي عبر حقل الدخول الموحد',
         });
 
+        const authToken = signAuthSessionToken({
+          role: 'master_super_admin',
+          tenantId: '*',
+          subjectId: 'super_admin',
+        });
+
         sendJson(res, 200, {
           success: true,
           verified: true,
           role: 'super_admin',
+          authToken,
           session: {
             isMaster: true,
             role: 'super_admin',
             username: 'Master Super Admin',
             fullName: 'الأدمين الرئيسي (Super Admin)',
+            token: authToken,
           },
           message: 'تم تسجيل الدخول إلى الإدارة العامة للمنصة بنجاح',
         });
@@ -478,6 +487,12 @@ export async function handlePlatformIdentityApi(
           details: `تسجيل دخول ناجح للأدمن المساعد «${matchedSubAdmin.fullName}» عبر حقل الدخول الموحد`,
         });
 
+        const authToken = signAuthSessionToken({
+          role: 'master_super_admin',
+          tenantId: '*',
+          subjectId: matchedSubAdmin.id,
+        });
+
         const subSession = {
           isMaster: false,
           role: 'secondary_admin' as const,
@@ -485,12 +500,14 @@ export async function handlePlatformIdentityApi(
           fullName: matchedSubAdmin.fullName,
           phone: matchedSubAdmin.phone,
           permissions: matchedSubAdmin.permissions,
+          token: authToken,
         };
 
         sendJson(res, 200, {
           success: true,
           verified: true,
           role: 'secondary_admin',
+          authToken,
           session: subSession,
           admin: {
             id: matchedSubAdmin.id,

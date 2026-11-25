@@ -1,4 +1,4 @@
-import { Member, FinancialOperation, ActivityItem, AuditLog, AssociationSettings, MemberRegistrationField, UIElementConfig, Poll, PollVote, MemberCardSettings, MemberContribution, BoardMember, SubAdmin, CurrentAdminSession, DonationCampaign, CampaignContribution, ContributionTypeConfig, DEFAULT_DONATION_PRESETS } from './types';
+import { Member, FinancialOperation, ActivityItem, AuditLog, AssociationSettings, MemberRegistrationField, UIElementConfig, Poll, PollVote, MemberCardSettings, MemberContribution, ContributionStatus, BoardMember, SubAdmin, CurrentAdminSession, DonationCampaign, CampaignContribution, ContributionTypeConfig, DEFAULT_DONATION_PRESETS } from './types';
 import { initialMembers, initialOperations, initialActivities, initialAuditLogs, initialSettings, initialRegistrationFields, initialUIElements, initialPolls, initialMemberCardSettings, initialContributions, initialBoardMembers, initialSubAdmins, defaultStoreThemeColors, initialCampaigns, initialCampaignContributions, initialContributionTypes } from './initialData';
 import { applyStoreTheme } from './utils/themeEngine';
 import { 
@@ -13,6 +13,7 @@ import {
   saveGlobalDonationPresets
 } from './contributionTypesStorage';
 import { firestoreSyncService } from './services/firestoreSyncService';
+import { getEffectiveAuthTokenForTenant, getMasterAuthToken } from './authSessionClient';
 
 export const KEYS = {
   MEMBERS: 'chayef_assoc_members_v1',
@@ -387,6 +388,10 @@ export async function persistTenantCollectionToBackend(
       'x-tenant-id': cleanTenant,
       'x-user-role': isEffectiveAdmin ? 'admin' : (currentRole || 'member'),
     };
+    const authToken = getEffectiveAuthTokenForTenant(cleanTenant);
+    if (authToken) {
+      headers['Authorization'] = `Bearer ${authToken}`;
+    }
     if (adminSession) {
       headers['x-admin-session'] = encodeURIComponent(JSON.stringify(adminSession));
     } else if (isEffectiveAdmin) {
@@ -494,15 +499,84 @@ export const saveMembers = (members: Member[], tenantId?: string, syncBackend: b
   return Promise.resolve(true);
 };
 
+export const hasAuthorizedBoardAccessInClient = (tenantId?: string): boolean => {
+  const current = tenantId || getActiveTenantIdFromStorage();
+  const cleanTenant = !current || current === 'portal' ? 'tenant_nour' : current;
+
+  const masterSession =
+    loadData<any>('chayef_master_admin_session_v2', null) ||
+    loadData<any>('chayef_master_admin_session_v1', null);
+  if (masterSession && (getMasterAuthToken() || masterSession.isMaster === true)) {
+    return true;
+  }
+
+  const currentRole = loadData<string>(KEYS.ROLE, 'member');
+  const adminSession = getStoredCurrentAdminSession(cleanTenant);
+  if (
+    currentRole === 'admin' &&
+    adminSession &&
+    (adminSession.type === 'super_admin' || adminSession.type === 'sub_admin') &&
+    (!adminSession.tenantId ||
+      adminSession.tenantId === 'portal' ||
+      adminSession.tenantId === cleanTenant ||
+      adminSession.isMasterPlatformAdmin === true)
+  ) {
+    if (adminSession.type === 'sub_admin') {
+      const subs = getStoredSubAdmins(cleanTenant);
+      const matched = subs.find((s) => s.id === adminSession.id);
+      if (matched && matched.status !== 'active') return false;
+    }
+    return true;
+  }
+
+  const loggedInMemberId = getStoredLoggedInMemberId(cleanTenant);
+  if (loggedInMemberId) {
+    const members = getStoredMembers(cleanTenant);
+    const activeMember = members.find((m) => m && m.id === loggedInMemberId && m.status === 'active');
+    if (activeMember) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+export const clearStoredBoardMembersCache = (tenantId?: string): void => {
+  const current = tenantId || getActiveTenantIdFromStorage();
+  const clean = !current || current === 'portal' ? 'tenant_nour' : current;
+  const keysToPurge = [
+    getScopedKey(KEYS.BOARD_MEMBERS, current),
+    getScopedKey(KEYS.BOARD_MEMBERS, clean),
+    `chayef_tenant_${clean}_board_members`,
+  ];
+  for (const k of keysToPurge) {
+    delete memoryStorageFallback[k];
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem(k);
+        sessionStorage.removeItem(k);
+      } catch {}
+    }
+  }
+};
+
 export const getStoredBoardMembers = (tenantId?: string): BoardMember[] => {
   const current = tenantId || getActiveTenantIdFromStorage();
+  if (!hasAuthorizedBoardAccessInClient(current)) {
+    return [];
+  }
   const isMaster = !current || current === 'tenant_nour' || current === 'portal';
   return loadData<BoardMember[]>(getScopedKey(KEYS.BOARD_MEMBERS, current), isMaster ? initialBoardMembers : []);
 };
 export const saveBoardMembers = (boardMembers: BoardMember[], tenantId?: string, syncBackend: boolean = true): Promise<boolean> => {
-  saveData(getScopedKey(KEYS.BOARD_MEMBERS, tenantId), boardMembers);
+  const current = tenantId || getActiveTenantIdFromStorage();
+  if (!hasAuthorizedBoardAccessInClient(current)) {
+    clearStoredBoardMembersCache(current);
+    return Promise.resolve(false);
+  }
+  saveData(getScopedKey(KEYS.BOARD_MEMBERS, current), boardMembers);
   if (syncBackend) {
-    return persistTenantCollectionToBackend('boardMembers', boardMembers, tenantId);
+    return persistTenantCollectionToBackend('boardMembers', boardMembers, current);
   }
   return Promise.resolve(true);
 };
@@ -510,11 +584,13 @@ export const saveBoardMembers = (boardMembers: BoardMember[], tenantId?: string,
 export const getDeletedOperationIds = (tenantId?: string): string[] => {
   const current = tenantId || getActiveTenantIdFromStorage();
   const clean = !current || current === 'portal' ? 'tenant_nour' : current;
-  return loadData<string[]>(`chayef_tenant_${clean}_deleted_ops_v1`, []);
+  return loadData<string[]>(`chayef_tenant_${clean}_deleted_ops_v1`, []).filter(
+    (id) => id && !String(id).startsWith('op-unpaid-deduction-')
+  );
 };
 
 export const recordDeletedOperationId = (id: string, tenantId?: string): void => {
-  if (!id) return;
+  if (!id || String(id).startsWith('op-unpaid-deduction-')) return;
   const current = tenantId || getActiveTenantIdFromStorage();
   const clean = !current || current === 'portal' ? 'tenant_nour' : current;
   const existing = getDeletedOperationIds(clean);
@@ -617,6 +693,19 @@ export const saveOperations = (operations: FinancialOperation[], tenantId?: stri
 
 export const isUnpaidContributionStatus = (status?: string | null): boolean => {
   return status === 'approved' || status === 'unpaid';
+};
+
+export const isUnpaidContributionRecord = (c?: Partial<MemberContribution> | null): boolean => {
+  if (!c) return false;
+  if (c.status === 'rejected') return false;
+  const ps = String(c.paymentStatus || '').trim().toLowerCase();
+  return (
+    isUnpaidContributionStatus(c.status) ||
+    c.isNegative === true ||
+    c.amountSign === '-' ||
+    ps === 'unpaid' ||
+    ps === 'not_paid'
+  );
 };
 
 /**
@@ -800,17 +889,39 @@ export const reconcileUnpaidContributionDeductions = (
   const reconciledContributions: MemberContribution[] = baseContribs.map((c) => {
     if (!c) return c;
     const deductionOpId = `op-unpaid-deduction-${c.id}`;
-    if (isUnpaidContributionStatus(c.status) && Number(c.amount) > 0) {
-      unpaidContribMap.set(c.id, c);
-      if (c.unpaidDeductionOperationId !== deductionOpId) {
+    if (isUnpaidContributionRecord(c) && Number(c.amount) > 0) {
+      const normalizedUnpaid: MemberContribution = {
+        ...c,
+        status: 'unpaid',
+        isNegative: true,
+        amountSign: '-',
+        paymentStatus: 'unpaid',
+        isPaid: false,
+        unpaidDeductionOperationId: deductionOpId,
+      };
+      unpaidContribMap.set(c.id, normalizedUnpaid);
+      if (
+        c.status !== 'unpaid' ||
+        c.isNegative !== true ||
+        c.amountSign !== '-' ||
+        c.paymentStatus !== 'unpaid' ||
+        c.isPaid !== false ||
+        c.unpaidDeductionOperationId !== deductionOpId
+      ) {
         didChange = true;
-        return { ...c, unpaidDeductionOperationId: deductionOpId };
+        return normalizedUnpaid;
       }
       return c;
     } else {
-      if (c.unpaidDeductionOperationId) {
+      const hasPendingPaymentDrift =
+        c.status === 'completed' &&
+        (String(c.paymentStatus || '').trim().toLowerCase() === 'pending' || c.isPaid === false);
+      if (c.unpaidDeductionOperationId || hasPendingPaymentDrift) {
         didChange = true;
-        const clone = { ...c };
+        const clone: MemberContribution = {
+          ...c,
+          ...(hasPendingPaymentDrift ? { status: 'pending' as const } : {}),
+        };
         delete clone.unpaidDeductionOperationId;
         return clone;
       }
@@ -916,6 +1027,263 @@ export const reconcileUnpaidContributionDeductions = (
   };
 };
 
+interface PendingContributionStatusMutation {
+  status: ContributionStatus;
+  updatedAtIso: string;
+  updatedAtMs: number;
+  createdLocalMs: number;
+  inFlight: boolean;
+  patch: Partial<MemberContribution>;
+}
+
+const pendingContributionStatusMutations = new Map<string, PendingContributionStatusMutation>();
+
+function getPendingContribKey(tenantId: string, contribId: string): string {
+  const cleanTenant = !tenantId || tenantId === 'portal' ? 'tenant_nour' : tenantId;
+  return `${cleanTenant}::${contribId}`;
+}
+
+function getContributionItemTimestamp(item?: Partial<MemberContribution> | null): number {
+  if (!item) return 0;
+  return Math.max(
+    new Date((item as any).updatedAt || 0).getTime() || 0,
+    new Date((item as any)._updatedAt || 0).getTime() || 0,
+    new Date(item.createdAt || 0).getTime() || 0
+  );
+}
+
+export const registerPendingContributionStatusUpdate = (
+  tenantId: string,
+  contribId: string,
+  patch: Partial<MemberContribution> & { status: ContributionStatus },
+  updatedAtIso: string
+): void => {
+  const key = getPendingContribKey(tenantId, contribId);
+  const tsMs = new Date(updatedAtIso).getTime() || Date.now();
+  pendingContributionStatusMutations.set(key, {
+    status: patch.status,
+    updatedAtIso,
+    updatedAtMs: tsMs,
+    createdLocalMs: Date.now(),
+    inFlight: true,
+    patch: {
+      ...patch,
+      updatedAt: updatedAtIso,
+      _updatedAt: updatedAtIso,
+    },
+  });
+};
+
+export const markPendingContributionStatusSettled = (
+  tenantId: string,
+  contribId: string,
+  updatedAtIso: string,
+  succeeded: boolean
+): void => {
+  const key = getPendingContribKey(tenantId, contribId);
+  const existing = pendingContributionStatusMutations.get(key);
+  if (!existing || existing.updatedAtIso !== updatedAtIso) return;
+  if (!succeeded) {
+    pendingContributionStatusMutations.delete(key);
+    return;
+  }
+  existing.inFlight = false;
+  existing.createdLocalMs = Date.now();
+};
+
+export const applyPendingContributionStatusUpdates = (
+  tenantId: string,
+  contributions: MemberContribution[]
+): MemberContribution[] => {
+  if (!Array.isArray(contributions) || pendingContributionStatusMutations.size === 0) {
+    return contributions;
+  }
+  const cleanTenant = !tenantId || tenantId === 'portal' ? 'tenant_nour' : tenantId;
+  const now = Date.now();
+  const SETTLED_GRACE_MS = 12000;
+
+  return contributions.map((item) => {
+    if (!item || !item.id) return item;
+    const key = getPendingContribKey(cleanTenant, item.id);
+    const pending = pendingContributionStatusMutations.get(key);
+    if (!pending) return item;
+
+    const itemTs = getContributionItemTimestamp(item);
+    // If remote/snapshot has caught up to or surpassed our mutation with the matching status, clear guard
+    if (!pending.inFlight && item.status === pending.status && itemTs >= pending.updatedAtMs - 1000) {
+      pendingContributionStatusMutations.delete(key);
+      return item;
+    }
+    // If a strictly newer external update arrived after our settled mutation, accept it and clear guard
+    if (!pending.inFlight && itemTs > pending.updatedAtMs + 1000) {
+      pendingContributionStatusMutations.delete(key);
+      return item;
+    }
+    // Expire old settled guards after grace period
+    if (!pending.inFlight && now - pending.createdLocalMs > SETTLED_GRACE_MS) {
+      pendingContributionStatusMutations.delete(key);
+      return item;
+    }
+
+    // Preserve the fresher local mutation against stale out-of-order snapshots/GETs
+    return {
+      ...item,
+      ...pending.patch,
+      status: pending.status,
+      updatedAt: pending.updatedAtIso,
+      _updatedAt: pending.updatedAtIso,
+    };
+  });
+};
+
+/**
+ * Persists a single contribution's status change atomically to the backend database
+ * (disk + single Cloud Firestore document + records_meta) without rewriting unrelated records.
+ */
+export const updateContributionStatusPersisted = async (
+  contribId: string,
+  newStatus: ContributionStatus,
+  updatedContrib: MemberContribution,
+  tenantId?: string,
+  adminSessionOverride?: CurrentAdminSession | null
+): Promise<{
+  success: boolean;
+  contribution?: MemberContribution;
+  contributions?: MemberContribution[];
+  operations?: FinancialOperation[];
+  error?: string;
+}> => {
+  const target = tenantId || getActiveTenantIdFromStorage();
+  const cleanTenant = !target || target === 'portal' ? 'tenant_nour' : target;
+  const nowIso = updatedContrib.updatedAt || updatedContrib._updatedAt || new Date().toISOString();
+
+  // Immediately persist locally so localStorage reflects the new status right away
+  const currentLocal = getStoredContributions(cleanTenant);
+  const nextLocal = currentLocal.some((c) => c && c.id === contribId)
+    ? currentLocal.map((c) => (c.id === contribId ? updatedContrib : c))
+    : [updatedContrib, ...currentLocal];
+  saveData(getScopedKey(KEYS.CONTRIBUTIONS, cleanTenant), nextLocal);
+
+  if (typeof window === 'undefined' || typeof fetch === 'undefined') {
+    return { success: true, contribution: updatedContrib, contributions: nextLocal };
+  }
+
+  try {
+    const currentRole = loadData<string>(KEYS.ROLE, 'member');
+    let adminSession: any = adminSessionOverride || getStoredCurrentAdminSession(cleanTenant);
+    if (!adminSession) {
+      const masterSession =
+        loadData<any>('chayef_master_admin_session_v2', null) ||
+        loadData<any>('chayef_master_admin_session_v1', null);
+      if (masterSession) {
+        adminSession = {
+          type: 'super_admin',
+          role: 'main_admin',
+          id: masterSession.id || 'master_admin',
+          fullName: masterSession.fullName || 'الإدارة العامة للمنصة',
+          phone: masterSession.phone || '',
+          tenantId: cleanTenant,
+          isMasterPlatformAdmin: true,
+        };
+      }
+    }
+    const isEffectiveAdmin = Boolean(adminSession) || currentRole === 'admin';
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'x-tenant-id': cleanTenant,
+      'x-user-role': isEffectiveAdmin ? 'admin' : (currentRole || 'member'),
+    };
+    const authToken = getEffectiveAuthTokenForTenant(cleanTenant);
+    if (authToken) {
+      headers['Authorization'] = `Bearer ${authToken}`;
+    }
+    if (adminSession) {
+      headers['x-admin-session'] = encodeURIComponent(JSON.stringify(adminSession));
+    } else if (isEffectiveAdmin) {
+      headers['x-admin-session'] = encodeURIComponent(
+        JSON.stringify({
+          type: 'super_admin',
+          role: 'main_admin',
+          id: 'admin_session',
+          tenantId: cleanTenant,
+        })
+      );
+    }
+
+    const res = await fetch(
+      `/api/tenant-records/contributions/${encodeURIComponent(contribId)}/status?tenantId=${encodeURIComponent(cleanTenant)}`,
+      {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({
+          tenantId: cleanTenant,
+          status: newStatus,
+          updatedAt: nowIso,
+          callerRole: isEffectiveAdmin ? 'admin' : (currentRole || 'member'),
+        }),
+      }
+    );
+
+    const json = await res.json().catch(() => null);
+    if (res.ok && json?.success) {
+      if (Array.isArray(json.contributions)) {
+        const guarded = applyPendingContributionStatusUpdates(cleanTenant, json.contributions);
+        saveData(getScopedKey(KEYS.CONTRIBUTIONS, cleanTenant), guarded);
+      }
+      if (Array.isArray(json.operations)) {
+        saveData(getScopedKey(KEYS.OPERATIONS, cleanTenant), json.operations);
+      }
+      return {
+        success: true,
+        contribution: json.contribution || updatedContrib,
+        contributions: Array.isArray(json.contributions) ? json.contributions : nextLocal,
+        operations: Array.isArray(json.operations) ? json.operations : undefined,
+      };
+    }
+
+    // If backend explicitly rejected authorization (403), do NOT bypass via client Firestore
+    if (res.status === 403) {
+      return {
+        success: false,
+        error: json?.error || 'غير مصرح لك بتعديل حالة المساهمات والانخراطات.',
+      };
+    }
+
+    // If contribution didn't exist on server yet (404) or transient server error, persist to Firestore directly & fallback to full save
+    const fsOk = await firestoreSyncService
+      .saveSingleContributionToFirestore(cleanTenant, updatedContrib)
+      .catch(() => false);
+    if (fsOk) {
+      return {
+        success: true,
+        contribution: updatedContrib,
+        contributions: nextLocal,
+      };
+    }
+    return {
+      success: false,
+      error: json?.error || 'تعذر حفظ الحالة الجديدة في قاعدة البيانات.',
+    };
+  } catch (err: any) {
+    console.warn('[Storage] updateContributionStatusPersisted network fallback:', err);
+    const fsOk = await firestoreSyncService
+      .saveSingleContributionToFirestore(cleanTenant, updatedContrib)
+      .catch(() => false);
+    if (fsOk) {
+      return {
+        success: true,
+        contribution: updatedContrib,
+        contributions: nextLocal,
+      };
+    }
+    return {
+      success: false,
+      error: err?.message || 'تعذر الاتصال بقاعدة البيانات لحفظ الحالة الجديدة.',
+    };
+  }
+};
+
 /**
  * Atomically saves both contributions and operations to localStorage, Cloud Firestore,
  * and the backend `/api/tenant-records` database in a single request so no race condition can occur.
@@ -930,7 +1298,10 @@ export const saveContributionsAndOperations = async (
   const target = tenantId || getActiveTenantIdFromStorage();
   const cleanTenant = !target || target === 'portal' ? 'tenant_nour' : target;
 
-  for (const opId of removedOperationIds) {
+  const explicitManualRemovedOpIds = removedOperationIds.filter(
+    (opId) => opId && !String(opId).startsWith('op-unpaid-deduction-')
+  );
+  for (const opId of explicitManualRemovedOpIds) {
     recordDeletedOperationId(opId, cleanTenant);
   }
   for (const cId of removedContributionIds) {
@@ -943,7 +1314,8 @@ export const saveContributionsAndOperations = async (
     removedOperationIds: autoRemovedIds,
   } = reconcileUnpaidContributionDeductions(contributions, operations, cleanTenant);
 
-  const allRemovedIds = Array.from(new Set([...removedOperationIds, ...autoRemovedIds, ...getDeletedOperationIds(cleanTenant)]));
+  const allRemovedIds = Array.from(new Set([...explicitManualRemovedOpIds, ...getDeletedOperationIds(cleanTenant)]));
+  const firestoreRemovedIds = Array.from(new Set([...allRemovedIds, ...autoRemovedIds]));
   const allRemovedContribIds = Array.from(new Set([...removedContributionIds, ...getDeletedContributionIds(cleanTenant)]));
 
   saveData(getScopedKey(KEYS.CONTRIBUTIONS, cleanTenant), reconciledContributions);
@@ -955,7 +1327,7 @@ export const saveContributionsAndOperations = async (
   try {
     firestoreSyncService.syncContributionsToFirestore(cleanTenant, reconciledContributions).catch(() => {});
     firestoreSyncService.syncOperationsToFirestore(cleanTenant, reconciledOperations).catch(() => {});
-    for (const opId of allRemovedIds) {
+    for (const opId of firestoreRemovedIds) {
       firestoreSyncService.deleteOperationFromFirestore(cleanTenant, opId).catch(() => {});
     }
   } catch (syncErr) {
@@ -989,6 +1361,10 @@ export const saveContributionsAndOperations = async (
       'x-tenant-id': cleanTenant,
       'x-user-role': isEffectiveAdmin ? 'admin' : (currentRole || 'member'),
     };
+    const authToken = getEffectiveAuthTokenForTenant(cleanTenant);
+    if (authToken) {
+      headers['Authorization'] = `Bearer ${authToken}`;
+    }
     if (adminSession) {
       headers['x-admin-session'] = encodeURIComponent(JSON.stringify(adminSession));
     } else if (isEffectiveAdmin) {
@@ -1703,14 +2079,20 @@ export const saveGlobalRegistrationFieldsForAllTenants = async (
       isMasterPlatformAdmin: true,
     };
 
+    const masterAuthHeaders: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'x-tenant-id': 'tenant_nour',
+      'x-user-role': 'admin',
+      'x-admin-session': encodeURIComponent(JSON.stringify(adminHeaderPayload)),
+    };
+    const masterTok = getEffectiveAuthTokenForTenant('tenant_nour');
+    if (masterTok) {
+      masterAuthHeaders['Authorization'] = `Bearer ${masterTok}`;
+    }
+
     const res = await fetch('/api/tenant-records?tenantId=tenant_nour', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-tenant-id': 'tenant_nour',
-        'x-user-role': 'admin',
-        'x-admin-session': encodeURIComponent(JSON.stringify(adminHeaderPayload)),
-      },
+      headers: masterAuthHeaders,
       body: JSON.stringify({
         tenantId: 'tenant_nour',
         collection: 'registrationFields',
@@ -1990,17 +2372,23 @@ export const syncTenantRecordsFromBackend = async (tenantId?: string): Promise<{
 
   try {
     const cacheBuster = Date.now();
+    const syncAuthHeaders: Record<string, string> = { 'x-tenant-id': cleanTenant };
+    const effectiveToken = getEffectiveAuthTokenForTenant(cleanTenant);
+    if (effectiveToken) {
+      syncAuthHeaders['Authorization'] = `Bearer ${effectiveToken}`;
+    }
     const [
       recordsRes,
       cardRes,
       fbMembers,
       fbOps,
+      fbContribs,
       fbSubs,
       fbCard,
       fbFields,
     ] = await Promise.all([
       fetch(`/api/tenant-records?tenantId=${encodeURIComponent(cleanTenant)}&force=true&ts=${cacheBuster}`, {
-        headers: { 'x-tenant-id': cleanTenant },
+        headers: syncAuthHeaders,
         cache: 'no-store',
       }).catch(() => null),
       fetch(`/api/card-settings?tenantId=${encodeURIComponent(cleanTenant)}&force=true&ts=${cacheBuster}`, {
@@ -2009,6 +2397,7 @@ export const syncTenantRecordsFromBackend = async (tenantId?: string): Promise<{
       }).catch(() => null),
       firestoreSyncService.fetchMembersFromFirestore(cleanTenant).catch(() => []),
       firestoreSyncService.fetchOperationsFromFirestore(cleanTenant).catch(() => []),
+      firestoreSyncService.fetchContributionsFromFirestore(cleanTenant).catch(() => []),
       firestoreSyncService.fetchSubAdminsFromFirestore(cleanTenant).catch(() => []),
       firestoreSyncService.fetchMemberCardSettingsFromFirestore(cleanTenant).catch(() => null),
       firestoreSyncService.fetchRegistrationFieldsFromFirestore(cleanTenant).catch(() => null),
@@ -2042,31 +2431,38 @@ export const syncTenantRecordsFromBackend = async (tenantId?: string): Promise<{
       const data = await recordsRes.json();
       if (data?.success && data.records) {
         const rec = data.records;
+        const canAccessBoard = hasAuthorizedBoardAccessInClient(cleanTenant);
         if (rec.updatedBy === 'System Init' && (!Array.isArray(fbMembers) || fbMembers.length === 0)) {
-          // If server DB & Firestore have no cloud records yet, push existing local records if any
-          const localMembers = getStoredMembers(cleanTenant);
-          const localBoard = getStoredBoardMembers(cleanTenant);
-          const localContribs = getStoredContributions(cleanTenant);
-          const localOps = getStoredOperations(cleanTenant);
-          const localFields = getStoredRegistrationFields(cleanTenant);
-          const localLogs = getStoredAuditLogs(cleanTenant);
+          // If server DB & Firestore have no cloud records yet, push existing local records ONLY if authorized
+          if (effectiveToken) {
+            const localMembers = getStoredMembers(cleanTenant);
+            const localBoard = canAccessBoard ? getStoredBoardMembers(cleanTenant) : undefined;
+            const localContribs = getStoredContributions(cleanTenant);
+            const localOps = getStoredOperations(cleanTenant);
+            const localFields = getStoredRegistrationFields(cleanTenant);
+            const localLogs = getStoredAuditLogs(cleanTenant);
 
-          fetch(`/api/tenant-records?tenantId=${encodeURIComponent(cleanTenant)}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-tenant-id': cleanTenant },
-            body: JSON.stringify({
-              tenantId: cleanTenant,
-              records: {
-                members: localMembers,
-                boardMembers: localBoard,
-                contributions: localContribs,
-                operations: localOps,
-                registrationFields: localFields,
-                auditLogs: localLogs,
+            fetch(`/api/tenant-records?tenantId=${encodeURIComponent(cleanTenant)}`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-tenant-id': cleanTenant,
+                Authorization: `Bearer ${effectiveToken}`,
               },
-              updatedBy: 'مزامنة تلقائية',
-            }),
-          }).catch(() => {});
+              body: JSON.stringify({
+                tenantId: cleanTenant,
+                records: {
+                  members: localMembers,
+                  ...(localBoard ? { boardMembers: localBoard } : {}),
+                  contributions: localContribs,
+                  operations: localOps,
+                  registrationFields: localFields,
+                  auditLogs: localLogs,
+                },
+                updatedBy: 'مزامنة تلقائية',
+              }),
+            }).catch(() => {});
+          }
         } else {
           const serverMembers: Member[] = Array.isArray(rec.members) ? rec.members : [];
           const authoritativeMembers =
@@ -2082,11 +2478,14 @@ export const syncTenantRecordsFromBackend = async (tenantId?: string): Promise<{
             }
             result.members = authoritativeMembers;
           }
-          if (Array.isArray(rec.boardMembers)) {
+          if (canAccessBoard && Array.isArray(rec.boardMembers)) {
             saveBoardMembers(rec.boardMembers, cleanTenant, false);
             result.boardMembers = rec.boardMembers;
+          } else {
+            clearStoredBoardMembersCache(cleanTenant);
+            result.boardMembers = [];
           }
-          if (Array.isArray(rec.contributions) || Array.isArray(rec.operations) || (Array.isArray(fbOps) && fbOps.length > 0)) {
+          if (Array.isArray(rec.contributions) || Array.isArray(rec.operations) || (Array.isArray(fbOps) && fbOps.length > 0) || (Array.isArray(fbContribs) && fbContribs.length > 0)) {
             // Sync server-tracked deleted IDs first
             if (Array.isArray(rec.deletedOperationIds)) {
               for (const delOpId of rec.deletedOperationIds) {
@@ -2103,10 +2502,14 @@ export const syncTenantRecordsFromBackend = async (tenantId?: string): Promise<{
             const deletedContribSet = new Set(getDeletedContributionIds(cleanTenant));
 
             const localContribs = getStoredContributions(cleanTenant);
-            const remoteContribs: MemberContribution[] = Array.isArray(rec.contributions) ? rec.contributions : [];
+            const serverContribs: MemberContribution[] = Array.isArray(rec.contributions) ? rec.contributions : [];
+            const remoteContribs: MemberContribution[] =
+              Array.isArray(fbContribs) && fbContribs.length > 0
+                ? (mergeByLatestTimestamp(serverContribs as any[], fbContribs as any[]) as MemberContribution[])
+                : serverContribs;
             const remoteContribIds = new Set(remoteContribs.map((c) => c?.id).filter(Boolean));
 
-            // Merge remote and local contributions without losing any newly added local contribution
+            // Merge remote and local contributions cleanly by item timestamp without corrupting status fields
             const mergedContribsMap = new Map<string, MemberContribution>();
             for (const c of localContribs) {
               if (c && c.id && !deletedContribSet.has(c.id)) {
@@ -2116,18 +2519,33 @@ export const syncTenantRecordsFromBackend = async (tenantId?: string): Promise<{
             for (const c of remoteContribs) {
               if (c && c.id && !deletedContribSet.has(c.id)) {
                 const prev = mergedContribsMap.get(c.id);
-                mergedContribsMap.set(c.id, prev ? { ...prev, ...c } : c);
+                if (!prev) {
+                  mergedContribsMap.set(c.id, c);
+                } else {
+                  const prevTs = getContributionItemTimestamp(prev);
+                  const remoteTs = getContributionItemTimestamp(c);
+                  if (prevTs > remoteTs) {
+                    mergedContribsMap.set(c.id, prev);
+                  } else {
+                    // Use the authoritative remote record cleanly (do not leak stale local status/paymentStatus/isPaid)
+                    mergedContribsMap.set(c.id, {
+                      ...c,
+                      proofImageUrl: c.proofImageUrl || prev.proofImageUrl,
+                      receiptUrl: c.receiptUrl || prev.receiptUrl,
+                    });
+                  }
+                }
               }
             }
             const localOnlyContribs = localContribs.filter(
               (c) => c && c.id && !deletedContribSet.has(c.id) && !remoteContribIds.has(c.id)
             );
-            const mergedContribs: MemberContribution[] = [
+            const mergedContribs: MemberContribution[] = applyPendingContributionStatusUpdates(cleanTenant, [
               ...localOnlyContribs,
               ...remoteContribs
                 .filter((c) => c && c.id && !deletedContribSet.has(c.id))
                 .map((c) => mergedContribsMap.get(c.id) || c),
-            ];
+            ]);
 
             const localOps = getStoredOperations(cleanTenant);
             const serverOps: FinancialOperation[] = Array.isArray(rec.operations) ? rec.operations : [];
@@ -2391,14 +2809,14 @@ export const recalculateCampaignsFromContributions = (
   contributions: CampaignContribution[]
 ): DonationCampaign[] => {
   return campaigns.map((camp) => {
-    // Filter contributions for this campaign that are financial and approved/completed (not pending, unpaid, or negative)
+    // Filter contributions for this campaign that are financial and actually paid & completed (exclude unpaid, approved/unpaid, pending, rejected, negative)
     const campContribs = contributions.filter(
       (c) =>
         c.campaignId === camp.id &&
         c.isFinancial &&
-        c.status !== 'pending' &&
-        c.status !== 'unpaid' &&
-        c.status !== 'rejected' &&
+        c.status === 'completed' &&
+        c.isPaid !== false &&
+        c.paymentStatus !== 'unpaid' &&
         !c.isNegative &&
         c.amountSign !== '-'
     );

@@ -24,6 +24,7 @@ import {
   verifyPasswordHashServer,
   sanitizePublicTenant,
   sanitizePublicOwner,
+  signAuthSessionToken,
 } from './authCrypto';
 
 let tenantsCloudReconcileLastTs = 0;
@@ -1076,6 +1077,11 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
 
         const safeTenant = sanitizePublicTenant(targetTenant);
         const safeOwner = sanitizePublicOwner(linkedOwner);
+        const authToken = signAuthSessionToken({
+          role: 'admin',
+          tenantId: safeTenant.id,
+          subjectId: safeOwner.id,
+        });
         const session = {
           type: 'super_admin',
           role: 'main_admin',
@@ -1087,7 +1093,7 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
           phone: safeOwner.phone,
           tenantId: safeTenant.id,
           isMasterPlatformAdmin: false,
-          token: `token_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+          token: authToken,
         };
         return sendJson(res, 200, {
           success: true,
@@ -1095,6 +1101,7 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
           owner: safeOwner,
           tenant: safeTenant,
           session,
+          authToken,
         });
       }
 
@@ -1217,6 +1224,11 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
           const safeTenant = sanitizePublicTenant(tenant);
           const safeOwner = sanitizePublicOwner(matchedOwner);
 
+          const authToken = signAuthSessionToken({
+            role: 'admin',
+            tenantId: safeTenant.id,
+            subjectId: safeOwner.id,
+          });
           const session = {
             type: 'super_admin',
             role: 'main_admin',
@@ -1228,7 +1240,7 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
             phone: safeOwner.phone,
             tenantId: safeTenant.id,
             isMasterPlatformAdmin: false,
-            token: `token_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+            token: authToken,
           };
 
           return sendJson(res, 200, {
@@ -1237,6 +1249,7 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
             owner: safeOwner,
             tenant: safeTenant,
             session,
+            authToken,
             message: `مرحباً بك مجدداً يا ${safeOwner.fullName}! جاري توجيهك إلى منصة «${safeTenant.name}»...`,
           });
         }
@@ -1308,11 +1321,17 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
               });
             }
             const tenant = tenants.find((t) => t.id === subTenantId) || tenants[0];
+            const authToken = signAuthSessionToken({
+              role: 'sub_admin',
+              tenantId: tenant?.id || subTenantId,
+              subjectId: matchedSubAdmin.id,
+            });
             return sendJson(res, 200, {
               success: true,
               role: 'admin',
               subAdmin: matchedSubAdmin,
               tenant: sanitizePublicTenant(tenant),
+              authToken,
               session: {
                 type: 'sub_admin',
                 role: 'secondary_admin',
@@ -1322,6 +1341,7 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
                 phone: matchedSubAdmin.phone,
                 tenantId: tenant?.id,
                 subAdmin: matchedSubAdmin,
+                token: authToken,
               },
             });
           }
@@ -1389,12 +1409,18 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
               writeTenantRecordsToDisk(rec, memberTenant.id);
             } catch {}
 
+            const authToken = signAuthSessionToken({
+              role: 'member',
+              tenantId: memberTenant.id,
+              subjectId: finalMember.id,
+            });
             return sendJson(res, 200, {
               success: true,
               role: 'member',
               member: finalMember,
               tenant: sanitizePublicTenant(memberTenant),
               session: null,
+              authToken,
               message: `مرحباً بك يا ${finalMember.fullName}! جاري توجيهك إلى واجهة «${memberTenant.name}»...`,
             });
           }
@@ -1795,10 +1821,17 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
       }
       writeOwnersToDisk(owners);
 
+      const authToken = signAuthSessionToken({
+        role: 'admin',
+        tenantId: newTenantId,
+        subjectId: newOwnerId,
+      });
+
       return sendJson(res, 201, {
         success: true,
         tenant: sanitizePublicTenant(newTenant),
         owner: sanitizePublicOwner(ownerRecord),
+        authToken,
         message: 'تم إنشاء منصة الجمعية وحفظها في قاعدة البيانات السحابية بنجاح.',
       });
     }

@@ -1,5 +1,6 @@
 import { Member, SubAdmin, AdminSectionKey, SectionPermission, PermissionLevel, CurrentAdminSession } from './types';
 import { isAssociationSectionEnabled } from './associationSectionsStorage';
+import { setTenantAuthToken } from './authSessionClient';
 
 /**
  * Generates a random cryptographic salt
@@ -762,11 +763,16 @@ export async function authenticateUnifiedAdmin(
             error: 'عذراً، هذا الحساب مرتبط بجمعية أخرى مستقلة ولا يُسمح له بالدخول إلى لوحة تحكم هذه الجمعية.',
           };
         }
+        const effectiveTenant = serverSession.tenantId || resolvedTenantId;
+        const tok = data.authToken || serverSession.token;
+        if (tok) {
+          setTenantAuthToken(effectiveTenant, tok);
+        }
         return {
           success: true,
           session: {
             ...serverSession,
-            tenantId: serverSession.tenantId || resolvedTenantId,
+            tenantId: effectiveTenant,
             isMasterPlatformAdmin: false,
           },
         };
