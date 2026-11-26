@@ -10,6 +10,7 @@ import { handleSettingsApi } from './settingsApiHandler';
 import { handleCampaignsApi } from './campaignsApiHandler';
 import { handleAdCampaignsApi } from './adCampaignsApiHandler';
 import { handleGeoApi } from './geoApiHandler';
+import { handleCurrencyApi } from './currencyApiHandler';
 import { handleTenantsApi } from './tenantsApiHandler';
 import { handlePortalSettingsApi } from './portalSettingsApiHandler';
 import { handlePlatformIdentityApi } from './platformIdentityApiHandler';
@@ -157,6 +158,12 @@ export function associationApiPlugin(): Plugin {
         // 0.4 Handle Visitor Country Detection (/api/geo*)
         const handledByGeo = await handleGeoApi(req, res);
         if (handledByGeo) {
+          return;
+        }
+
+        // 0.4b Handle Currency Exchange Rates & Conversion (/api/currency*)
+        const handledByCurrency = await handleCurrencyApi(req, res);
+        if (handledByCurrency) {
           return;
         }
 

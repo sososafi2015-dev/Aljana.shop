@@ -342,11 +342,8 @@ export function isSectionVisibleForUser(
 
   const element = uiElements.find((e) => e.id === canonicalId || e.id === sectionId);
 
-  // If element not registered in system, default to visible (except gateway_members which defaults to hidden)
+  // If element not registered in system, default to visible
   if (!element) {
-    if (canonicalId === 'gateway_members') {
-      return false;
-    }
     return true;
   }
 

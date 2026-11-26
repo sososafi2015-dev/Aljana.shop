@@ -1,5 +1,6 @@
 import type { AssociationSettings } from '../types';
 import { firestoreSyncService } from '../services/firestoreSyncService';
+import { normalizeAssociationDomains } from '../utils/associationDomains';
 
 export interface SettingsApiResponse {
   success: boolean;
@@ -49,6 +50,9 @@ export async function apiFetchSettingsWithMeta(tenantId?: string): Promise<Setti
             (firestoreSettings.adminUsername && String(firestoreSettings.adminUsername).trim()) ||
             (data.settings.adminUsername && String(data.settings.adminUsername).trim()) ||
             '';
+          merged.associationDomains = normalizeAssociationDomains(
+            firestoreSettings.associationDomains ?? data.settings.associationDomains
+          );
           return {
             settings: merged,
             lastUpdated: (firestoreSettings as any)._updatedAt,
@@ -69,6 +73,9 @@ export async function apiFetchSettingsWithMeta(tenantId?: string): Promise<Setti
             (data.settings.adminUsername && String(data.settings.adminUsername).trim()) ||
             (firestoreSettings?.adminUsername && String(firestoreSettings.adminUsername).trim()) ||
             '',
+          associationDomains: normalizeAssociationDomains(
+            data.settings.associationDomains ?? firestoreSettings?.associationDomains
+          ),
         };
         return {
           settings: safeServerSettings,
@@ -83,6 +90,7 @@ export async function apiFetchSettingsWithMeta(tenantId?: string): Promise<Setti
           ...firestoreSettings,
           ribBank: (firestoreSettings.ribBank && String(firestoreSettings.ribBank).trim()) || '011 780 0000 123456789012 45',
           bankName: (firestoreSettings.bankName && String(firestoreSettings.bankName).trim()) || 'التجاري وفا بنك / Attijariwafa Bank',
+          associationDomains: normalizeAssociationDomains(firestoreSettings.associationDomains),
         },
         lastUpdated: (firestoreSettings as any)._updatedAt,
       };

@@ -71,7 +71,7 @@ import { ManageContributions } from './ManageContributions';
 import { ManageBoardMembers } from './ManageBoardMembers';
 import { ManageSubAdmins } from './ManageSubAdmins';
 import { initialMemberCardSettings, defaultStoreThemeColors } from '../initialData';
-import { Vote, Image as ImageIcon, Award, RefreshCw, Megaphone, GraduationCap, Menu, X, Layers, ChevronRight, ChevronLeft, ChevronDown } from 'lucide-react';
+import { Vote, Image as ImageIcon, Award, RefreshCw, Megaphone, GraduationCap, Menu, X, Layers, ChevronRight, ChevronLeft, ChevronDown, Search, Check, Tag } from 'lucide-react';
 import { ManageOperations } from './ManageOperations';
 import { ManageAccessControl } from './ManageAccessControl';
 import { CampaignsAdminManager } from './CampaignsAdminManager';
@@ -90,6 +90,12 @@ import {
   calculateUnifiedAssociationFinancials,
   UnifiedAssociationFinancials,
 } from '../utils/transparencyUtils';
+import {
+  ALL_ASSOCIATION_DOMAINS,
+  ASSOCIATION_SPECIFIC_DOMAINS,
+  normalizeAssociationDomains,
+  toggleAssociationDomain,
+} from '../utils/associationDomains';
 
 interface AdminPanelProps {
   settings: AssociationSettings;
@@ -546,8 +552,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     adminUsername: resolveAccountUsername(settings),
     ribBank: initialResolvedBank.ribBank,
     bankName: initialResolvedBank.bankName,
+    associationDomains: normalizeAssociationDomains(settings.associationDomains),
   });
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [isDomainsDropdownOpen, setIsDomainsDropdownOpen] = useState(false);
+  const [domainsSearchQuery, setDomainsSearchQuery] = useState('');
 
   // Keep formData in sync whenever external settings or active tenant change
   useEffect(() => {
@@ -557,8 +566,30 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       adminUsername: resolveAccountUsername(settings),
       ribBank: resolvedBank.ribBank,
       bankName: resolvedBank.bankName,
+      associationDomains: normalizeAssociationDomains(settings.associationDomains),
     });
   }, [settings, activeTenantId]);
+
+  const selectedDomains = useMemo(
+    () => normalizeAssociationDomains(formData.associationDomains),
+    [formData.associationDomains]
+  );
+
+  const isAllDomainsSelected =
+    selectedDomains.length === 1 && selectedDomains[0] === ALL_ASSOCIATION_DOMAINS;
+
+  const filteredSpecificDomains = useMemo(() => {
+    const q = domainsSearchQuery.trim();
+    if (!q) return ASSOCIATION_SPECIFIC_DOMAINS;
+    return ASSOCIATION_SPECIFIC_DOMAINS.filter((d) => d.includes(q));
+  }, [domainsSearchQuery]);
+
+  const handleToggleDomainOption = (domain: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      associationDomains: toggleAssociationDomain(prev.associationDomains, domain),
+    }));
+  };
 
   const handleSettingsSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -573,6 +604,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       adminUsername: trimmedUsername,
       ribBank: resolvedBank.ribBank,
       bankName: resolvedBank.bankName,
+      associationDomains: normalizeAssociationDomains(formData.associationDomains),
       // Preserve critical branding and access control settings so they are never erased
       logoUrl: formData.logoUrl !== undefined ? formData.logoUrl : settings.logoUrl,
       bannerImageUrl: formData.bannerImageUrl !== undefined ? formData.bannerImageUrl : settings.bannerImageUrl,
@@ -591,6 +623,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     const ok = await onUpdateSettings(mergedSettings);
     if (ok !== false) {
       setSavedSuccess(true);
+      setIsDomainsDropdownOpen(false);
       setTimeout(() => setSavedSuccess(false), 3000);
     }
   };
@@ -2136,6 +2169,182 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 onChange={(e) => setFormData({ ...formData, address: e.target.value })}
                 className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs sm:text-sm focus:border-emerald-600 focus:bg-white outline-hidden"
               />
+            </div>
+
+            {/* مجالات الجمعية (Multi-select with default: جميع المجالات) */}
+            <div className="space-y-2" id="admin-settings-association-domains-field">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="block text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                  <Tag className="w-3.5 h-3.5 text-emerald-700" />
+                  <span>مجالات الجمعية</span>
+                </label>
+                <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
+                  {isAllDomainsSelected
+                    ? 'جميع المجالات (اختيار شامل)'
+                    : `تم تحديد ${selectedDomains.length} ${selectedDomains.length === 1 ? 'مجال' : selectedDomains.length === 2 ? 'مجالين' : selectedDomains.length <= 10 ? 'مجالات' : 'مجالاً'}`}
+                </span>
+              </div>
+
+              {/* Selected Domains Summary & Trigger */}
+              <div className="bg-slate-50 border border-slate-300 rounded-xl p-3 space-y-2.5 focus-within:border-emerald-600 transition-colors">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5 flex-1 min-w-0">
+                    {isAllDomainsSelected ? (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-700 text-white text-xs font-bold shadow-2xs">
+                        <Check className="w-3.5 h-3.5" />
+                        <span>{ALL_ASSOCIATION_DOMAINS}</span>
+                      </span>
+                    ) : (
+                      selectedDomains.map((domain) => (
+                        <span
+                          key={domain}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-900 border border-emerald-300 text-xs font-bold"
+                        >
+                          <span>{domain}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleDomainOption(domain)}
+                            className="text-emerald-700 hover:text-rose-600 transition-colors cursor-pointer rounded-full p-0.5"
+                            title={`إزالة ${domain}`}
+                            aria-label={`إزالة ${domain}`}
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    {!isAllDomainsSelected && (
+                      <button
+                        type="button"
+                        onClick={() => handleToggleDomainOption(ALL_ASSOCIATION_DOMAINS)}
+                        className="px-2.5 py-1.5 rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 text-[11px] font-bold transition-colors cursor-pointer"
+                      >
+                        تعيين «جميع المجالات»
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      id="admin-settings-domains-toggle-btn"
+                      onClick={() => setIsDomainsDropdownOpen((prev) => !prev)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold transition-colors cursor-pointer shadow-2xs"
+                    >
+                      <span>{isDomainsDropdownOpen ? 'إغلاق القائمة' : 'تحديد / تعديل المجالات'}</span>
+                      <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isDomainsDropdownOpen ? 'rotate-180' : ''}`} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Expandable Organized Multi-Select List */}
+                {isDomainsDropdownOpen && (
+                  <div className="pt-2.5 mt-2 border-t border-slate-200 space-y-2.5">
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 text-slate-400 absolute top-1/2 -translate-y-1/2 right-3 pointer-events-none" />
+                      <input
+                        type="text"
+                        value={domainsSearchQuery}
+                        onChange={(e) => setDomainsSearchQuery(e.target.value)}
+                        placeholder="ابحث ضمن مجالات الجمعية..."
+                        className="w-full bg-white border border-slate-300 rounded-lg py-2 pr-9 pl-8 text-xs focus:border-emerald-600 outline-hidden"
+                      />
+                      {domainsSearchQuery && (
+                        <button
+                          type="button"
+                          onClick={() => setDomainsSearchQuery('')}
+                          className="absolute top-1/2 -translate-y-1/2 left-2.5 text-slate-400 hover:text-slate-700 cursor-pointer"
+                          aria-label="مسح البحث"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Comprehensive Option: جميع المجالات */}
+                    {(!domainsSearchQuery.trim() || ALL_ASSOCIATION_DOMAINS.includes(domainsSearchQuery.trim())) && (
+                      <button
+                        type="button"
+                        onClick={() => handleToggleDomainOption(ALL_ASSOCIATION_DOMAINS)}
+                        className={`w-full flex items-center justify-between gap-2 p-2.5 rounded-xl border text-right transition-all cursor-pointer ${
+                          isAllDomainsSelected
+                            ? 'bg-emerald-50 border-emerald-500 text-emerald-950 shadow-2xs'
+                            : 'bg-white border-slate-200 hover:border-emerald-300 text-slate-800'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <span
+                            className={`w-4 h-4 rounded flex items-center justify-center border transition-colors shrink-0 ${
+                              isAllDomainsSelected
+                                ? 'bg-emerald-600 border-emerald-600 text-white'
+                                : 'bg-white border-slate-300'
+                            }`}
+                          >
+                            {isAllDomainsSelected && <Check className="w-3 h-3" />}
+                          </span>
+                          <div>
+                            <span className="text-xs font-black block">{ALL_ASSOCIATION_DOMAINS}</span>
+                            <span className="text-[10px] text-slate-500 block">
+                              اختيار شامل يغطي جميع مجالات العمل الجمعوي (الخيار الافتراضي)
+                            </span>
+                          </div>
+                        </div>
+                        {isAllDomainsSelected && (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-600 text-white shrink-0">
+                            مفعل حالياً
+                          </span>
+                        )}
+                      </button>
+                    )}
+
+                    {/* Specific Domains Multi-Select Grid */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-72 overflow-y-auto p-0.5">
+                      {filteredSpecificDomains.map((domain) => {
+                        const isChecked = !isAllDomainsSelected && selectedDomains.includes(domain);
+                        return (
+                          <button
+                            key={domain}
+                            type="button"
+                            onClick={() => handleToggleDomainOption(domain)}
+                            className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-right text-xs transition-all cursor-pointer ${
+                              isChecked
+                                ? 'bg-emerald-50 border-emerald-500 text-emerald-950 font-bold shadow-2xs'
+                                : 'bg-white border-slate-200 hover:border-emerald-300 text-slate-700 font-medium'
+                            }`}
+                          >
+                            <span
+                              className={`w-4 h-4 rounded flex items-center justify-center border transition-colors shrink-0 ${
+                                isChecked
+                                  ? 'bg-emerald-600 border-emerald-600 text-white'
+                                  : 'bg-white border-slate-300'
+                              }`}
+                            >
+                              {isChecked && <Check className="w-3 h-3" />}
+                            </span>
+                            <span className="leading-snug">{domain}</span>
+                          </button>
+                        );
+                      })}
+                      {filteredSpecificDomains.length === 0 && (
+                        <div className="col-span-full text-center py-4 text-xs text-slate-500">
+                          لا توجد مجالات مطابقة لعبارة البحث.
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-200 text-[11px] text-slate-500">
+                      <span>يمكنك تحديد مجال واحد أو عدة مجالات، ثم الضغط على «حفظ التعديلات» لاعتمادها.</span>
+                      <button
+                        type="button"
+                        onClick={() => setIsDomainsDropdownOpen(false)}
+                        className="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs cursor-pointer shrink-0"
+                      >
+                        تم
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Quick banner link to branding images */}

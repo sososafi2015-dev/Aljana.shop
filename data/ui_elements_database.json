@@ -128,12 +128,11 @@
     "descriptionFr": "Accès au registre des adhérents et cartes d'adhésion",
     "descriptionEn": "Access card and gateway to the Members and Subscribers directory",
     "category": "records_and_ledgers",
-    "enabled": false,
+    "enabled": true,
     "visibleToNonMembers": true,
     "order": 8,
     "iconName": "Users",
-    "_gatewayMembersDefaultHiddenV1": true,
-    "updatedAt": "2026-11-23T20:33:27.189Z"
+    "updatedAt": "2026-11-26T09:57:16.090Z"
   },
   {
     "id": "board_members",

@@ -569,6 +569,7 @@ export interface AssociationSettings {
   whatsapp: string;
   email: string;
   address: string;
+  country?: string;
   city?: string;
   licenseNumber: string;
   foundingYear: string;
@@ -577,6 +578,7 @@ export interface AssociationSettings {
   currency: string; // "د.م" or "DH"
   currencyFr: string;
   currencyEn: string;
+  currencyCode?: SupportedCurrency;
   featuredActivityId?: string; // ID of the single activity displayed on the main store homepage
   featuredActivitiesHeroImage?: string; // Custom main cover/hero image for the featured activities section
   videoUploadSettings?: VideoUploadSettings; // Configurable video upload limits & quality
@@ -589,6 +591,7 @@ export interface AssociationSettings {
   themeColors?: StoreThemeColors; // إدارة ألوان واجهة المتجر
   donationPresetAmounts?: number[]; // مبالغ التبرع السريعة الجاهزة (قابلة للإدارة والتعديل)
   enablePublicDonations?: boolean; // الاستفادة من التبرعات - ظهور بواجهة المنصة من أجل تلقي التبرعات (قسم «تبرع وشارك في مشاريع التنمية»)
+  associationDomains?: string[]; // مجالات الجمعية (افتراضياً: ['جميع المجالات'])
 }
 
 export const DEFAULT_DONATION_PRESETS: number[] = [
@@ -712,6 +715,7 @@ export interface AssociationTenant {
   nameEn?: string;
   country: string; // الدولة (e.g. "المغرب")
   city: string; // المدينة (e.g. "الدار البيضاء")
+  currency?: SupportedCurrency; // العملة الرسمية المعتمدة تلقائياً حسب دولة الجمعية
   slug: string; // URL-safe identifier e.g. "nour"
   logoUrl?: string;
   bannerImageUrl?: string;
@@ -738,6 +742,7 @@ export interface AssociationTenant {
   rib?: string; // الحساب البنكي RIB
   bankName?: string; // اسم البنك
   licenseNumber?: string; // رقم الترخيص أو الوصل
+  associationDomains?: string[]; // مجالات الجمعية (افتراضياً: ['جميع المجالات'])
   stats?: {
     membersCount: number;
     activitiesCount: number;
@@ -893,7 +898,33 @@ export type PaymentMethod = 'bank_transfer' | 'cash_plus' | 'credit_card' | 'pay
 export type PaymentStatus = 'pending' | 'verified' | 'confirmed' | 'rejected' | 'cancelled';
 export type PaymentType = 'activation' | 'renewal' | 'ad_campaign' | 'platform_support';
 
-export type SupportedCurrency = 'MAD' | 'USD' | 'EUR' | 'SAR' | 'AED' | 'DZD' | 'TND' | 'QAR' | 'KWD' | 'BHD' | 'OMR' | 'JOD' | 'EGP' | 'GBP' | 'CAD' | 'MRU' | string;
+export type SupportedCurrency =
+  | 'MAD'
+  | 'USD'
+  | 'EUR'
+  | 'SAR'
+  | 'AED'
+  | 'DZD'
+  | 'TND'
+  | 'QAR'
+  | 'KWD'
+  | 'BHD'
+  | 'OMR'
+  | 'JOD'
+  | 'EGP'
+  | 'GBP'
+  | 'CAD'
+  | 'MRU'
+  | 'LYD'
+  | 'LBP'
+  | 'IQD'
+  | 'SDG'
+  | 'YER'
+  | 'CHF'
+  | 'SEK'
+  | 'TRY'
+  | 'ILS'
+  | string;
 
 export interface TenantPaymentRecord {
   id: string;

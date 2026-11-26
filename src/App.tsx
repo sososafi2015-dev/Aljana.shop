@@ -201,6 +201,7 @@ import { clearTenantAuthToken, clearMasterAuthToken } from './authSessionClient'
 import { syncPaymentsFromBackend } from './paymentStorage';
 import { AssociationTenant } from './types';
 import { useAssociationSectionsConfig } from './associationSectionsStorage';
+import { normalizeAssociationDomains } from './utils/associationDomains';
 
 export default function App() {
   // Subscribe to central association sections config for live reactive updates across the app
@@ -675,8 +676,17 @@ export default function App() {
           if (Array.isArray(syncedRecords.members)) {
             setMembers(syncedRecords.members);
           }
-          if (hasAuthorizedBoardAccessInClient(currentActive) && Array.isArray(syncedRecords.boardMembers)) {
-            setBoardMembers(syncedRecords.boardMembers);
+          if (hasAuthorizedBoardAccessInClient(currentActive)) {
+            if (Array.isArray(syncedRecords.boardMembers) && syncedRecords.boardMembers.length > 0) {
+              setBoardMembers(syncedRecords.boardMembers);
+            } else {
+              const cachedBoard = getStoredBoardMembers(currentActive);
+              if (cachedBoard.length > 0) {
+                setBoardMembers(cachedBoard);
+              } else if (Array.isArray(syncedRecords.boardMembers)) {
+                setBoardMembers(syncedRecords.boardMembers);
+              }
+            }
           } else {
             setBoardMembers([]);
             clearStoredBoardMembersCache(currentActive);
@@ -842,6 +852,9 @@ export default function App() {
               enableTripleClickLogoLogin: remoteResult.settings.enableTripleClickLogoLogin !== undefined
                 ? remoteResult.settings.enableTripleClickLogoLogin
                 : (prev.enableTripleClickLogoLogin ?? true),
+              associationDomains: normalizeAssociationDomains(
+                remoteResult.settings.associationDomains ?? prev.associationDomains
+              ),
             };
             saveSettings(merged, false, currentActive);
             applyStoreTheme(merged.themeColors);
@@ -1391,6 +1404,9 @@ export default function App() {
           ...remote.settings,
           ribBank: resolvedBank.ribBank,
           bankName: resolvedBank.bankName,
+          associationDomains: normalizeAssociationDomains(
+            remote.settings.associationDomains ?? newSettings.associationDomains
+          ),
         };
         setSettings(safeSettings);
         saveSettings(safeSettings, false, newTenantId);
@@ -1784,11 +1800,12 @@ export default function App() {
 
   // Keep loggedInMember synced with members list updates
   useEffect(() => {
+    const cleanTenant =
+      !activeTenantId || activeTenantId === 'portal'
+        ? MASTER_TEMPLATE_TENANT_ID
+        : activeTenantId;
+
     if (loggedInMember) {
-      const cleanTenant =
-        !activeTenantId || activeTenantId === 'portal'
-          ? MASTER_TEMPLATE_TENANT_ID
-          : activeTenantId;
       const refreshed = members.find((m) => m.id === loggedInMember.id);
       if (refreshed && refreshed.status === 'active') {
         setLoggedInMember(refreshed);
@@ -1802,18 +1819,17 @@ export default function App() {
           setActiveTab('home');
         }
         addToast('error', 'تم تعليق أو تعطيل الحساب من طرف الإدارة. تم تسجيل الخروج.');
-      } else if (!refreshed && members.length > 0) {
-        setLoggedInMember(null);
-        clearLoggedInMemberId(cleanTenant);
-        clearTenantAuthToken(cleanTenant);
-        setBoardMembers([]);
-        clearStoredBoardMembersCache(cleanTenant);
-        if (activeTab === 'my-account') {
-          setActiveTab('home');
+      }
+    } else if (!currentAdminSession && members.length > 0) {
+      const storedId = getStoredLoggedInMemberId(cleanTenant);
+      if (storedId) {
+        const found = members.find((m) => m.id === storedId && m.status === 'active');
+        if (found) {
+          setLoggedInMember(found);
         }
       }
     }
-  }, [members]);
+  }, [members, activeTenantId]);
 
   // System-level Authorization & Direct-URL Guard:
   // Strictly prevent any Member or non-admin from accessing the Admin Control Panel via direct URL (?tab=admin, ?admin=true, #admin) or state
@@ -1982,6 +1998,9 @@ export default function App() {
             ...liveSettings,
             ribBank: resolvedBank.ribBank,
             bankName: resolvedBank.bankName,
+            associationDomains: normalizeAssociationDomains(
+              liveSettings.associationDomains ?? prev.associationDomains
+            ),
           };
           saveData(getScopedKey(KEYS.SETTINGS, cleanTenant), merged);
           if (merged.themeColors) {
@@ -2062,14 +2081,24 @@ export default function App() {
       return;
     }
 
+    const immediateCachedBoard = getStoredBoardMembers(cleanTenant);
+    if (immediateCachedBoard.length > 0) {
+      setBoardMembers((prev) => (prev.length > 0 ? prev : immediateCachedBoard));
+    }
+
     let isCancelled = false;
     syncTenantRecordsFromBackend(cleanTenant)
       .then((synced) => {
         if (isCancelled) return;
-        if (synced && Array.isArray(synced.boardMembers)) {
+        if (synced && Array.isArray(synced.boardMembers) && synced.boardMembers.length > 0) {
           setBoardMembers(synced.boardMembers);
         } else {
-          setBoardMembers(getStoredBoardMembers(cleanTenant));
+          const fallbackBoard = getStoredBoardMembers(cleanTenant);
+          if (fallbackBoard.length > 0) {
+            setBoardMembers(fallbackBoard);
+          } else if (synced && Array.isArray(synced.boardMembers)) {
+            setBoardMembers(synced.boardMembers);
+          }
         }
       })
       .catch(() => {
@@ -2751,11 +2780,12 @@ export default function App() {
       (c) => c.id !== feeContribId && c.memberId !== id
     );
 
+    const currentTenantId = (!activeTenantId || activeTenantId === 'portal') ? MASTER_TEMPLATE_TENANT_ID : activeTenantId;
     const calculated = calculateFinancials(updatedOps);
     const [okMembers, okContribs, okOps] = await Promise.all([
-      saveMembers(updatedMembers),
-      saveContributions(updatedContribs),
-      saveOperations(calculated.processedOperations),
+      saveMembers(updatedMembers, currentTenantId, true, [id]),
+      saveContributions(updatedContribs, currentTenantId),
+      saveOperations(calculated.processedOperations, currentTenantId),
     ]);
 
     if (!okMembers || !okContribs || !okOps) {
@@ -3228,7 +3258,7 @@ export default function App() {
     const updatedMembers = targetMembersList.some((m) => m.id === member.id)
       ? targetMembersList.map((m) => (m.id === member.id ? member : m))
       : [member, ...targetMembersList];
-    saveMembers(updatedMembers, targetTenantId);
+    saveMembers(updatedMembers, targetTenantId, false);
     saveLoggedInMemberId(member.id, targetTenantId);
 
     if (targetTenant && targetTenant.id !== activeTenantId) {
@@ -3548,6 +3578,7 @@ export default function App() {
       ...newSettings,
       ribBank: resolvedIncomingBank.ribBank,
       bankName: resolvedIncomingBank.bankName,
+      associationDomains: normalizeAssociationDomains(newSettings.associationDomains),
     };
 
     // 1. Persist permanently to backend database FIRST and verify
@@ -3562,6 +3593,7 @@ export default function App() {
       ...res.settings,
       ribBank: resolvedAuthBank.ribBank,
       bankName: resolvedAuthBank.bankName,
+      associationDomains: normalizeAssociationDomains(res.settings.associationDomains ?? preparedSettings.associationDomains),
     };
     const now = Date.now();
     setSettingsTimestamp(now, currentTenant);
@@ -3585,6 +3617,7 @@ export default function App() {
         rib: authoritativeSettings.ribBank,
         bankName: authoritativeSettings.bankName,
         enablePublicDonations: authoritativeSettings.enablePublicDonations,
+        associationDomains: authoritativeSettings.associationDomains,
         ...(cleanAdminUsername ? { ownerUsername: cleanAdminUsername } : {}),
       });
 
@@ -3636,7 +3669,11 @@ export default function App() {
       addToast('error', permCheck.reason || 'تم رفض العملية أمنياً: لا تملك صلاحية تعديل أعضاء المكتب.');
       return;
     }
-    const ok = await saveBoardMembers(updated, activeTenantId, true);
+    const updatedIds = new Set((updated || []).map((bm) => bm.id));
+    const removedBoardIds = (boardMembers || [])
+      .filter((bm) => bm && bm.id && !updatedIds.has(bm.id))
+      .map((bm) => bm.id);
+    const ok = await saveBoardMembers(updated, activeTenantId, true, removedBoardIds);
     if (!ok) {
       addToast('error', 'تعذر حفظ قائمة أعضاء المكتب في قاعدة البيانات الدائمة. يرجى المحاولة مجدداً.');
       return;

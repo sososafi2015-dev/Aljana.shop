@@ -14,9 +14,12 @@ export function setTenantAuthToken(tenantId: string | undefined | null, token?: 
   const clean = normalizeClientTenant(tenantId);
   const trimmed = token.trim();
   memoryTenantTokens.set(clean, trimmed);
-  if (typeof window !== 'undefined' && typeof window.sessionStorage !== 'undefined') {
+  if (typeof window !== 'undefined') {
     try {
-      window.sessionStorage.setItem(`${TENANT_TOKEN_PREFIX}${clean}`, trimmed);
+      window.sessionStorage?.setItem(`${TENANT_TOKEN_PREFIX}${clean}`, trimmed);
+    } catch {}
+    try {
+      window.localStorage?.setItem(`${TENANT_TOKEN_PREFIX}${clean}`, trimmed);
     } catch {}
   }
 }
@@ -25,12 +28,23 @@ export function getTenantAuthToken(tenantId?: string | null): string | null {
   const clean = normalizeClientTenant(tenantId);
   const mem = memoryTenantTokens.get(clean);
   if (mem) return mem;
-  if (typeof window !== 'undefined' && typeof window.sessionStorage !== 'undefined') {
+  if (typeof window !== 'undefined') {
     try {
-      const stored = window.sessionStorage.getItem(`${TENANT_TOKEN_PREFIX}${clean}`);
-      if (stored && stored.trim()) {
-        memoryTenantTokens.set(clean, stored.trim());
-        return stored.trim();
+      const sessStored = window.sessionStorage?.getItem(`${TENANT_TOKEN_PREFIX}${clean}`);
+      if (sessStored && sessStored.trim()) {
+        memoryTenantTokens.set(clean, sessStored.trim());
+        return sessStored.trim();
+      }
+    } catch {}
+    try {
+      const localStored = window.localStorage?.getItem(`${TENANT_TOKEN_PREFIX}${clean}`);
+      if (localStored && localStored.trim()) {
+        const trimmed = localStored.trim();
+        memoryTenantTokens.set(clean, trimmed);
+        try {
+          window.sessionStorage?.setItem(`${TENANT_TOKEN_PREFIX}${clean}`, trimmed);
+        } catch {}
+        return trimmed;
       }
     } catch {}
   }
@@ -40,9 +54,12 @@ export function getTenantAuthToken(tenantId?: string | null): string | null {
 export function clearTenantAuthToken(tenantId?: string | null): void {
   const clean = normalizeClientTenant(tenantId);
   memoryTenantTokens.delete(clean);
-  if (typeof window !== 'undefined' && typeof window.sessionStorage !== 'undefined') {
+  if (typeof window !== 'undefined') {
     try {
-      window.sessionStorage.removeItem(`${TENANT_TOKEN_PREFIX}${clean}`);
+      window.sessionStorage?.removeItem(`${TENANT_TOKEN_PREFIX}${clean}`);
+    } catch {}
+    try {
+      window.localStorage?.removeItem(`${TENANT_TOKEN_PREFIX}${clean}`);
     } catch {}
   }
 }
@@ -51,20 +68,33 @@ export function setMasterAuthToken(token?: string | null): void {
   if (!token || typeof token !== 'string' || !token.trim()) return;
   const trimmed = token.trim();
   memoryMasterToken = trimmed;
-  if (typeof window !== 'undefined' && typeof window.sessionStorage !== 'undefined') {
+  if (typeof window !== 'undefined') {
     try {
-      window.sessionStorage.setItem(MASTER_TOKEN_KEY, trimmed);
+      window.sessionStorage?.setItem(MASTER_TOKEN_KEY, trimmed);
+    } catch {}
+    try {
+      window.localStorage?.setItem(MASTER_TOKEN_KEY, trimmed);
     } catch {}
   }
 }
 
 export function getMasterAuthToken(): string | null {
   if (memoryMasterToken) return memoryMasterToken;
-  if (typeof window !== 'undefined' && typeof window.sessionStorage !== 'undefined') {
+  if (typeof window !== 'undefined') {
     try {
-      const stored = window.sessionStorage.getItem(MASTER_TOKEN_KEY);
-      if (stored && stored.trim()) {
-        memoryMasterToken = stored.trim();
+      const sessStored = window.sessionStorage?.getItem(MASTER_TOKEN_KEY);
+      if (sessStored && sessStored.trim()) {
+        memoryMasterToken = sessStored.trim();
+        return memoryMasterToken;
+      }
+    } catch {}
+    try {
+      const localStored = window.localStorage?.getItem(MASTER_TOKEN_KEY);
+      if (localStored && localStored.trim()) {
+        memoryMasterToken = localStored.trim();
+        try {
+          window.sessionStorage?.setItem(MASTER_TOKEN_KEY, memoryMasterToken);
+        } catch {}
         return memoryMasterToken;
       }
     } catch {}
@@ -74,9 +104,12 @@ export function getMasterAuthToken(): string | null {
 
 export function clearMasterAuthToken(): void {
   memoryMasterToken = null;
-  if (typeof window !== 'undefined' && typeof window.sessionStorage !== 'undefined') {
+  if (typeof window !== 'undefined') {
     try {
-      window.sessionStorage.removeItem(MASTER_TOKEN_KEY);
+      window.sessionStorage?.removeItem(MASTER_TOKEN_KEY);
+    } catch {}
+    try {
+      window.localStorage?.removeItem(MASTER_TOKEN_KEY);
     } catch {}
   }
 }

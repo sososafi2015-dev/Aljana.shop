@@ -1,6 +1,6 @@
 {
   "featured_activities": true,
-  "gateway_members": false,
+  "gateway_members": true,
   "board_members": false,
   "campaigns_section": true,
   "gateway_ledger": true,
@@ -13,6 +13,6 @@
   "nav_report_button": true,
   "proof_document_preview": true,
   "current_financial_balance": false,
-  "lastUpdated": "2026-11-25T16:44:24.686Z",
+  "lastUpdated": "2026-11-26T09:57:16.090Z",
   "updatedBy": "System Initialization"
 }

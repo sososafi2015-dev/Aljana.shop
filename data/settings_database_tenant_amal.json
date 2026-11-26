@@ -7,16 +7,16 @@
     "taglineFr": "Transparence, Solidarité et Développement Communautaire Durable",
     "taglineEn": "Transparency, Solidarity and Sustainable Community Development",
     "logoUrl": "https://images.unsplash.com/photo-1582213782179-e0d53f98f2ca?auto=format&fit=crop&w=300&q=80",
-    "bannerImageUrl": "https://images.unsplash.com/photo-1593113598332-cd288d649433?auto=format&fit=crop&w=1600&q=80",
+    "bannerImageUrl": "/api/images/img-e9473acf601cf2d6.jpg",
     "ribBank": "011 780 0000 123456789012 45",
     "bankName": "التجاري وفا بنك / Attijariwafa Bank",
     "phone": "0662000002",
     "whatsapp": "0662000002",
-    "email": "contact@association-nour.ma",
+    "email": "",
     "address": "الرباط، المغرب",
-    "licenseNumber": "W/2024/8492-MA",
+    "licenseNumber": "",
     "foundingYear": "2024",
-    "adminPin": "2025",
+    "adminPin": "",
     "adminUsername": "amal2024",
     "currency": "درهم",
     "currencyFr": "DH",
@@ -28,19 +28,22 @@
     "heroBadgeTextFr": "",
     "heroBadgeTextEn": "",
     "themeColors": {
-      "backgroundColor": "#f8fafc",
-      "headingColor": "#0f172a",
-      "linkColor": "#047857",
-      "textColor": "#334155",
-      "bannerOverlayColor": "#000000",
-      "buttonColor": "#059669",
-      "secondaryColor": "#0f172a",
       "navbarColor": "#ffffff",
+      "buttonColor": "#059669",
+      "cardColor": "#ffffff",
+      "secondaryColor": "#0f172a",
+      "bannerOverlayColor": "#000000",
+      "headingColor": "#0f172a",
       "primaryColor": "#047857",
-      "cardColor": "#ffffff"
+      "backgroundColor": "#f8fafc",
+      "textColor": "#334155",
+      "linkColor": "#047857"
     },
     "enablePublicDonations": true,
-    "description": "جمعية تنموية واجتماعية غير ربحية تهدف إلى خدمة الصالح العام وتنمية المبادرات التضامنية بمدينة الرباط.",
+    "associationDomains": [
+      "جميع المجالات"
+    ],
+    "description": "",
     "descriptionFr": "Association à but non lucratif œuvrant pour l'intérêt général et le développement solidaire à الرباط.",
     "descriptionEn": "Non-profit association dedicated to public benefit and community solidarity in الرباط.",
     "addressFr": "الرباط - المغرب",
@@ -51,5 +54,5 @@
     "heroSubtitle": "منصة رقمية شفافة تتيح لكل منخرط ومتبرع الاطلاع اللحظي على المداخيل، المصاريف، والأنشطة الميدانية الخاصة بـ جمعية الأمل لرعاية الأيتام والتنمية الاجتماعية.",
     "aboutText": "تأسست جمعية الأمل لرعاية الأيتام والتنمية الاجتماعية لتكون نموذجًا للعمل الجمعوي المؤسساتي القائم على الشفافية المالية الكاملة وتوثيق الأنشطة الميدانية."
   },
-  "lastUpdated": "2026-10-25T19:07:41.240Z"
+  "lastUpdated": "2026-11-25T17:02:53.966Z"
 }

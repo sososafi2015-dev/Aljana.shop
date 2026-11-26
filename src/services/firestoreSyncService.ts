@@ -39,6 +39,7 @@ import {
   SubAdmin,
   MemberContribution
 } from '../types';
+import { normalizeAssociationDomains } from '../utils/associationDomains';
 
 /**
  * Service to manage seamless bi-directional synchronization with Cloud Firestore
@@ -286,6 +287,7 @@ class FirestoreSyncService {
           ...settings,
           ribBank: cleanRibBank,
           bankName: cleanBankName,
+          associationDomains: normalizeAssociationDomains(settings?.associationDomains),
           tenantId: cleanTenant,
           _updatedAt: new Date().toISOString(),
         })
@@ -309,6 +311,7 @@ class FirestoreSyncService {
           ...data,
           ribBank: (data?.ribBank && String(data.ribBank).trim()) || '011 780 0000 123456789012 45',
           bankName: (data?.bankName && String(data.bankName).trim()) || 'التجاري وفا بنك / Attijariwafa Bank',
+          associationDomains: normalizeAssociationDomains(data?.associationDomains),
         };
       }
       return null;
@@ -630,15 +633,68 @@ class FirestoreSyncService {
   }
 
   // ==========================================
+  // SAFE UPSERT + EXPLICIT DELETION HELPER
+  // ==========================================
+  private async upsertTenantCollectionWithExplicitDeletions<T extends { id?: string }>(
+    collectionName: string,
+    tenantId: string,
+    items: T[],
+    removedIds: string[] = []
+  ): Promise<boolean> {
+    try {
+      const cleanTenant = !tenantId || tenantId === 'portal' ? 'tenant_nour' : tenantId;
+      const col = collection(db, collectionName);
+      const nowIso = new Date().toISOString();
+      const removedSet = new Set<string>((removedIds || []).filter(Boolean));
+
+      const writePromises: Promise<void>[] = [];
+      for (const item of items || []) {
+        if (!item || !item.id || removedSet.has(item.id)) continue;
+        const docId = `${cleanTenant}_${item.id}`.replace(/[^a-zA-Z0-9_.-]/g, '_');
+        const payload = JSON.parse(
+          JSON.stringify({
+            ...item,
+            tenantId: cleanTenant,
+            associationId: (item as any).associationId || cleanTenant,
+            _updatedAt: (item as any)._updatedAt || (item as any).updatedAt || nowIso,
+          })
+        );
+        writePromises.push(setDoc(doc(col, docId), payload, { merge: true }));
+      }
+      if (writePromises.length > 0) {
+        await Promise.all(writePromises);
+      }
+
+      if (removedSet.size > 0) {
+        const deletions: Promise<void>[] = [];
+        for (const remId of removedSet) {
+          const docId = `${cleanTenant}_${remId}`.replace(/[^a-zA-Z0-9_.-]/g, '_');
+          deletions.push(deleteDoc(doc(col, docId)).catch(() => {}));
+        }
+        await Promise.all(deletions);
+      }
+
+      return true;
+    } catch (err) {
+      console.warn(`[Firestore] Safe sync ${collectionName} error:`, err);
+      return false;
+    }
+  }
+
+  // ==========================================
   // MEMBERS, BOARD MEMBERS & SUB-ADMINS SYNC
   // ==========================================
-  public async syncMembersToFirestore(tenantId: string, members: Member[]): Promise<boolean> {
-    return this.syncTenantCollectionWithDeletions('members', tenantId, members);
+  public async syncMembersToFirestore(
+    tenantId: string,
+    members: Member[],
+    removedMemberIds: string[] = []
+  ): Promise<boolean> {
+    return this.upsertTenantCollectionWithExplicitDeletions('members', tenantId, members, removedMemberIds);
   }
 
   public async fetchMembersFromFirestore(tenantId: string): Promise<Member[]> {
     try {
-      const cleanTenant = tenantId || 'tenant_nour';
+      const cleanTenant = !tenantId || tenantId === 'portal' ? 'tenant_nour' : tenantId;
       const col = collection(db, 'members');
       const q = query(col, where('tenantId', '==', cleanTenant));
       const snap = await getDocs(q);
@@ -651,8 +707,38 @@ class FirestoreSyncService {
     }
   }
 
-  public async syncBoardMembersToFirestore(tenantId: string, boardMembers: BoardMember[]): Promise<boolean> {
-    return this.syncTenantCollectionWithDeletions('board_members', tenantId, boardMembers);
+  public async syncBoardMembersToFirestore(
+    tenantId: string,
+    boardMembers: BoardMember[],
+    removedBoardMemberIds: string[] = []
+  ): Promise<boolean> {
+    return this.upsertTenantCollectionWithExplicitDeletions(
+      'board_members',
+      tenantId,
+      boardMembers,
+      removedBoardMemberIds
+    );
+  }
+
+  public async fetchBoardMembersFromFirestore(tenantId: string): Promise<BoardMember[]> {
+    try {
+      const cleanTenant = !tenantId || tenantId === 'portal' ? 'tenant_nour' : tenantId;
+      const col = collection(db, 'board_members');
+      const q = query(col, where('tenantId', '==', cleanTenant));
+      const snap = await getDocs(q);
+      const board: BoardMember[] = [];
+      snap.forEach((d) => {
+        const data = d.data() as BoardMember;
+        if (data && data.id) {
+          board.push(data);
+        }
+      });
+      board.sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+      return board;
+    } catch (err) {
+      console.warn('[Firestore] Fetch board_members error:', err);
+      return [];
+    }
   }
 
   public async syncSubAdminsToFirestore(tenantId: string, subAdmins: SubAdmin[]): Promise<boolean> {

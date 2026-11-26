@@ -1129,19 +1129,35 @@ export const MemberFormModal: React.FC<MemberFormModalProps> = ({
 
     // 2. Member Code
     if (field.id === 'memberCode') {
+      const isMemberCodeReadOnly = !editingMember;
       return (
         <div key={field.id} className="space-y-1">
           <label className="block text-xs sm:text-sm font-bold text-slate-700">
             {label} {field.required && <span className="text-rose-500">*</span>}
           </label>
-          <input
-            type="text"
-            required={field.required}
-            value={memberCode}
-            onChange={(e) => setMemberCode(e.target.value)}
-            placeholder={placeholder || 'ACH-009'}
-            className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-sm font-mono font-bold focus:border-emerald-600 focus:bg-white outline-hidden transition-all"
-          />
+          <div className="relative">
+            <input
+              type="text"
+              required={field.required}
+              value={memberCode}
+              readOnly={isMemberCodeReadOnly}
+              aria-readonly={isMemberCodeReadOnly}
+              onChange={(e) => {
+                if (!isMemberCodeReadOnly) {
+                  setMemberCode(e.target.value);
+                }
+              }}
+              placeholder={placeholder || 'ACH-009'}
+              className={
+                isMemberCodeReadOnly
+                  ? 'w-full bg-slate-100 text-slate-900 border border-slate-300 rounded-xl p-3 pl-9 rtl:pl-9 rtl:pr-3 ltr:pr-9 ltr:pl-3 text-sm font-mono font-bold cursor-not-allowed outline-hidden select-all'
+                  : 'w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-sm font-mono font-bold focus:border-emerald-600 focus:bg-white outline-hidden transition-all'
+              }
+            />
+            {isMemberCodeReadOnly && (
+              <Lock className="w-4 h-4 text-slate-400 absolute top-3.5 left-3 rtl:left-3 rtl:right-auto ltr:right-3 ltr:left-auto pointer-events-none" />
+            )}
+          </div>
           {helpText && <p className="text-[11px] text-slate-400">{helpText}</p>}
         </div>
       );

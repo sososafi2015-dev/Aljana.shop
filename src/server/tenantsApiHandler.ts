@@ -6,7 +6,11 @@ import { initializeTenantCampaigns } from './campaignsApiHandler';
 import { initializeTenantActivities } from './activitiesApiHandler';
 import { initializeTenantPolls } from './pollsApiHandler';
 import { initializeTenantSettings, loadSettingsDatabase, saveSettingsDatabase } from './settingsApiHandler';
-import { readTenantRecordsFromDisk, writeTenantRecordsToDisk } from './tenantRecordsApiHandler';
+import {
+  readTenantRecordsFromDisk,
+  writeTenantRecordsToDisk,
+  reconcileTenantRecordsFromCloudFirestore,
+} from './tenantRecordsApiHandler';
 import { loadSubAdminsDatabase, hydrateSubAdminsFromFirestore } from './subAdminsApiHandler';
 import { offloadBase64ToDisk, readLargeJsonBody, writeJsonFileAtomicSync } from './storageEngine';
 import {
@@ -26,6 +30,8 @@ import {
   sanitizePublicOwner,
   signAuthSessionToken,
 } from './authCrypto';
+import { normalizeAssociationDomains } from '../utils/associationDomains';
+import { getCurrencyForCountry, resolveAssociationCurrency } from '../utils/currencyEngine';
 
 let tenantsCloudReconcileLastTs = 0;
 const TENANTS_RECONCILE_TTL_MS = 8000;
@@ -1361,8 +1367,19 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
           if (!t || !t.id) continue;
           if (expectedTenantId && t.id !== expectedTenantId) continue;
           try {
-            const rec = readTenantRecordsFromDisk(t.id);
-            const membersList = Array.isArray(rec.members) ? rec.members : [];
+            let rec = readTenantRecordsFromDisk(t.id);
+            let membersList = Array.isArray(rec.members) ? rec.members : [];
+            const hasLocalMatch = membersList.some(
+              (m: any) =>
+                m &&
+                Boolean(m.username) &&
+                (String(m.username).trim().toLowerCase() === cleanIdLower ||
+                  (Boolean(normUsernameQuery) && normalizeOwnerUsername(m.username) === normUsernameQuery))
+            );
+            if (!hasLocalMatch) {
+              rec = await reconcileTenantRecordsFromCloudFirestore(t.id, false);
+              membersList = Array.isArray(rec.members) ? rec.members : [];
+            }
             for (const m of membersList) {
               if (!m) continue;
               const matchByUsername =
@@ -1642,7 +1659,21 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
       const filteredTenants = isPublicOnly
         ? allTenants.filter((t) => (t.isTemplate || t.id === 'tenant_nour') && t.isVisibleOnPublicPortal !== false)
         : allTenants;
-      const tenants = filteredTenants.map((t) => sanitizePublicTenant(t));
+      const tenants = filteredTenants.map((t) => {
+        const sanitized = sanitizePublicTenant(t);
+        let rawDomains = sanitized.associationDomains;
+        if (!Array.isArray(rawDomains) || rawDomains.length === 0) {
+          try {
+            const settingsDb = loadSettingsDatabase(sanitized.id);
+            rawDomains = settingsDb?.settings?.associationDomains;
+          } catch {}
+        }
+        return {
+          ...sanitized,
+          currency: resolveAssociationCurrency(undefined, sanitized).code,
+          associationDomains: normalizeAssociationDomains(rawDomains),
+        };
+      });
       return sendJson(res, 200, {
         success: true,
         tenants,
@@ -1707,6 +1738,7 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
         nameEn: body.nameEn?.trim() || body.nameFr?.trim() || `Association ${body.name.trim()}`,
         country: body.country.trim(),
         city: body.city.trim(),
+        currency: getCurrencyForCountry(body.country.trim()).code,
         slug: body.slug || `assoc-${Date.now()}`,
         logoUrl: body.logoUrl || 'https://images.unsplash.com/photo-1582213782179-e0d53f98f2ca?auto=format&fit=crop&w=300&q=80',
         bannerImageUrl: body.bannerImageUrl || 'https://images.unsplash.com/photo-1593113598332-cd288d649433?auto=format&fit=crop&w=1600&q=80',
@@ -1741,6 +1773,7 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
         isTemplate: isMaster,
         isVisibleOnPublicPortal: isMaster,
         enablePublicDonations: body.enablePublicDonations !== undefined ? body.enablePublicDonations : true,
+        associationDomains: normalizeAssociationDomains(body.associationDomains),
         tagline: body.tagline || `منصة العمل الجمعوي الشفاف والتنمية المستدامة - ${body.city.trim()}`,
         stats: body.stats || {
           membersCount: 1,
@@ -2073,6 +2106,7 @@ export async function handleTenantsApi(req: IncomingMessage, res: ServerResponse
           ...(body.bankName !== undefined && String(body.bankName).trim() ? { bankName: String(body.bankName).trim() } : {}),
           ...(body.licenseNumber !== undefined ? { licenseNumber: body.licenseNumber } : {}),
           ...(body.enablePublicDonations !== undefined ? { enablePublicDonations: body.enablePublicDonations } : {}),
+          ...(body.associationDomains !== undefined ? { associationDomains: normalizeAssociationDomains(body.associationDomains) } : {}),
           ...(cleanIncomingUsername ? { adminUsername: cleanIncomingUsername } : {}),
         };
         saveSettingsDatabase(

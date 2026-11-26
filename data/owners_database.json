@@ -3,13 +3,15 @@
     "id": "owner_nour_master",
     "fullName": "أحمد المنصوري (رئيس الجمعية)",
     "phone": "0661000001",
-    "passwordHash": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918",
-    "passwordSalt": "nour_salt_123",
+    "passwordHash": "scrypt$caf9286c722f92d653ac8ffb16ea4590753fe8a40ddb9e7cfb240cc82990a8896cd69159b45e680eebcd326d34289ca3b30ba4e8885cd2c2617831b87c9f75b2",
+    "passwordSalt": "6ed4bee4b701711140c7836a48f62770",
     "tenantId": "tenant_nour",
     "status": "active",
     "createdAt": "2024-01-01T00:00:00.000Z",
-    "updatedAt": "2026-10-26T09:23:55.322Z",
-    "username": "nour2024"
+    "updatedAt": "2026-11-23T15:42:30.975Z",
+    "username": "nour2024",
+    "hasCustomPassword": true,
+    "recoveredAccount": false
   },
   {
     "id": "owner_amal_khadija",
@@ -20,19 +22,8 @@
     "tenantId": "tenant_amal",
     "status": "active",
     "createdAt": "2024-03-15T10:30:00.000Z",
-    "username": "amal2024"
-  },
-  {
-    "id": "owner_al_istithmar",
-    "fullName": "مسؤول جمعية الاستثمار",
-    "phone": "0661000202",
-    "passwordHash": "39684056f205d016292b3c4dd43ad53749cceb4ea9cbd9513a9131db655d2521",
-    "passwordSalt": "b65ec0a42e35cda3",
-    "tenantId": "tenant_al_istithmar",
-    "status": "active",
-    "createdAt": "2026-10-19T18:10:00.000Z",
-    "recoveredAccount": true,
-    "username": "istithmar24"
+    "username": "amal2024",
+    "updatedAt": "2026-11-25T17:02:53.966Z"
   },
   {
     "id": "owner_1789045972557_8ycr",
@@ -90,18 +81,6 @@
     "username": "basma2024"
   },
   {
-    "id": "owner_1792661526529_7gak",
-    "fullName": "عبدالله",
-    "phone": "+212 6 89 56 23 56",
-    "passwordHash": "scrypt$d443fdfe462d9e126d2ac7725ad6a673efe775e89581c4865e4e785b505b162b3b61d94011438d9079182489c17165072bb24321387e43b457ed7b5723c3a0ec",
-    "passwordSalt": "8225860951675fcf8bedcefafdc3d5c2",
-    "tenantId": "tenant_1792661526529_a545",
-    "status": "active",
-    "createdAt": "2026-10-22T09:32:06.533Z",
-    "recoveredAccount": true,
-    "username": "nador2024"
-  },
-  {
     "id": "owner_1792874152357_qtvk",
     "fullName": "عبدالله",
     "phone": "+212 6 59 86 53 26",
@@ -124,7 +103,8 @@
     "tenantId": "tenant_borj_nador",
     "status": "active",
     "createdAt": "2026-10-19T18:00:00.000Z",
-    "recoveredAccount": true
+    "recoveredAccount": true,
+    "updatedAt": "1970-01-01T00:00:00.000Z"
   },
   {
     "id": "owner_1793118307992_9sn4",
@@ -144,26 +124,14 @@
     "username": "mohamed4567",
     "fullName": "محمد الإدريسي",
     "phone": "+212 6 89 56 32 48",
-    "passwordHash": "4b7e4254cef2a76254b400e5ff9ce16fb87e85993583fbda1f48047aff557a6e",
-    "passwordSalt": "4bf09a5ed81d1025",
+    "passwordHash": "scrypt$06b6c2a2dd5ab6c6a5f9f86cf36353cdeb0a5baa2defdc96bf26abd5f30961f9acd8560376faa6c88228e2db30ade0c6ec8149269309b0ed42bb8615b1d20add",
+    "passwordSalt": "233442fd4394535e29aa1154dbfe814c",
     "hasCustomPassword": true,
     "tenantId": "tenant_1795258190139_2bwc",
     "status": "active",
     "createdAt": "2026-11-21T10:49:50.144Z",
-    "recoveredAccount": true
-  },
-  {
-    "id": "owner_1793010003772_bo2u",
-    "username": "admin7725",
-    "fullName": "يوسف",
-    "phone": "+212 6 89 56 24 78",
-    "passwordHash": "",
-    "passwordSalt": "",
-    "hasCustomPassword": true,
-    "tenantId": "tenant_1793010003772_oec5",
-    "status": "active",
-    "createdAt": "2026-10-26T12:01:59.405Z",
-    "recoveredAccount": true
+    "recoveredAccount": false,
+    "updatedAt": "1970-01-01T00:00:00.000Z"
   },
   {
     "id": "owner_1793094581292_9zzz",
@@ -176,7 +144,8 @@
     "tenantId": "tenant_1793094581292_fxxr",
     "status": "active",
     "createdAt": "2026-10-27T09:59:15.691Z",
-    "recoveredAccount": true
+    "recoveredAccount": true,
+    "updatedAt": "1970-01-01T00:00:00.000Z"
   },
   {
     "id": "owner_1793192092092_ca46",
@@ -189,6 +158,7 @@
     "tenantId": "tenant_1793192092092_o1a7",
     "status": "active",
     "createdAt": "2026-10-28T12:55:49.195Z",
-    "recoveredAccount": true
+    "recoveredAccount": true,
+    "updatedAt": "1970-01-01T00:00:00.000Z"
   }
 ]

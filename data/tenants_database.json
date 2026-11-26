@@ -22,17 +22,17 @@
     "enablePublicDonations": false,
     "tagline": "الشفافية والتكافل والتنمية المجتمعية المستدامة",
     "stats": {
-      "activitiesCount": 8,
       "totalBalance": 46250,
-      "membersCount": 14,
-      "campaignsCount": 3
+      "activitiesCount": 8,
+      "campaignsCount": 3,
+      "membersCount": 14
     },
     "subscriptionStartedAt": "2026-01-01T00:00:00.000Z",
     "subscriptionExpiresAt": "2027-01-01T00:00:00.000Z",
     "activationFeePaid": 199,
     "activationFeeCurrency": "MAD",
     "activationFeeDate": "2026-01-01T00:00:00.000Z",
-    "updatedAt": "2026-11-20T15:23:13.208Z",
+    "updatedAt": "2026-11-23T15:42:30.975Z",
     "description": "جمعية تنموية رائدة تهدف إلى ترسيخ قيم التضامن الاجتماعي والتنمية المستدامة وتمكين الفئات الهشة.",
     "address": "شارع الجيش الملكي، وسط المدينة، الدار البيضاء",
     "ownerUsername": "nour2024",
@@ -41,11 +41,11 @@
     "rib": "011 780 0000 123456789012 45",
     "ribBank": "011 780 0000 123456789012 45",
     "bankName": "التجاري وفا بنك / Attijariwafa Bank",
-    "passwordSalt": "nour_salt_123",
-    "credentialsUpdatedAt": "2026-11-21T21:55:42.576Z",
-    "_updatedAt": "2026-11-21T21:55:42.576Z",
+    "passwordSalt": "6ed4bee4b701711140c7836a48f62770",
+    "credentialsUpdatedAt": "2026-11-23T16:42:47.709Z",
+    "_updatedAt": "2026-11-23T15:42:30.975Z",
     "hasCustomPassword": true,
-    "passwordHash": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918"
+    "passwordHash": "scrypt$caf9286c722f92d653ac8ffb16ea4590753fe8a40ddb9e7cfb240cc82990a8896cd69159b45e680eebcd326d34289ca3b30ba4e8885cd2c2617831b87c9f75b2"
   },
   {
     "id": "tenant_amal",
@@ -56,7 +56,7 @@
     "city": "الرباط",
     "slug": "amal",
     "logoUrl": "https://images.unsplash.com/photo-1582213782179-e0d53f98f2ca?auto=format&fit=crop&w=300&q=80",
-    "bannerImageUrl": "https://images.unsplash.com/photo-1593113598332-cd288d649433?auto=format&fit=crop&w=1600&q=80",
+    "bannerImageUrl": "/api/images/img-e9473acf601cf2d6.jpg",
     "ownerId": "owner_amal_khadija",
     "ownerName": "خديجة العلمي",
     "ownerPhone": "0662000002",
@@ -70,12 +70,12 @@
     "enablePublicDonations": true,
     "tagline": "الشفافية والتكافل والتنمية المجتمعية المستدامة وحملات تمويل المشاريع الخيرية",
     "stats": {
-      "campaignsCount": 2,
-      "activitiesCount": 4,
       "membersCount": 8,
-      "totalBalance": 24300
+      "activitiesCount": 4,
+      "totalBalance": 24300,
+      "campaignsCount": 2
     },
-    "updatedAt": "2026-10-25T19:07:41.240Z",
+    "updatedAt": "2026-11-25T17:02:53.966Z",
     "ownerUsername": "amal2024",
     "whatsapp": "0662000002",
     "phone": "0662000002",
@@ -83,52 +83,10 @@
     "ribBank": "011 780 0000 123456789012 45",
     "bankName": "التجاري وفا بنك / Attijariwafa Bank",
     "passwordHash": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918",
-    "_updatedAt": "2026-11-21T21:55:42.576Z",
+    "_updatedAt": "2026-11-25T18:03:10.550Z",
     "hasCustomPassword": true,
-    "credentialsUpdatedAt": "2026-11-21T21:55:42.576Z",
+    "credentialsUpdatedAt": "2026-11-25T18:03:10.550Z",
     "passwordSalt": "amal_salt_123"
-  },
-  {
-    "id": "tenant_al_istithmar",
-    "name": "جمعية الاستثمار",
-    "nameFr": "Association Al Istithmar",
-    "nameEn": "Al Istithmar Association",
-    "country": "المغرب",
-    "city": "الدار البيضاء",
-    "slug": "al-istithmar",
-    "logoUrl": "https://images.unsplash.com/photo-1582213782179-e0d53f98f2ca?auto=format&fit=crop&w=300&q=80",
-    "bannerImageUrl": "https://images.unsplash.com/photo-1593113598332-cd288d649433?auto=format&fit=crop&w=1600&q=80",
-    "ownerId": "owner_al_istithmar",
-    "ownerName": "مسؤول جمعية الاستثمار",
-    "ownerPhone": "0661000202",
-    "status": "active",
-    "paymentVerified": true,
-    "createdAt": "2026-10-19T18:10:00.000Z",
-    "tier": "pro",
-    "monthlyFee": 299,
-    "isTemplate": false,
-    "isVisibleOnPublicPortal": false,
-    "enablePublicDonations": true,
-    "tagline": "دعم المبادرات التنموية والاستثمار الاجتماعي المستدام",
-    "stats": {
-      "totalBalance": 0,
-      "activitiesCount": 8,
-      "campaignsCount": 3,
-      "membersCount": 1
-    },
-    "recoveredAccount": true,
-    "updatedAt": "2026-11-13T18:26:33.359Z",
-    "ownerUsername": "istithmar24",
-    "whatsapp": "0661000202",
-    "phone": "0661000202",
-    "rib": "011 780 0000 123456789012 45",
-    "ribBank": "011 780 0000 123456789012 45",
-    "bankName": "التجاري وفا بنك / Attijariwafa Bank",
-    "passwordSalt": "b65ec0a42e35cda3",
-    "credentialsUpdatedAt": "2026-11-21T21:55:42.576Z",
-    "_updatedAt": "2026-11-21T21:55:42.576Z",
-    "hasCustomPassword": true,
-    "passwordHash": "39684056f205d016292b3c4dd43ad53749cceb4ea9cbd9513a9131db655d2521"
   },
   {
     "id": "tenant_1789045972557_t35i",
@@ -139,7 +97,7 @@
     "city": "خنيفرة",
     "slug": "atlas-khenifra",
     "logoUrl": "https://images.unsplash.com/photo-1488521787991-ed7bbaae773c?auto=format&fit=crop&w=300&q=80",
-    "bannerImageUrl": "https://images.unsplash.com/photo-1488521787991-ed7bbaae773c?auto=format&fit=crop&w=1200&q=80",
+    "bannerImageUrl": "/api/images/img-864425d054119d65.jpg",
     "ownerId": "owner_1789045972557_8ycr",
     "ownerName": "يوسف الرباحي",
     "ownerPhone": "0612458765",
@@ -151,12 +109,12 @@
     "isVisibleOnPublicPortal": false,
     "tagline": "تأهيل دور الأيتام، فك العزلة عن القرى الجبلية، والمبادرات الصحية والتعليمية",
     "stats": {
-      "campaignsCount": 3,
-      "activitiesCount": 6,
       "totalBalance": 32000,
-      "membersCount": 12
+      "activitiesCount": 6,
+      "membersCount": 12,
+      "campaignsCount": 3
     },
-    "updatedAt": "2026-11-13T18:26:51.893Z",
+    "updatedAt": "2026-11-25T18:03:51.291Z",
     "ownerUsername": "atlas2024",
     "whatsapp": "0612458765",
     "phone": "0612458765",
@@ -165,8 +123,8 @@
     "bankName": "التجاري وفا بنك / Attijariwafa Bank",
     "enablePublicDonations": true,
     "passwordSalt": "ae58a5949bad49a7",
-    "_updatedAt": "2026-11-21T21:55:42.576Z",
-    "credentialsUpdatedAt": "2026-11-21T21:55:42.576Z",
+    "_updatedAt": "2026-11-25T18:03:51.291Z",
+    "credentialsUpdatedAt": "2026-11-25T18:03:51.291Z",
     "passwordHash": "acf36f6683237b90b6e124d7b39308f79056baaec70dcacca5670ee80521e24a",
     "hasCustomPassword": true
   },
@@ -179,7 +137,7 @@
     "city": "مراكش",
     "slug": "albir-marrakech",
     "logoUrl": "https://images.unsplash.com/photo-1593113598332-cd288d649433?auto=format&fit=crop&w=300&q=80",
-    "bannerImageUrl": "https://images.unsplash.com/photo-1593113598332-cd288d649433?auto=format&fit=crop&w=1200&q=80",
+    "bannerImageUrl": "/api/images/img-0446dcbcec04ea52.jpg",
     "ownerId": "owner_1789212385161_ud49",
     "ownerName": "سليمان بن",
     "ownerPhone": "+212 6 89 56 23 56",
@@ -191,10 +149,10 @@
     "isVisibleOnPublicPortal": false,
     "tagline": "قوافل الإغاثة الشتوية، إفطار الصائم، ومشاريع كفالة الأيتام والأسر المعوزة",
     "stats": {
-      "membersCount": 15,
       "campaignsCount": 2,
+      "totalBalance": 51200,
       "activitiesCount": 5,
-      "totalBalance": 51200
+      "membersCount": 15
     },
     "ownerUsername": "albir2024",
     "whatsapp": "+212 6 89 56 23 56",
@@ -203,12 +161,12 @@
     "ribBank": "011 780 0000 123456789012 45",
     "bankName": "التجاري وفا بنك / Attijariwafa Bank",
     "enablePublicDonations": true,
-    "updatedAt": "2026-11-13T18:26:51.898Z",
+    "updatedAt": "2026-11-25T18:04:54.636Z",
     "passwordHash": "a7cba0a3330cbed804f991a6120f3d3a223c666e9233761fea052e412c630138",
-    "_updatedAt": "2026-11-21T21:55:42.576Z",
+    "_updatedAt": "2026-11-25T18:04:54.636Z",
     "hasCustomPassword": true,
     "passwordSalt": "2321c09799519b2c",
-    "credentialsUpdatedAt": "2026-11-21T21:55:42.576Z"
+    "credentialsUpdatedAt": "2026-11-25T18:04:54.636Z"
   },
   {
     "id": "tenant_ihsan_sa",
@@ -299,7 +257,7 @@
     "city": "فاس",
     "slug": "assoc-1792430222354",
     "logoUrl": "https://images.unsplash.com/photo-1582213782179-e0d53f98f2ca?auto=format&fit=crop&w=300&q=80",
-    "bannerImageUrl": "https://images.unsplash.com/photo-1593113598332-cd288d649433?auto=format&fit=crop&w=1600&q=80",
+    "bannerImageUrl": "/api/images/img-2e1d0f4180435a3a.jpg",
     "ownerId": "owner_1792430222354_0140",
     "ownerName": "سعيد الفاسي",
     "ownerPhone": "0611223344",
@@ -314,8 +272,8 @@
     "tagline": "الشفافية والتكافل والتنمية المجتمعية المستدامة",
     "stats": {
       "totalBalance": 0,
-      "activitiesCount": 8,
       "campaignsCount": 3,
+      "activitiesCount": 8,
       "membersCount": 1
     },
     "ownerUsername": "basma2024",
@@ -324,71 +282,12 @@
     "rib": "011 780 0000 123456789012 45",
     "ribBank": "011 780 0000 123456789012 45",
     "bankName": "التجاري وفا بنك / Attijariwafa Bank",
-    "updatedAt": "2026-11-13T18:26:51.918Z",
+    "updatedAt": "2026-11-25T18:06:34.298Z",
     "passwordSalt": "0c499952df135b01",
-    "_updatedAt": "2026-11-21T21:55:42.576Z",
+    "_updatedAt": "2026-11-25T18:06:34.298Z",
     "passwordHash": "d2cef9c324e5826a01da74944fccae2ed3718287b44d3745eeed43cef732a703",
     "hasCustomPassword": true,
-    "credentialsUpdatedAt": "2026-11-21T21:55:42.576Z"
-  },
-  {
-    "id": "tenant_1792661526529_a545",
-    "name": "جمعية برج الناضور A",
-    "nameFr": "Jam3ia nador A",
-    "nameEn": "Jam3ia nador A",
-    "country": "المغرب",
-    "city": "الرباط",
-    "slug": "assoc-1792661526529",
-    "logoUrl": "https://images.unsplash.com/photo-1582213782179-e0d53f98f2ca?auto=format&fit=crop&w=300&q=80",
-    "bannerImageUrl": "https://images.unsplash.com/photo-1593113598332-cd288d649433?auto=format&fit=crop&w=1600&q=80",
-    "legalDocument": {
-      "fileName": "18124.jpg",
-      "fileType": "image/jpeg",
-      "uploadedAt": "2026-10-22T09:31:10.596Z",
-      "fileSize": 153011,
-      "fileSizeFormatted": "149 كيلوبايت",
-      "fileUrl": "/api/images/img-1792665089539-asxbta9.jpg",
-      "status": "pending"
-    },
-    "ownerId": "owner_1792661526529_7gak",
-    "ownerName": "عبدالله",
-    "ownerPhone": "+212 6 89 56 23 56",
-    "status": "active",
-    "paymentVerified": true,
-    "subscriptionStatusHistory": [
-      {
-        "note": "تم إنشاء وتفعيل منصة الجمعية بنجاح في قاعدة البيانات.",
-        "status": "active",
-        "timestamp": "2026-10-22T09:32:06.533Z",
-        "label": "تفعيل وإنشاء المنصة",
-        "actor": "عبدالله"
-      }
-    ],
-    "createdAt": "2026-10-22T09:32:06.533Z",
-    "tier": "pro",
-    "monthlyFee": 299,
-    "isTemplate": false,
-    "isVisibleOnPublicPortal": false,
-    "enablePublicDonations": true,
-    "tagline": "منصة العمل الجمعوي الشفاف والتنمية المستدامة - الرباط",
-    "stats": {
-      "membersCount": 1,
-      "activitiesCount": 3,
-      "totalBalance": 0,
-      "campaignsCount": 3
-    },
-    "updatedAt": "2026-11-13T18:26:33.366Z",
-    "ownerUsername": "nador2024",
-    "whatsapp": "+212 6 89 56 23 56",
-    "phone": "+212 6 89 56 23 56",
-    "rib": "011 780 0000 123456789012 45",
-    "ribBank": "011 780 0000 123456789012 45",
-    "bankName": "التجاري وفا بنك / Attijariwafa Bank",
-    "_updatedAt": "2026-11-21T21:55:42.576Z",
-    "passwordHash": "scrypt$d443fdfe462d9e126d2ac7725ad6a673efe775e89581c4865e4e785b505b162b3b61d94011438d9079182489c17165072bb24321387e43b457ed7b5723c3a0ec",
-    "passwordSalt": "8225860951675fcf8bedcefafdc3d5c2",
-    "credentialsUpdatedAt": "2026-11-21T21:55:42.576Z",
-    "hasCustomPassword": true
+    "credentialsUpdatedAt": "2026-11-25T18:06:34.298Z"
   },
   {
     "id": "tenant_1792874152357_46fk",
@@ -508,17 +407,23 @@
     "enablePublicDonations": true,
     "tagline": "العمل الجمعوي التنموي والتكافل الاجتماعي بخدمة ساكنة برج الناضور",
     "stats": {
-      "activitiesCount": 8,
-      "totalBalance": 0,
       "membersCount": 1,
-      "campaignsCount": 3
+      "campaignsCount": 3,
+      "totalBalance": 0,
+      "activitiesCount": 8
     },
     "ownerUsername": "admin2024",
-    "_updatedAt": "2026-11-21T21:55:42.576Z",
+    "_updatedAt": "2026-11-25T21:31:35.234Z",
     "passwordSalt": "e0c8f77c24e1a7c3",
     "passwordHash": "e5a781d0fd7591d5219c2fab34e8af2a3d7319dc19c25697367358fb6a3f2ec4",
     "credentialsUpdatedAt": "2026-11-21T21:55:42.576Z",
-    "hasCustomPassword": true
+    "hasCustomPassword": true,
+    "whatsapp": "0661000101",
+    "phone": "0661000101",
+    "rib": "011 780 0000 123456789012 45",
+    "ribBank": "011 780 0000 123456789012 45",
+    "bankName": "التجاري وفا بنك / Attijariwafa Bank",
+    "updatedAt": "1970-01-01T00:00:00.000Z"
   },
   {
     "subscriptionStatusHistory": [
@@ -667,7 +572,7 @@
     "tagline": "منصة العمل الجمعوي الشفاف والتنمية المستدامة - الدار البيضاء",
     "isTemplate": false,
     "status": "active",
-    "updatedAt": "2026-11-21T21:34:02.608Z",
+    "updatedAt": "1970-01-01T00:00:00.000Z",
     "ownerId": "owner_1795258190139_5jr9",
     "paymentVerifiedBy": "الإدارة العامة",
     "bankName": "التجاري وفا بنك / Attijariwafa Bank",
@@ -683,52 +588,9 @@
     "phone": "+212 6 89 56 32 48",
     "whatsapp": "+212 6 89 56 32 48",
     "paymentVerifiedAt": "2026-11-21T21:02:25.549Z",
-    "passwordHash": "4b7e4254cef2a76254b400e5ff9ce16fb87e85993583fbda1f48047aff557a6e",
-    "credentialsUpdatedAt": "2026-11-21T21:55:42.576Z",
-    "passwordSalt": "4bf09a5ed81d1025"
-  },
-  {
-    "ownerUsername": "admin7725",
-    "country": "المغرب",
-    "nameFr": "Association جمعية يوسف",
-    "isVisibleOnPublicPortal": false,
-    "paymentVerifiedAt": "2026-11-21T12:36:08.477Z",
-    "ownerPhone": "+212 6 89 56 24 78",
-    "name": "جمعية يوسف",
-    "id": "tenant_1793010003772_oec5",
-    "logoUrl": "https://images.unsplash.com/photo-1582213782179-e0d53f98f2ca?auto=format&fit=crop&w=300&q=80",
-    "tier": "pro",
-    "activationFeeDate": "2026-10-26T12:01:59.405Z",
-    "subscriptionExpiresAt": "2027-11-21T12:36:08.477Z",
-    "updatedAt": "2026-11-21T12:36:08.477Z",
-    "status": "active",
-    "ownerName": "يوسف",
-    "slug": "assoc-1793010003772",
-    "subscriptionStartedAt": "2026-11-21T12:36:08.477Z",
-    "paymentVerified": true,
-    "lastRenewalDate": "2026-11-21T12:36:08.477Z",
-    "bannerImageUrl": "https://images.unsplash.com/photo-1593113598332-cd288d649433?auto=format&fit=crop&w=1600&q=80",
-    "enablePublicDonations": true,
-    "city": "الدار البيضاء",
-    "activationFeePaid": 199,
-    "isTemplate": false,
-    "createdAt": "2026-10-26T12:01:59.405Z",
-    "nameEn": "Association جمعية يوسف",
-    "_updatedAt": "2026-11-21T12:36:08.477Z",
-    "monthlyFee": 180,
-    "paymentVerifiedBy": "الإدارة العامة",
-    "activationFeeCurrency": "MAD",
-    "ownerId": "owner_1793010003772_bo2u",
-    "subscriptionStatusHistory": [
-      {
-        "label": "مفعّلة",
-        "timestamp": "2026-11-21T12:36:08.477Z",
-        "actor": "الإدارة العامة",
-        "status": "active",
-        "note": "تم قبول طلب التفعيل وتفعيل منصة الجمعية رسمياً من طرف الإدارة العامة."
-      }
-    ],
-    "lastRenewalPaymentId": "pay_1793016119405_87dt9"
+    "passwordHash": "scrypt$06b6c2a2dd5ab6c6a5f9f86cf36353cdeb0a5baa2defdc96bf26abd5f30961f9acd8560376faa6c88228e2db30ade0c6ec8149269309b0ed42bb8615b1d20add",
+    "credentialsUpdatedAt": "2026-11-21T22:12:12.391Z",
+    "passwordSalt": "233442fd4394535e29aa1154dbfe814c"
   },
   {
     "activationFeePaid": 199,
@@ -743,7 +605,7 @@
     "enablePublicDonations": true,
     "_updatedAt": "2026-11-21T12:36:00.707Z",
     "monthlyFee": 180,
-    "updatedAt": "2026-11-21T12:36:00.707Z",
+    "updatedAt": "1970-01-01T00:00:00.000Z",
     "nameEn": "Association جمعية علي طالب",
     "activationFeeDate": "2026-10-27T09:59:15.691Z",
     "lastRenewalDate": "2026-11-21T12:36:00.707Z",
@@ -771,7 +633,13 @@
       }
     ],
     "bannerImageUrl": "https://images.unsplash.com/photo-1593113598332-cd288d649433?auto=format&fit=crop&w=1600&q=80",
-    "createdAt": "2026-10-27T09:59:15.691Z"
+    "createdAt": "2026-10-27T09:59:15.691Z",
+    "tagline": "الشفافية والتكافل والتنمية المجتمعية المستدامة - الدار البيضاء",
+    "whatsapp": "+212 6 98 65 48 75",
+    "phone": "+212 6 98 65 48 75",
+    "rib": "011 780 0000 123456789012 45",
+    "ribBank": "011 780 0000 123456789012 45",
+    "bankName": "التجاري وفا بنك / Attijariwafa Bank"
   },
   {
     "ownerName": "يوسف الادرييسي",
@@ -782,7 +650,7 @@
     "monthlyFee": 180,
     "lastRenewalDate": "2026-11-21T12:35:57.029Z",
     "nameEn": "Association جمعية النور",
-    "updatedAt": "2026-11-21T12:35:57.029Z",
+    "updatedAt": "1970-01-01T00:00:00.000Z",
     "paymentVerified": true,
     "city": "الدار البيضاء",
     "activationFeeDate": "2026-10-28T12:55:49.195Z",
@@ -814,6 +682,12 @@
     "tier": "pro",
     "ownerId": "owner_1793192092092_ca46",
     "ownerPhone": "+212 6 53 42 15 45",
-    "name": "جمعية النور"
+    "name": "جمعية النور",
+    "tagline": "الشفافية والتكافل والتنمية المجتمعية المستدامة - الدار البيضاء",
+    "whatsapp": "+212 6 53 42 15 45",
+    "phone": "+212 6 53 42 15 45",
+    "rib": "011 780 0000 123456789012 45",
+    "ribBank": "011 780 0000 123456789012 45",
+    "bankName": "التجاري وفا بنك / Attijariwafa Bank"
   }
 ]

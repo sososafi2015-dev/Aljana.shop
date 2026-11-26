@@ -906,27 +906,39 @@ export function writeTenantRecordsToDisk(
 export async function writeTenantRecordsToDiskAndCloud(
   db: TenantRecordsDatabase,
   tenantId?: string | null,
-  touchedCollections?: Set<string>
+  touchedCollections?: Set<string>,
+  explicitRemovedIds?: {
+    removedMemberIds?: string[];
+    removedBoardMemberIds?: string[];
+    replaceAll?: boolean;
+  }
 ): Promise<TenantRecordsDatabase> {
   const cleanTenant = normalizeTenantId(tenantId || db.tenantId);
   const saved = writeTenantRecordsToDisk(db, cleanTenant, false, false);
   const deletedOperationIds = Array.isArray(saved.deletedOperationIds) ? saved.deletedOperationIds : [];
   const deletedContributionIds = Array.isArray(saved.deletedContributionIds) ? saved.deletedContributionIds : [];
+  const removedMemberIds = Array.isArray(explicitRemovedIds?.removedMemberIds)
+    ? explicitRemovedIds.removedMemberIds.filter(Boolean)
+    : [];
+  const removedBoardMemberIds = Array.isArray(explicitRemovedIds?.removedBoardMemberIds)
+    ? explicitRemovedIds.removedBoardMemberIds.filter(Boolean)
+    : [];
+  const allowFullReconcile = explicitRemovedIds?.replaceAll === true;
 
   const syncAll = !touchedCollections || touchedCollections.size === 0;
   const tasks: Promise<any>[] = [awaitPendingOffloadBackups()];
 
   if (syncAll || touchedCollections.has('members')) {
     tasks.push(
-      syncTenantCollectionToFirebaseServer('members', cleanTenant, saved.members || [], [], {
-        reconcileDeletions: true,
+      syncTenantCollectionToFirebaseServer('members', cleanTenant, saved.members || [], removedMemberIds, {
+        reconcileDeletions: allowFullReconcile,
       })
     );
   }
   if (syncAll || touchedCollections.has('boardMembers')) {
     tasks.push(
-      syncTenantCollectionToFirebaseServer('board_members', cleanTenant, saved.boardMembers || [], [], {
-        reconcileDeletions: true,
+      syncTenantCollectionToFirebaseServer('board_members', cleanTenant, saved.boardMembers || [], removedBoardMemberIds, {
+        reconcileDeletions: allowFullReconcile,
       })
     );
   }
@@ -1057,10 +1069,37 @@ export async function reconcileTenantRecordsFromCloudFirestore(
       (cloudMembers.length > 0 || isMetaNewer) &&
       (isColdLocal || membersMax > localTs || isMetaNewer)
     ) {
-      if (cloudMembers.length > 0 || isMetaNewer) {
-        nextDb.members = sanitizeMembersArray(cloudMembers);
-        if (membersMax > newestTs) newestTs = membersMax;
-        changed = true;
+      if (isColdLocal || isMetaNewer) {
+        if (cloudMembers.length > 0 || isMetaNewer) {
+          nextDb.members = sanitizeMembersArray(cloudMembers);
+          if (membersMax > newestTs) newestTs = membersMax;
+          changed = true;
+        }
+      } else if (cloudMembers.length > 0) {
+        const localById = new Map<string, any>();
+        for (const lm of nextDb.members || []) {
+          if (lm && lm.id) localById.set(lm.id, lm);
+        }
+        const mergedById = new Map<string, any>(localById);
+        let membersChanged = false;
+        const mTs = (m: any) =>
+          Math.max(
+            new Date(m?._updatedAt || 0).getTime() || 0,
+            new Date(m?.updatedAt || 0).getTime() || 0
+          );
+        for (const cm of sanitizeMembersArray(cloudMembers)) {
+          if (!cm || !cm.id) continue;
+          const lm = localById.get(cm.id);
+          if (!lm || mTs(cm) > mTs(lm)) {
+            mergedById.set(cm.id, lm ? { ...lm, ...cm } : cm);
+            membersChanged = true;
+          }
+        }
+        if (membersChanged) {
+          nextDb.members = Array.from(mergedById.values());
+          if (membersMax > newestTs) newestTs = membersMax;
+          changed = true;
+        }
       }
     }
 
@@ -1486,6 +1525,20 @@ export async function handleTenantRecordsApi(req: IncomingMessage, res: ServerRe
           ].filter(Boolean)
         : [];
 
+      const incomingDeletedMemberIds: string[] = hasValidAdminSession
+        ? [
+            ...(Array.isArray(body.removedMemberIds) ? body.removedMemberIds : []),
+            ...(Array.isArray(body.deletedMemberIds) ? body.deletedMemberIds : []),
+          ].filter(Boolean)
+        : [];
+
+      const incomingDeletedBoardMemberIds: string[] = hasValidAdminSession
+        ? [
+            ...(Array.isArray(body.removedBoardMemberIds) ? body.removedBoardMemberIds : []),
+            ...(Array.isArray(body.deletedBoardMemberIds) ? body.deletedBoardMemberIds : []),
+          ].filter(Boolean)
+        : [];
+
       const mergedDeletedOpIds = Array.from(
         new Set([
           ...(current.deletedOperationIds || []).filter((id) => Boolean(id) && !String(id).startsWith('op-unpaid-deduction-')),
@@ -1500,6 +1553,8 @@ export async function handleTenantRecordsApi(req: IncomingMessage, res: ServerRe
 
       const deletedOpSet = new Set(mergedDeletedOpIds);
       const deletedContribSet = new Set(mergedDeletedContribIds);
+      const deletedMemberSet = new Set(incomingDeletedMemberIds);
+      const deletedBoardMemberSet = new Set(incomingDeletedBoardMemberIds);
 
       const applyCollectionUpdateSafely = (col: keyof TenantRecordsDatabase, incomingData: any[]) => {
         if (!Array.isArray(incomingData)) return;
@@ -1557,16 +1612,27 @@ export async function handleTenantRecordsApi(req: IncomingMessage, res: ServerRe
           }
         }
 
-        // CRITICAL FIX FOR PERMANENT PERSISTENCE OF FINANCIAL OPERATIONS, CONTRIBUTIONS & SUB-ADMINS:
-        // Never allow a stale or partial client array to accidentally wipe out newly added financial records or sub-admins on disk!
+        // CRITICAL FIX FOR PERMANENT PERSISTENCE OF MEMBERS, BOARD MEMBERS, FINANCIAL OPERATIONS, CONTRIBUTIONS & SUB-ADMINS:
+        // Never allow a stale or partial client array to accidentally wipe out existing members, board members, financial records or sub-admins on disk!
         // Merge incoming items by ID (updating existing IDs and prepending new IDs), and only remove items if explicitly listed in deletedIds or if body.replaceAll === true.
-        if ((col === 'contributions' || col === 'operations' || col === 'subAdmins') && body.replaceAll !== true) {
+        if (
+          (col === 'members' ||
+            col === 'boardMembers' ||
+            col === 'contributions' ||
+            col === 'operations' ||
+            col === 'subAdmins') &&
+          body.replaceAll !== true
+        ) {
           const existingList: any[] = Array.isArray((current as any)[col]) ? (current as any)[col] : [];
           const delSet =
             col === 'operations'
               ? deletedOpSet
               : col === 'contributions'
               ? deletedContribSet
+              : col === 'members'
+              ? deletedMemberSet
+              : col === 'boardMembers'
+              ? deletedBoardMemberSet
               : new Set<string>();
 
           const orderedResult: any[] = [];
@@ -1672,7 +1738,11 @@ export async function handleTenantRecordsApi(req: IncomingMessage, res: ServerRe
         writeGlobalRegistrationFieldsToDisk(current.registrationFields, true);
       }
 
-      const saved = await writeTenantRecordsToDiskAndCloud(current, targetTenant, touchedCollections);
+      const saved = await writeTenantRecordsToDiskAndCloud(current, targetTenant, touchedCollections, {
+        removedMemberIds: incomingDeletedMemberIds,
+        removedBoardMemberIds: incomingDeletedBoardMemberIds,
+        replaceAll: body.replaceAll === true,
+      });
       const safeSaved = sanitizeRecordsForCaller(saved, access);
       return sendJson(res, 200, {
         success: true,

@@ -17,6 +17,7 @@ import {
   ContributionTypeConfig
 } from './types';
 import { createDefaultPermissions, applyPermissionLevel } from './security';
+import { ALL_ASSOCIATION_DOMAINS } from './utils/associationDomains';
 
 export const defaultStoreThemeColors: StoreThemeColors = {
   primaryColor: '#047857', // اللون الرئيسي (الزمردي الراقي)
@@ -61,6 +62,7 @@ export const initialSettings: AssociationSettings = {
   heroBadgeTextEn: '',
   themeColors: defaultStoreThemeColors, // ألوان واجهة المتجر الافتراضية
   enablePublicDonations: true, // تفعيل الاستفادة من التبرعات والظهور في واجهة المنصة العامة افتراضياً
+  associationDomains: [ALL_ASSOCIATION_DOMAINS], // مجالات الجمعية الافتراضية
 };
 
 export const initialMembers: Member[] = [
@@ -1095,7 +1097,7 @@ export const initialUIElements: UIElementConfig[] = [
     descriptionFr: 'Accès au registre des adhérents et cartes d\'adhésion',
     descriptionEn: 'Access card and gateway to the Members and Subscribers directory',
     category: 'records_and_ledgers',
-    enabled: false,
+    enabled: true,
     visibleToNonMembers: true,
     order: 8,
     iconName: 'Users',

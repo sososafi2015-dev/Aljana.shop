@@ -88,6 +88,7 @@
         "logoUrl": { "type": "string", "description": "Logo URL", "optional": true },
         "coverUrl": { "type": "string", "description": "Cover image URL", "optional": true },
         "primaryColor": { "type": "string", "description": "Branding color" },
+        "associationDomains": { "type": "list", "description": "Selected association domains (defaults to ['جميع المجالات'])", "optional": true },
         "updatedAt": { "type": "string", "description": "ISO timestamp" }
       },
       "allowRead": "true",

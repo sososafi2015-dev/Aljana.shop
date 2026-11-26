@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   HeartHandshake,
   Search,
@@ -13,11 +13,19 @@ import {
   FolderHeart,
   Award,
   ChevronDown,
-  Sparkles
+  Sparkles,
+  Tag,
+  Check,
+  X
 } from 'lucide-react';
 import { AssociationTenant } from '../types';
 import { getAllTenants } from '../tenantStorage';
+import { getStoredSettings } from '../storage';
 import { DEFAULT_DONATIONS_COVER_IMAGE } from '../portalSettingsStorage';
+import {
+  ASSOCIATION_DOMAIN_OPTIONS,
+  normalizeAssociationDomains,
+} from '../utils/associationDomains';
 import {
   applyAdCampaignPriorityToTenants,
   getAdCampaignForTenant,
@@ -124,11 +132,33 @@ export const DonationProjectsPage: React.FC<DonationProjectsPageProps> = ({
   coverImage,
   coverOverlayOpacity,
 }) => {
+  const hydrateTenantDomainsFromLocal = (list: AssociationTenant[]): AssociationTenant[] =>
+    list
+      .filter((t) => t.status === 'active' && t.enablePublicDonations !== false)
+      .map((t) => {
+        if (Array.isArray(t.associationDomains) && t.associationDomains.length > 0) {
+          return {
+            ...t,
+            associationDomains: normalizeAssociationDomains(t.associationDomains),
+          };
+        }
+        try {
+          const localSettings = getStoredSettings(t.id);
+          return {
+            ...t,
+            associationDomains: normalizeAssociationDomains(localSettings?.associationDomains),
+          };
+        } catch {
+          return {
+            ...t,
+            associationDomains: normalizeAssociationDomains(t.associationDomains),
+          };
+        }
+      });
+
   const [tenants, setTenants] = useState<AssociationTenant[]>(() => {
     try {
-      return getAllTenants().filter(
-        (t) => t.status === 'active' && t.enablePublicDonations !== false
-      );
+      return hydrateTenantDomainsFromLocal(getAllTenants());
     } catch {
       return [];
     }
@@ -152,6 +182,10 @@ export const DonationProjectsPage: React.FC<DonationProjectsPageProps> = ({
   // Filter States
   const [selectedCountry, setSelectedCountry] = useState<string>('');
   const [selectedCity, setSelectedCity] = useState<string>('all');
+  const [selectedDomains, setSelectedDomains] = useState<string[]>([]);
+  const [isDomainsDropdownOpen, setIsDomainsDropdownOpen] = useState<boolean>(false);
+  const [domainsSearchQuery, setDomainsSearchQuery] = useState<string>('');
+  const domainsDropdownRef = useRef<HTMLDivElement | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [hasInitializedCountry, setHasInitializedCountry] = useState<boolean>(false);
   const [campaignsVersion, setCampaignsVersion] = useState<number>(0);
@@ -183,7 +217,36 @@ export const DonationProjectsPage: React.FC<DonationProjectsPageProps> = ({
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
-  // Fetch active associations from database ONLY on mount of this dedicated page
+  // Close domains dropdown on click outside or Escape
+  useEffect(() => {
+    if (!isDomainsDropdownOpen) return;
+
+    const handleClickOutside = (event: MouseEvent | TouchEvent) => {
+      if (
+        domainsDropdownRef.current &&
+        !domainsDropdownRef.current.contains(event.target as Node)
+      ) {
+        setIsDomainsDropdownOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsDomainsDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isDomainsDropdownOpen]);
+
+  // Fetch active associations from live database and keep synchronized with settings updates
   useEffect(() => {
     let isMounted = true;
 
@@ -192,38 +255,34 @@ export const DonationProjectsPage: React.FC<DonationProjectsPageProps> = ({
         if (showLoadingSpinner && isMounted) {
           setIsLoading(true);
         }
-        const res = await fetch('/api/tenants');
+        const res = await fetch(`/api/tenants?force=true&_t=${Date.now()}`, {
+          cache: 'no-store',
+        });
         if (res.ok) {
           const data = await res.json();
           if (isMounted) {
             if (data.success && Array.isArray(data.tenants)) {
-              // Filter out non-active associations and associations with donations disabled
-              const activeOnly = data.tenants.filter(
-                (t: AssociationTenant) => t.status === 'active' && t.enablePublicDonations !== false
-              );
+              const activeOnly = data.tenants
+                .filter(
+                  (t: AssociationTenant) =>
+                    t.status === 'active' && t.enablePublicDonations !== false
+                )
+                .map((t: AssociationTenant) => ({
+                  ...t,
+                  associationDomains: normalizeAssociationDomains(t.associationDomains),
+                }));
               setTenants(activeOnly);
             } else {
-              const localTenants = getAllTenants().filter(
-                (t) => t.status === 'active' && t.enablePublicDonations !== false
-              );
-              setTenants(localTenants);
+              setTenants(hydrateTenantDomainsFromLocal(getAllTenants()));
             }
           }
-        } else {
-          if (isMounted) {
-            const localTenants = getAllTenants().filter(
-              (t) => t.status === 'active' && t.enablePublicDonations !== false
-            );
-            setTenants(localTenants);
-          }
+        } else if (isMounted) {
+          setTenants(hydrateTenantDomainsFromLocal(getAllTenants()));
         }
       } catch (err) {
         console.warn('[DonationProjectsPage] Error loading tenants from server:', err);
         if (isMounted) {
-          const localTenants = getAllTenants().filter(
-            (t) => t.status === 'active' && t.enablePublicDonations !== false
-          );
-          setTenants(localTenants);
+          setTenants(hydrateTenantDomainsFromLocal(getAllTenants()));
         }
       } finally {
         if (isMounted) {
@@ -234,14 +293,36 @@ export const DonationProjectsPage: React.FC<DonationProjectsPageProps> = ({
 
     fetchTenants(tenants.length === 0);
 
-    const handleTenantsChange = () => {
+    const handleTenantsChange = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      if (Array.isArray(customEvent?.detail)) {
+        const activeFromRealtime = customEvent.detail
+          .filter(
+            (t: AssociationTenant) =>
+              t && t.status === 'active' && t.enablePublicDonations !== false
+          )
+          .map((t: AssociationTenant) => ({
+            ...t,
+            associationDomains: normalizeAssociationDomains(t.associationDomains),
+          }));
+        if (isMounted) {
+          setTenants(activeFromRealtime);
+        }
+        return;
+      }
+      fetchTenants(false);
+    };
+
+    const handleWindowFocus = () => {
       fetchTenants(false);
     };
 
     window.addEventListener('chayef-tenants-changed', handleTenantsChange);
+    window.addEventListener('focus', handleWindowFocus);
     return () => {
       isMounted = false;
       window.removeEventListener('chayef-tenants-changed', handleTenantsChange);
+      window.removeEventListener('focus', handleWindowFocus);
     };
   }, []);
 
@@ -285,6 +366,36 @@ export const DonationProjectsPage: React.FC<DonationProjectsPageProps> = ({
     return Array.from(citiesSet).sort((a, b) => a.localeCompare(b, 'ar'));
   }, [tenants, selectedCountry]);
 
+  // Available association domains sourced dynamically from canonical definitions and live DB associations
+  const availableDomainOptions = useMemo(() => {
+    const ordered: string[] = [...ASSOCIATION_DOMAIN_OPTIONS];
+    const seen = new Set<string>(ordered);
+    tenants.forEach((assoc) => {
+      const assocDomains = normalizeAssociationDomains(assoc.associationDomains);
+      assocDomains.forEach((d) => {
+        if (d && !seen.has(d)) {
+          seen.add(d);
+          ordered.push(d);
+        }
+      });
+    });
+    return ordered;
+  }, [tenants]);
+
+  const filteredDomainOptions = useMemo(() => {
+    const normQuery = normalizeArabic(domainsSearchQuery);
+    if (!normQuery) return availableDomainOptions;
+    return availableDomainOptions.filter((domain) =>
+      normalizeArabic(domain).includes(normQuery)
+    );
+  }, [availableDomainOptions, domainsSearchQuery]);
+
+  const handleToggleDomain = (domain: string) => {
+    setSelectedDomains((prev) =>
+      prev.includes(domain) ? prev.filter((item) => item !== domain) : [...prev, domain]
+    );
+  };
+
   // Country change handler: resets city to 'all'
   const handleCountryChange = (country: string) => {
     setSelectedCountry(country);
@@ -297,10 +408,13 @@ export const DonationProjectsPage: React.FC<DonationProjectsPageProps> = ({
       setSelectedCountry(detectUserCountry(availableCountries));
     }
     setSelectedCity('all');
+    setSelectedDomains([]);
+    setDomainsSearchQuery('');
+    setIsDomainsDropdownOpen(false);
     setSearchQuery('');
   };
 
-  // Combined Filtering: Country + City + Search Query + Advertising Campaign Priority Sorting
+  // Combined Filtering: Country + City + Association Domains + Search Query + Advertising Campaign Priority Sorting
   const filteredAssociations = useMemo(() => {
     const normalizedQuery = normalizeArabic(searchQuery);
 
@@ -315,7 +429,18 @@ export const DonationProjectsPage: React.FC<DonationProjectsPageProps> = ({
         return false;
       }
 
-      // 3. Name Search Filter (partial match)
+      // 3. Association Domains Filter (Multi-select OR logic; empty selection shows all)
+      if (selectedDomains.length > 0) {
+        const assocDomains = normalizeAssociationDomains(assoc.associationDomains);
+        const matchesAnySelectedDomain = selectedDomains.some((domain) =>
+          assocDomains.includes(domain)
+        );
+        if (!matchesAnySelectedDomain) {
+          return false;
+        }
+      }
+
+      // 4. Name Search Filter (partial match)
       if (normalizedQuery) {
         const nameArNorm = normalizeArabic(assoc.name || '');
         const nameFrNorm = (assoc.nameFr || '').toLowerCase();
@@ -340,7 +465,7 @@ export const DonationProjectsPage: React.FC<DonationProjectsPageProps> = ({
 
     // Apply ad campaign priority (1, 2, 3...) to promote sponsored associations to the top
     return applyAdCampaignPriorityToTenants(filtered);
-  }, [tenants, selectedCountry, selectedCity, searchQuery, campaignsVersion]);
+  }, [tenants, selectedCountry, selectedCity, selectedDomains, searchQuery, campaignsVersion]);
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col" dir="rtl">
@@ -463,7 +588,7 @@ export const DonationProjectsPage: React.FC<DonationProjectsPageProps> = ({
             </div>
 
             <div className="flex items-center gap-2 self-end lg:self-auto">
-              {(selectedCity !== 'all' || searchQuery.trim() !== '') && (
+              {(selectedCity !== 'all' || selectedDomains.length > 0 || searchQuery.trim() !== '') && (
                 <button
                   onClick={handleResetFilters}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-slate-600 hover:text-emerald-700 bg-slate-100 hover:bg-emerald-50 transition-colors cursor-pointer"
@@ -479,7 +604,7 @@ export const DonationProjectsPage: React.FC<DonationProjectsPageProps> = ({
             </div>
           </div>
 
-          {/* Filters Controls Grid: Country + City + Search Name */}
+          {/* Filters Controls Grid: Country + City + Association Domains + Search Name */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 pt-2">
             {/* 1. Country Filter */}
             <div className="sm:col-span-1 lg:col-span-3">
@@ -532,8 +657,157 @@ export const DonationProjectsPage: React.FC<DonationProjectsPageProps> = ({
               </div>
             </div>
 
-            {/* 3. Search by Association Name */}
-            <div className="sm:col-span-2 lg:col-span-6">
+            {/* 3. Association Domains Filter (Multi-select, strictly between City Filter and Name Search) */}
+            <div className="sm:col-span-1 lg:col-span-3 relative" ref={domainsDropdownRef}>
+              <label htmlFor="donations-domains-filter-btn" className="block text-[11px] font-black text-slate-700 mb-1.5">
+                <span className="flex items-center gap-1">
+                  <Tag className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>مجالات الجمعية:</span>
+                </span>
+              </label>
+              <div className="relative">
+                <button
+                  id="donations-domains-filter-btn"
+                  type="button"
+                  onClick={() => setIsDomainsDropdownOpen((prev) => !prev)}
+                  aria-expanded={isDomainsDropdownOpen}
+                  aria-haspopup="listbox"
+                  className={`w-full py-2.5 pr-3.5 ${
+                    selectedDomains.length > 0 ? 'pl-14' : 'pl-9'
+                  } text-xs font-bold border rounded-xl outline-none transition-all cursor-pointer shadow-xs text-right flex items-center justify-between gap-2 ${
+                    isDomainsDropdownOpen || selectedDomains.length > 0
+                      ? 'bg-white border-emerald-500 ring-2 ring-emerald-500/15 text-slate-900'
+                      : 'bg-slate-50 hover:bg-white border-slate-200 text-slate-800'
+                  }`}
+                >
+                  <span className="truncate">
+                    {selectedDomains.length === 0
+                      ? `كل مجالات الجمعية (${availableDomainOptions.length} مجال)`
+                      : selectedDomains.length === 1
+                      ? selectedDomains[0]
+                      : `تم تحديد ${selectedDomains.length} مجالات`}
+                  </span>
+                </button>
+
+                {selectedDomains.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedDomains([]);
+                    }}
+                    className="absolute left-8 top-1/2 -translate-y-1/2 text-slate-400 hover:text-rose-600 p-0.5 rounded cursor-pointer transition-colors"
+                    title="إلغاء تحديد مجالات الجمعية"
+                    aria-label="إلغاء تحديد مجالات الجمعية"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+
+                <ChevronDown
+                  className={`w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none transition-transform duration-200 ${
+                    isDomainsDropdownOpen ? 'rotate-180 text-emerald-600' : ''
+                  }`}
+                />
+
+                {isDomainsDropdownOpen && (
+                  <div
+                    id="donations-domains-dropdown-panel"
+                    role="listbox"
+                    aria-multiselectable="true"
+                    className="absolute top-full right-0 mt-2 w-full sm:min-w-[310px] max-w-[calc(100vw-2rem)] bg-white border border-slate-200 rounded-2xl shadow-xl z-50 overflow-hidden"
+                  >
+                    <div className="p-2.5 border-b border-slate-100 bg-slate-50/80 space-y-2">
+                      <div className="flex items-center justify-between gap-2 px-1">
+                        <span className="text-[11px] font-black text-slate-700">
+                          {selectedDomains.length === 0
+                            ? 'اختر مجالاً أو أكثر للتصفية'
+                            : `تم تحديد ${selectedDomains.length} ${
+                                selectedDomains.length === 1
+                                  ? 'مجال'
+                                  : selectedDomains.length === 2
+                                  ? 'مجالين'
+                                  : selectedDomains.length <= 10
+                                  ? 'مجالات'
+                                  : 'مجالاً'
+                              }`}
+                        </span>
+                        {selectedDomains.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedDomains([])}
+                            className="text-[11px] font-bold text-rose-600 hover:text-rose-700 cursor-pointer"
+                          >
+                            عرض الكل
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="relative">
+                        <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        <input
+                          type="text"
+                          value={domainsSearchQuery}
+                          onChange={(e) => setDomainsSearchQuery(e.target.value)}
+                          placeholder="ابحث داخل مجالات الجمعية..."
+                          className="w-full bg-white border border-slate-200 rounded-xl py-1.5 pr-8 pl-7 text-xs text-slate-800 focus:border-emerald-500 outline-none placeholder:text-slate-400"
+                        />
+                        {domainsSearchQuery && (
+                          <button
+                            type="button"
+                            onClick={() => setDomainsSearchQuery('')}
+                            className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                            aria-label="مسح بحث المجالات"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="max-h-64 overflow-y-auto p-1.5 space-y-1">
+                      {filteredDomainOptions.length === 0 ? (
+                        <div className="py-6 text-center text-xs text-slate-400 font-medium">
+                          لا توجد مجالات مطابقة لبحثك
+                        </div>
+                      ) : (
+                        filteredDomainOptions.map((domain) => {
+                          const isChecked = selectedDomains.includes(domain);
+                          return (
+                            <button
+                              key={domain}
+                              type="button"
+                              role="option"
+                              aria-selected={isChecked}
+                              onClick={() => handleToggleDomain(domain)}
+                              className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-right text-xs transition-colors cursor-pointer ${
+                                isChecked
+                                  ? 'bg-emerald-50 text-emerald-900 font-bold'
+                                  : 'hover:bg-slate-50 text-slate-700 font-medium'
+                              }`}
+                            >
+                              <span
+                                className={`w-4 h-4 rounded flex items-center justify-center border transition-colors shrink-0 ${
+                                  isChecked
+                                    ? 'bg-emerald-600 border-emerald-600 text-white'
+                                    : 'bg-white border-slate-300'
+                                }`}
+                              >
+                                {isChecked && <Check className="w-3 h-3" />}
+                              </span>
+                              <span className="flex-1 leading-snug">{domain}</span>
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* 4. Search by Association Name */}
+            <div className="sm:col-span-1 lg:col-span-3">
               <label htmlFor="donations-search-name-input" className="block text-[11px] font-black text-slate-700 mb-1.5">
                 <span className="flex items-center gap-1">
                   <Search className="w-3.5 h-3.5 text-emerald-600" />
@@ -562,6 +836,32 @@ export const DonationProjectsPage: React.FC<DonationProjectsPageProps> = ({
               </div>
             </div>
           </div>
+
+          {/* Active Selected Domains Pills */}
+          {selectedDomains.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-100">
+              <span className="text-[11px] font-bold text-slate-500 ml-1">
+                المجالات المحددة:
+              </span>
+              {selectedDomains.map((domain) => (
+                <span
+                  key={domain}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px] font-bold"
+                >
+                  <span>{domain}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleDomain(domain)}
+                    className="text-emerald-600 hover:text-rose-600 transition-colors cursor-pointer"
+                    aria-label={`إزالة ${domain}`}
+                    title={`إزالة ${domain}`}
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* ================= ASSOCIATIONS CARDS LIST ================= */}
@@ -588,6 +888,7 @@ export const DonationProjectsPage: React.FC<DonationProjectsPageProps> = ({
                   لا توجد جمعيات تطابق معايير التصفية الحالية (
                   {selectedCountry && `الدولة: ${selectedCountry}`}
                   {selectedCity !== 'all' && ` • المدينة: ${selectedCity}`}
+                  {selectedDomains.length > 0 && ` • المجالات: ${selectedDomains.join('، ')}`}
                   {searchQuery && ` • البحث: "${searchQuery}"`}
                   ).
                 </p>

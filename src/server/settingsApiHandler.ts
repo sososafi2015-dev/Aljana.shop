@@ -24,6 +24,8 @@ import {
   validateSettingsAdminUsername,
   hashPasswordScrypt,
 } from './authCrypto';
+import { normalizeAssociationDomains } from '../utils/associationDomains';
+import { getCurrencyForCountry, resolveAssociationCurrency } from '../utils/currencyEngine';
 
 const settingsCloudReconcileCache = new Map<string, number>();
 const SETTINGS_RECONCILE_TTL_MS = 2000;
@@ -184,12 +186,20 @@ function buildDefaultTenantSettings(tenantId: string, tenantRecord?: any): Assoc
       ? tenantRecord.nameEn
       : assocNameFr;
   const city = tenantRecord?.city || 'المغرب';
+  const countryName = tenantRecord?.country || 'المغرب';
+  const autoCurrency = getCurrencyForCountry(countryName);
 
   return {
     ...initialSettings,
     name: assocName,
     nameFr: assocNameFr,
     nameEn: assocNameEn,
+    country: countryName,
+    city,
+    currency: autoCurrency.shortAr,
+    currencyFr: autoCurrency.shortFr,
+    currencyEn: autoCurrency.code,
+    currencyCode: autoCurrency.code,
     tagline:
       tenantRecord?.tagline ||
       `الشفافية والتكافل والتنمية المجتمعية المستدامة - ${city}`,
@@ -198,9 +208,9 @@ function buildDefaultTenantSettings(tenantId: string, tenantRecord?: any): Assoc
     description: `جمعية تنموية واجتماعية غير ربحية تهدف إلى خدمة الصالح العام وتنمية المبادرات التضامنية بمدينة ${city}.`,
     descriptionFr: `Association à but non lucratif œuvrant pour l'intérêt général et le développement solidaire à ${city}.`,
     descriptionEn: `Non-profit association dedicated to public benefit and community solidarity in ${city}.`,
-    address: `${city} - ${tenantRecord?.country || 'المغرب'}`,
-    addressFr: `${city} - ${tenantRecord?.country || 'Maroc'}`,
-    addressEn: `${city} - ${tenantRecord?.country || 'Morocco'}`,
+    address: `${city} - ${countryName}`,
+    addressFr: `${city} - ${countryName}`,
+    addressEn: `${city} - ${countryName}`,
     phone: tenantRecord?.phone || tenantRecord?.ownerPhone || initialSettings.phone,
     whatsapp: tenantRecord?.whatsapp || tenantRecord?.ownerPhone || initialSettings.whatsapp || '0661000001',
     logoUrl: tenantRecord?.logoUrl || initialSettings.logoUrl,
@@ -226,6 +236,7 @@ function buildDefaultTenantSettings(tenantId: string, tenantRecord?: any): Assoc
         : true,
     adminPin: tenantRecord?.passwordHash ? '' : initialSettings.adminPin,
     adminUsername: resolvedOwnerUsername,
+    associationDomains: normalizeAssociationDomains(tenantRecord?.associationDomains),
   } as unknown as AssociationSettings;
 }
 
@@ -245,10 +256,27 @@ function ensureBankDefaults(
     (fallbackSource?.bankName && String(fallbackSource.bankName).trim()) ||
     (tenantRecord?.bankName && String(tenantRecord.bankName).trim()) ||
     initialSettings.bankName;
+  const effectiveCountry = settings?.country || tenantRecord?.country || fallbackSource?.country || 'المغرب';
+  const resolvedCurr = resolveAssociationCurrency(
+    {
+      ...settings,
+      country: effectiveCountry,
+    },
+    tenantRecord || effectiveCountry
+  );
   return {
     ...settings,
+    country: effectiveCountry,
+    city: settings?.city || tenantRecord?.city || fallbackSource?.city,
+    currency: resolvedCurr.shortAr,
+    currencyFr: resolvedCurr.shortFr,
+    currencyEn: resolvedCurr.code,
+    currencyCode: resolvedCurr.code,
     ribBank,
     bankName,
+    associationDomains: normalizeAssociationDomains(
+      settings?.associationDomains ?? fallbackSource?.associationDomains ?? tenantRecord?.associationDomains
+    ),
   };
 }
 
@@ -720,6 +748,7 @@ export async function handleSettingsApi(
         ...(s.ribBank ? { rib: s.ribBank, ribBank: s.ribBank } : {}),
         ...(s.bankName ? { bankName: s.bankName } : {}),
         ...(s.enablePublicDonations !== undefined ? { enablePublicDonations: s.enablePublicDonations } : {}),
+        associationDomains: normalizeAssociationDomains(s.associationDomains),
         ...(finalAdminUsername ? { ownerUsername: finalAdminUsername } : {}),
         ...(nextPasswordHash
           ? {

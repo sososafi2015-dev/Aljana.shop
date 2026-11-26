@@ -14,6 +14,8 @@ import {
 } from './contributionTypesStorage';
 import { firestoreSyncService } from './services/firestoreSyncService';
 import { getEffectiveAuthTokenForTenant, getMasterAuthToken } from './authSessionClient';
+import { normalizeAssociationDomains } from './utils/associationDomains';
+import { resolveAssociationCurrency } from './utils/currencyEngine';
 
 export const KEYS = {
   MEMBERS: 'chayef_assoc_members_v1',
@@ -316,11 +318,13 @@ const COLLECTION_KEY_TO_STORAGE_KEY: Record<string, string> = {
 export async function persistTenantCollectionToBackend(
   key: string,
   data: any,
-  tenantId?: string
+  tenantId?: string,
+  options?: { removedIds?: string[] }
 ): Promise<boolean> {
   if (typeof window === 'undefined' || typeof fetch === 'undefined') return true;
   const target = tenantId || getActiveTenantIdFromStorage();
   const cleanTenant = !target || target === 'portal' ? 'tenant_nour' : target;
+  const removedIds = Array.isArray(options?.removedIds) ? options.removedIds.filter(Boolean) : [];
 
   try {
     const currentRole = loadData<string>(KEYS.ROLE, 'member');
@@ -352,14 +356,14 @@ export async function persistTenantCollectionToBackend(
           !isEffectiveAdmin && loggedInMemberId
             ? data.filter((m: any) => m && m.id === loggedInMemberId)
             : data;
-        if (membersToSync.length > 0) {
+        if (membersToSync.length > 0 || (isEffectiveAdmin && removedIds.length > 0)) {
           firestoreMirrorPromise = firestoreSyncService
-            .syncMembersToFirestore(cleanTenant, membersToSync)
+            .syncMembersToFirestore(cleanTenant, membersToSync, isEffectiveAdmin ? removedIds : [])
             .catch(() => false);
         }
       } else if (key === 'boardMembers' && Array.isArray(data)) {
         firestoreMirrorPromise = firestoreSyncService
-          .syncBoardMembersToFirestore(cleanTenant, data)
+          .syncBoardMembersToFirestore(cleanTenant, data, isEffectiveAdmin ? removedIds : [])
           .catch(() => false);
       } else if (key === 'contributions' && Array.isArray(data)) {
         firestoreMirrorPromise = firestoreSyncService
@@ -408,18 +412,26 @@ export async function persistTenantCollectionToBackend(
       headers['x-member-id'] = loggedInMemberId;
     }
 
+    const bodyPayload: Record<string, any> = {
+      tenantId: cleanTenant,
+      collection: key,
+      key,
+      data,
+      callerRole: isEffectiveAdmin ? 'admin' : (currentRole || 'member'),
+      callerMemberId: loggedInMemberId || undefined,
+    };
+    if (key === 'members' && isEffectiveAdmin && removedIds.length > 0) {
+      bodyPayload.removedMemberIds = removedIds;
+    }
+    if (key === 'boardMembers' && isEffectiveAdmin && removedIds.length > 0) {
+      bodyPayload.removedBoardMemberIds = removedIds;
+    }
+
     const [res, firestoreOk] = await Promise.all([
       fetch(`/api/tenant-records?tenantId=${encodeURIComponent(cleanTenant)}`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({
-          tenantId: cleanTenant,
-          collection: key,
-          key,
-          data,
-          callerRole: isEffectiveAdmin ? 'admin' : (currentRole || 'member'),
-          callerMemberId: loggedInMemberId || undefined,
-        }),
+        body: JSON.stringify(bodyPayload),
       }).catch(() => null),
       firestoreMirrorPromise,
     ]);
@@ -487,14 +499,19 @@ export const setMembersTimestamp = (ts: number = Date.now(), tenantId?: string):
   } catch {}
 };
 
-export const saveMembers = (members: Member[], tenantId?: string, syncBackend: boolean = true): Promise<boolean> => {
+export const saveMembers = (
+  members: Member[],
+  tenantId?: string,
+  syncBackend: boolean = true,
+  removedIds?: string[]
+): Promise<boolean> => {
   const target = tenantId || getActiveTenantIdFromStorage();
   const cleanTenant = !target || target === 'portal' ? 'tenant_nour' : target;
   const sanitized = (members || []).map(sanitizeMemberRecord);
   saveData(getScopedKey(KEYS.MEMBERS, cleanTenant), sanitized);
   if (syncBackend) {
     setMembersTimestamp(Date.now(), cleanTenant);
-    return persistTenantCollectionToBackend('members', sanitized, cleanTenant);
+    return persistTenantCollectionToBackend('members', sanitized, cleanTenant, { removedIds });
   }
   return Promise.resolve(true);
 };
@@ -568,7 +585,12 @@ export const getStoredBoardMembers = (tenantId?: string): BoardMember[] => {
   const isMaster = !current || current === 'tenant_nour' || current === 'portal';
   return loadData<BoardMember[]>(getScopedKey(KEYS.BOARD_MEMBERS, current), isMaster ? initialBoardMembers : []);
 };
-export const saveBoardMembers = (boardMembers: BoardMember[], tenantId?: string, syncBackend: boolean = true): Promise<boolean> => {
+export const saveBoardMembers = (
+  boardMembers: BoardMember[],
+  tenantId?: string,
+  syncBackend: boolean = true,
+  removedIds?: string[]
+): Promise<boolean> => {
   const current = tenantId || getActiveTenantIdFromStorage();
   if (!hasAuthorizedBoardAccessInClient(current)) {
     clearStoredBoardMembersCache(current);
@@ -576,7 +598,7 @@ export const saveBoardMembers = (boardMembers: BoardMember[], tenantId?: string,
   }
   saveData(getScopedKey(KEYS.BOARD_MEMBERS, current), boardMembers);
   if (syncBackend) {
-    return persistTenantCollectionToBackend('boardMembers', boardMembers, current);
+    return persistTenantCollectionToBackend('boardMembers', boardMembers, current, { removedIds });
   }
   return Promise.resolve(true);
 };
@@ -1700,6 +1722,11 @@ export const getStoredSettings = (tenantId?: string): AssociationSettings => {
   }
 
   const resolvedBank = resolveEffectiveBankSettings(loaded, tenantMeta as any);
+  const resolvedCountry = loaded?.country || tenantMeta?.country || (current === 'tenant_nour' ? 'المغرب' : undefined);
+  const resolvedCurrency = resolveAssociationCurrency(
+    { ...loaded, country: resolvedCountry },
+    tenantMeta || resolvedCountry
+  );
 
   const withAccessControl: AssociationSettings = {
     ...initialSettings,
@@ -1707,6 +1734,12 @@ export const getStoredSettings = (tenantId?: string): AssociationSettings => {
     name: resolvedName,
     nameFr: resolvedNameFr,
     nameEn: resolvedNameEn,
+    country: resolvedCountry,
+    city: loaded?.city || tenantMeta?.city,
+    currency: resolvedCurrency.shortAr,
+    currencyFr: resolvedCurrency.shortFr,
+    currencyEn: resolvedCurrency.code,
+    currencyCode: resolvedCurrency.code,
     ribBank: resolvedBank.ribBank,
     bankName: resolvedBank.bankName,
     tagline: (loaded?.tagline && loaded.tagline !== initialSettings.tagline)
@@ -1740,6 +1773,7 @@ export const getStoredSettings = (tenantId?: string): AssociationSettings => {
       ...defaultStoreThemeColors,
       ...(loaded?.themeColors || {}),
     },
+    associationDomains: normalizeAssociationDomains(loaded?.associationDomains ?? (tenantMeta as any)?.associationDomains),
   };
   if (withAccessControl && withAccessControl.featuredActivityId === 'act-1' && !localStorage.getItem('achayef_featured_manually_selected')) {
     const migrated = { ...withAccessControl, featuredActivityId: undefined };
@@ -1775,6 +1809,7 @@ export const saveSettings = (settings: AssociationSettings, updateTimestamp: boo
     ...settings,
     ribBank: resolvedBank.ribBank,
     bankName: resolvedBank.bankName,
+    associationDomains: normalizeAssociationDomains(settings?.associationDomains),
   };
   saveData(getScopedKey(KEYS.SETTINGS, current), normalizedSettings);
   if (updateTimestamp) {
@@ -2124,14 +2159,6 @@ export const getStoredUIElements = (tenantId?: string): UIElementConfig[] => {
     );
   if (!Array.isArray(loaded) || loaded.length === 0) return cleanInitial;
 
-  const migrationKey = `chayef_migration_hide_gateway_members_v1_${current || 'default'}`;
-  let needsHideMigration = false;
-  if (typeof window !== 'undefined') {
-    try {
-      needsHideMigration = localStorage.getItem(migrationKey) !== '1';
-    } catch {}
-  }
-
   // Filter out any deprecated elements and ensure current_financial_balance is hidden from visitors
   const normalized = loaded
     .filter((el) => el && el.id && el.id !== 'pillars_section' && el.id !== 'gateway_financials')
@@ -2139,18 +2166,8 @@ export const getStoredUIElements = (tenantId?: string): UIElementConfig[] => {
       if (el.id === 'current_financial_balance') {
         return { ...el, enabled: true, visibleToNonMembers: false };
       }
-      if (needsHideMigration && el.id === 'gateway_members') {
-        return { ...el, enabled: false };
-      }
       return el;
     });
-
-  if (needsHideMigration && typeof window !== 'undefined') {
-    try {
-      saveData(getScopedKey(KEYS.UI_ELEMENTS, current), normalized);
-      localStorage.setItem(migrationKey, '1');
-    } catch {}
-  }
 
   return normalized;
 };
@@ -2377,10 +2394,12 @@ export const syncTenantRecordsFromBackend = async (tenantId?: string): Promise<{
     if (effectiveToken) {
       syncAuthHeaders['Authorization'] = `Bearer ${effectiveToken}`;
     }
+    const canAccessBoard = hasAuthorizedBoardAccessInClient(cleanTenant);
     const [
       recordsRes,
       cardRes,
       fbMembers,
+      fbBoardMembers,
       fbOps,
       fbContribs,
       fbSubs,
@@ -2396,6 +2415,9 @@ export const syncTenantRecordsFromBackend = async (tenantId?: string): Promise<{
         cache: 'no-store',
       }).catch(() => null),
       firestoreSyncService.fetchMembersFromFirestore(cleanTenant).catch(() => []),
+      canAccessBoard
+        ? firestoreSyncService.fetchBoardMembersFromFirestore(cleanTenant).catch(() => [])
+        : Promise.resolve([]),
       firestoreSyncService.fetchOperationsFromFirestore(cleanTenant).catch(() => []),
       firestoreSyncService.fetchContributionsFromFirestore(cleanTenant).catch(() => []),
       firestoreSyncService.fetchSubAdminsFromFirestore(cleanTenant).catch(() => []),
@@ -2431,7 +2453,6 @@ export const syncTenantRecordsFromBackend = async (tenantId?: string): Promise<{
       const data = await recordsRes.json();
       if (data?.success && data.records) {
         const rec = data.records;
-        const canAccessBoard = hasAuthorizedBoardAccessInClient(cleanTenant);
         if (rec.updatedBy === 'System Init' && (!Array.isArray(fbMembers) || fbMembers.length === 0)) {
           // If server DB & Firestore have no cloud records yet, push existing local records ONLY if authorized
           if (effectiveToken) {
@@ -2478,9 +2499,21 @@ export const syncTenantRecordsFromBackend = async (tenantId?: string): Promise<{
             }
             result.members = authoritativeMembers;
           }
-          if (canAccessBoard && Array.isArray(rec.boardMembers)) {
-            saveBoardMembers(rec.boardMembers, cleanTenant, false);
-            result.boardMembers = rec.boardMembers;
+          if (canAccessBoard) {
+            const serverBoard: BoardMember[] = Array.isArray(rec.boardMembers) ? rec.boardMembers : [];
+            const cloudBoard: BoardMember[] = Array.isArray(fbBoardMembers) ? fbBoardMembers : [];
+            const authoritativeBoard =
+              cloudBoard.length > 0
+                ? (mergeByLatestTimestamp(serverBoard as any[], cloudBoard as any[]) as BoardMember[]).sort(
+                    (a, b) => (a.order ?? 999) - (b.order ?? 999)
+                  )
+                : serverBoard;
+            if (authoritativeBoard.length > 0 || effectiveToken) {
+              saveBoardMembers(authoritativeBoard, cleanTenant, false);
+              result.boardMembers = authoritativeBoard;
+            } else {
+              result.boardMembers = getStoredBoardMembers(cleanTenant);
+            }
           } else {
             clearStoredBoardMembersCache(cleanTenant);
             result.boardMembers = [];
@@ -2638,6 +2671,10 @@ export const syncTenantRecordsFromBackend = async (tenantId?: string): Promise<{
       // Fallback: if API server is temporarily unreachable, hydrate directly from Cloud Firestore
       saveMembers(fbMembers, cleanTenant, false);
       result.members = fbMembers;
+      if (canAccessBoard && Array.isArray(fbBoardMembers) && fbBoardMembers.length > 0) {
+        saveBoardMembers(fbBoardMembers, cleanTenant, false);
+        result.boardMembers = fbBoardMembers;
+      }
       if (Array.isArray(fbOps) && fbOps.length > 0) {
         saveOperations(fbOps, cleanTenant, false);
         result.operations = fbOps;
